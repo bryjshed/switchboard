@@ -10,6 +10,37 @@ human edit does, so nothing happens that you cannot see or undo.
 The management UI is a web dashboard. There is also an iOS/Android companion app, so the
 kill switch is in your pocket when you are not at a desk.
 
+```mermaid
+flowchart LR
+    subgraph apps["Your applications"]
+        sdk["TypeScript SDK<br/>evaluates in-process"]
+        ofrep["OpenFeature providers<br/>Go · Python · .NET · Java · JS"]
+        http["Any HTTP client"]
+    end
+
+    subgraph sb["Switchboard"]
+        be["Backend<br/>Spring Boot · WebFlux"]
+        db[("PostgreSQL")]
+    end
+
+    subgraph mgmt["Management"]
+        dash["Web dashboard"]
+        mob["Mobile companion"]
+    end
+
+    sdk -->|"bootstrap once, then SSE"| be
+    ofrep -->|"OFREP"| be
+    http -->|"REST evaluation"| be
+    dash --> be
+    mob --> be
+    be --- db
+```
+
+Every surface speaks to the same REST API, so nothing can do something another cannot.
+Changes propagate through Postgres `NOTIFY`, which means a second backend instance learns
+about a flag change the same way the first one does — there is no Redis or message broker
+in the picture.
+
 ## Quick start
 
 ```bash
@@ -29,29 +60,91 @@ Local ports: backend **28080**, dashboard **5273**, postgres **25432**, auth emu
 
 ## The model
 
+```mermaid
+erDiagram
+    ORG ||--o{ PROJECT : contains
+    PROJECT ||--o{ ENVIRONMENT : "dev, staging, production"
+    PROJECT ||--o{ FLAG : defines
+    PROJECT ||--o{ SEGMENT : defines
+    ENVIRONMENT ||--o{ SDK_KEY : issues
+    FLAG ||--o{ FLAG_ENV_CONFIG : "one per environment"
+    ENVIRONMENT ||--o{ FLAG_ENV_CONFIG : holds
+    FLAG_ENV_CONFIG ||--o{ VERSION_SNAPSHOT : "append-only history"
+    FLAG_ENV_CONFIG ||--o{ AUDIT_ENTRY : records
 ```
-Org → Project → Environment (dev / staging / production)
-                    └── SDK key (server-side, per environment)
-Flag (project-level: key, kind, variations)
-  └── FlagEnvConfig (per environment: enabled, kill switch, targeting, version)
-```
+
+A **flag** is defined once per project — its key, whether it is boolean or multivariate,
+and its variations. How it behaves is per **environment**: the same `new-checkout` flag can
+be fully on in dev, at 25% in production, and killed in staging, because each environment
+holds its own config.
 
 `FlagEnvConfig` is the unit of change. Every write bumps a strictly monotonic version,
 appends an immutable snapshot, writes an audit row, and advances the environment's
 `stateVersion` — all in one transaction. Rollback writes a *new* version that copies an old
 snapshot; history is never rewritten.
 
+Here is what actually happens between someone moving a slider and a running application
+serving the new value:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Dashboard
+    participant B as Backend
+    participant DB as PostgreSQL
+    participant A as Your app (SDK)
+
+    U->>B: PUT targeting, expectedVersion = 4
+    activate B
+    B->>DB: SELECT ... FOR UPDATE on the config row
+    Note over B,DB: one transaction from here
+    B->>B: expectedVersion still current? else 409
+    B->>DB: write head at v5
+    B->>DB: append immutable snapshot v5
+    B->>DB: append audit row
+    B->>DB: environments.state_version += 1
+    Note over B,DB: commit
+    deactivate B
+    B-)DB: pg_notify('flag_change', ...)
+    DB-)B: LISTEN delivers to every instance
+    B-)A: SSE patch event
+    A->>A: update in-memory config
+    Note over A: next evaluation is local,<br/>no network call
+```
+
+The row lock is what makes concurrent edits safe: twenty simultaneous writers produce
+versions 1 through 20 with no gaps and no lost updates, which is asserted by a race test.
+`expectedVersion` is how a stale editor gets a 409 instead of silently clobbering someone
+else's change.
+
 ### Evaluation precedence
 
+Every evaluation walks the same ladder, stopping at the first thing that matches. The
+reason it stopped comes back with the answer, which is what makes "why did this user get
+that?" answerable.
+
+```mermaid
+flowchart TD
+    start(["evaluate(flag, context)"]) --> known{"flag known?"}
+    known -->|no| sdkdef["serve the caller's default<br/><b>SDK_DEFAULT</b> · HTTP 200"]
+    known -->|yes| kill{"kill switch on?"}
+    kill -->|yes| off1["off variation<br/><b>KILL_SWITCH</b>"]
+    kill -->|no| enabled{"flag enabled?"}
+    enabled -->|no| off2["off variation<br/><b>FLAG_OFF</b>"]
+    enabled -->|yes| target{"individual target<br/>for this context key?"}
+    target -->|yes| tv["that variation<br/><b>TARGET_MATCH</b>"]
+    target -->|no| rules{"first rule whose<br/>clauses all match?"}
+    rules -->|yes| serve{"rule serves<br/>a rollout?"}
+    serve -->|yes| bucket1["bucket the context<br/><b>RULE_MATCH</b>"]
+    serve -->|no| rv["that variation<br/><b>RULE_MATCH</b>"]
+    rules -->|no| fall{"fallthrough is<br/>a rollout?"}
+    fall -->|yes| bucket2["bucket the context<br/><b>ROLLOUT</b>"]
+    fall -->|no| dv["fallthrough variation<br/><b>DEFAULT</b>"]
 ```
-1. kill switch active     → off variation      (KILL_SWITCH)
-2. flag disabled          → off variation      (FLAG_OFF)
-3. individual target hit  → target's variation (TARGET_MATCH)
-4. first matching rule    → rule's serve       (RULE_MATCH)   ← may itself be a rollout
-5. fallthrough rollout    → deterministic bucket (ROLLOUT)
-6. fallthrough variation  → that variation     (DEFAULT)
-unknown flag / bad context → the SDK's own default (SDK_DEFAULT), HTTP 200, never a 500
-```
+
+An unknown or archived flag is deliberately **not** an error: it returns the default the
+caller passed in, at HTTP 200. A flag system that can take your application down when it
+does not recognise a key is worse than no flag system.
 
 Bucketing is `int(hex(md5(flagKey + ":" + contextKey))[0:8], 16) % 10000`, walked
 cumulatively across the rollout weights (each whole-percent weight covers 100 buckets). MD5 is
@@ -126,6 +219,28 @@ that measurably does better. Because targeting reads attributes, you can scope a
 to one agent (`agent EQUALS meal-planner`) while everything else stays on the baseline.
 The seeded `agent-planner-prompt` flag is a working example of exactly this.
 
+## Targeting
+
+Targeting reads the context your application supplies, so anything you know about a request
+can drive a decision:
+
+```js
+{ context: { key: userId, attributes: { tenantId: "acme", plan: "pro", platform: "ios" } } }
+```
+
+**Turning a feature on for exactly one customer** is a single rule — `tenantId EQUALS acme`
+serves `true`, everyone else falls through to `false`. Reusable cohorts work the same way:
+put tenant ids in a segment and target `SEGMENT_MATCH`, so one pilot-customer list drives
+many flags. All of it is versioned, audited, and revocable per customer by kill switch.
+
+Two limits worth knowing before you design around them. Rollout bucketing keys off
+`context.key`, so a percentage rollout splits by whatever you pass as the key — usually the
+user. "Roll out to 10% of *customers*" needs a `bucketBy` attribute, which is on the
+backlog; today you would pass the tenant id as the context key and give up per-user
+targeting on that flag. And attributes are strings compared by six operators, so
+`version >= 4.2.0` is not expressible yet. Both are tracked in
+[docs/REMAINING-WORK.md](docs/REMAINING-WORK.md).
+
 ## Governance
 
 Roles are scoped and permissions are a **union** across org, project, and environment — a
@@ -138,6 +253,20 @@ returns **202** with a change request that needs review. Approvals apply through
 versioned, audited write path a direct edit takes, so an approved change is rollback-able
 like any other. A request whose base version was overtaken goes STALE rather than clobbering
 the newer config.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: gated write returns 202, flag unchanged
+    PENDING --> APPROVED: approvals reach the threshold
+    PENDING --> DECLINED: a reviewer declines
+    PENDING --> WITHDRAWN: the author withdraws
+    PENDING --> STALE: base version overtaken by another write
+    APPROVED --> APPLIED: applied via the normal audited write path
+    APPLIED --> [*]
+    DECLINED --> [*]
+    WITHDRAWN --> [*]
+    STALE --> [*]: rebase and resubmit
+```
 
 Two deliberate exceptions, both configurable and both fully audited: the **kill switch
 bypasses review** by default, because putting an emergency stop behind a queue turns an
@@ -158,6 +287,26 @@ when no API key is configured (the whole product works without one; AI endpoints
   applies the rollback itself and marks the finding `AUTO_ROLLED_BACK`.
 - **Optimizing** — the same scan spots a variant that converts significantly better and
   drafts the next ramp step (25 → 50 → 75 → 100). Auto-apply is a separate opt-in.
+
+The healing and optimizing loop is a closed circuit: your application reports outcomes, the
+scan judges them, and the result is an ordinary flag change.
+
+```mermaid
+flowchart TD
+    app["Your app reports<br/>eval + metric events"] --> scan{{"rollout scan<br/>48h window"}}
+    scan --> agg["aggregate per variant:<br/>evals, error rate, conversion rate"]
+    agg --> test{"two-proportion z-test<br/>vs the baseline variant"}
+    test -->|"errors significantly worse"| heal["anomaly finding<br/>+ rollback proposal"]
+    test -->|"converts significantly better"| opt["optimization proposal<br/>ramp 25 → 50 → 75 → 100"]
+    test -->|"no signal"| none["nothing"]
+    heal --> autoR{"auto-rollback<br/>enabled?"}
+    opt --> autoO{"auto-optimize<br/>enabled?"}
+    autoR -->|yes| apply["apply through the normal<br/>versioned, audited write path"]
+    autoR -->|no| queue["wait for a human<br/>on the Monitor screen"]
+    autoO -->|yes| apply
+    autoO -->|no| queue
+    apply --> app
+```
 
 Both auto behaviors are per-org settings, off by default, and every application lands as an
 ordinary audited version you can roll back. Scans run from `POST /api/jobs/rollout-scan` and
