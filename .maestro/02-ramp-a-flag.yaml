@@ -1,0 +1,50 @@
+# Primary journey: sign in, ramp a flag in production, see it recorded in the audit feed.
+appId: io.switchboard.app
+---
+- runFlow: 01-login.yaml
+
+# The flags list renders the seeded workspace.
+- assertVisible:
+    id: "flags-list"
+- assertVisible:
+    id: "flag-card-new-checkout"
+- takeScreenshot: artifacts/02-flags-list
+
+# Production is where new-checkout is mid-ramp.
+- tapOn:
+    id: "flags-env-switcher-env-production"
+- assertVisible:
+    id: "flag-card-new-checkout-env-production"
+
+- tapOn:
+    id: "flag-card-new-checkout"
+- extendedWaitUntil:
+    visible:
+      id: "flag-detail-screen"
+    timeout: 10000
+- assertVisible:
+    id: "flag-detail-key"
+- takeScreenshot: artifacts/02-flag-detail
+
+# Ramp production to 50% via the slider detent.
+- scrollUntilVisible:
+    element:
+      id: "env-card-production-ramp-track"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "env-card-production-ramp-detent-50"
+- assertVisible:
+    id: "env-card-production-ramp-value"
+- takeScreenshot: artifacts/02-ramped-50
+
+# The change lands in the org audit feed.
+- tapOn: "Activity"
+- assertVisible:
+    id: "activity-screen"
+- extendedWaitUntil:
+    visible:
+      id: "activity-list"
+    timeout: 10000
+- assertVisible: "new-checkout"
+- takeScreenshot: artifacts/02-audit-entry

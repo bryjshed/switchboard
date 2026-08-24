@@ -1,0 +1,45 @@
+# History is append-only: a rollback writes a NEW version rather than rewriting the past.
+appId: io.switchboard.app
+---
+- runFlow: 01-login.yaml
+
+- tapOn:
+    id: "flags-env-switcher-env-production"
+- tapOn:
+    id: "flag-card-new-checkout"
+- extendedWaitUntil:
+    visible:
+      id: "flag-detail-screen"
+    timeout: 10000
+
+- scrollUntilVisible:
+    element:
+      id: "env-card-production-history"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "env-card-production-history"
+- assertVisible:
+    id: "history-screen"
+- extendedWaitUntil:
+    visible:
+      id: "history-list"
+    timeout: 10000
+- takeScreenshot: artifacts/04-history
+
+- tapOn:
+    id: "history-rollback"
+- assertVisible:
+    id: "history-rollback-reason"
+- tapOn:
+    id: "history-rollback-reason"
+- inputText: "e2e rollback drill"
+- tapOn:
+    id: "history-rollback-confirm"
+
+# A new version appears at the top; nothing was rewritten.
+- extendedWaitUntil:
+    visible:
+      id: "history-list"
+    timeout: 10000
+- takeScreenshot: artifacts/04-rolled-back
