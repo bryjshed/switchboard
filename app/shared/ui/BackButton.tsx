@@ -1,5 +1,5 @@
 import Feather from '@expo/vector-icons/Feather';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import React from 'react';
 
 import { radius, useTheme } from '../theme';
@@ -7,7 +7,9 @@ import { PressableScale } from './PressableScale';
 
 export interface BackButtonProps {
   /** Where to land when there is no history (deep link into a detail screen). */
-  fallbackHref?: string;
+  // Typed against expo-router's Href, not string: with typedRoutes enabled a bare
+  // string is not assignable to router.replace().
+  fallbackHref?: Href;
   testID?: string;
 }
 

@@ -7,7 +7,7 @@
  * shared/api/types.ts declare is present and the right type. Plain node: no RN,
  * no bundler, no simulator.
  *
- *   node scripts/ai-check.mjs [--base http://localhost:28080] [--as alice@ex.com]
+ *   node scripts/ai-check.mjs [--base http://localhost:28080] [--as alice@switchboard.dev]
  *
  * Read-mostly. The only writes are acknowledging one OPEN anomaly finding (and
  * asserting the re-ack conflicts) — an ack is not reversible via the API, so
@@ -23,7 +23,7 @@ const argValue = (name, fallback) => {
 };
 
 const BASE = argValue('--base', process.env.SWITCHBOARD_API ?? 'http://localhost:28080');
-const ACTOR = argValue('--as', 'alice@ex.com');
+const ACTOR = argValue('--as', 'alice@switchboard.dev');
 const PROJECT_KEY = argValue('--project', 'storefront-app');
 const TOKEN = `dev:${ACTOR}`;
 

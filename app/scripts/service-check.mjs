@@ -7,7 +7,7 @@
  * shared/api/types.ts declare is actually present and the right type. Plain node:
  * no RN, no bundler, no simulator.
  *
- *   node scripts/service-check.mjs [--base http://localhost:28080] [--as alice@ex.com]
+ *   node scripts/service-check.mjs [--base http://localhost:28080] [--as alice@switchboard.dev]
  *
  * Writes only to a throwaway flag it creates and archives at the end.
  * Prints PASS/FAIL lines; exits 0 when everything passed, 1 otherwise.
@@ -20,7 +20,7 @@ const argValue = (name, fallback) => {
 };
 
 const BASE = argValue('--base', process.env.SWITCHBOARD_API ?? 'http://localhost:28080');
-const ACTOR = argValue('--as', 'alice@ex.com');
+const ACTOR = argValue('--as', 'alice@switchboard.dev');
 const PROJECT_KEY = argValue('--project', 'storefront-app');
 const TOKEN = `dev:${ACTOR}`;
 
