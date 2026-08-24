@@ -1,0 +1,108 @@
+{
+  "spec": "spec/evaluation.md#rollout-weights",
+  "kind": "rollout-validation",
+  "description": "Rollout weights are whole percents that must sum to exactly 100, each in [0, 100]. A rollout that fails these rules must be REJECTED at configuration time, never silently normalised at evaluation time.",
+  "rolloutValidation": [
+    {
+      "name": "even two-way split",
+      "weights": [
+        50,
+        50
+      ],
+      "valid": true
+    },
+    {
+      "name": "single variation at 100",
+      "weights": [
+        100
+      ],
+      "valid": true
+    },
+    {
+      "name": "uneven three-way split",
+      "weights": [
+        34,
+        33,
+        33
+      ],
+      "valid": true
+    },
+    {
+      "name": "a zero weight is legal and is simply never served",
+      "weights": [
+        0,
+        100
+      ],
+      "valid": true
+    },
+    {
+      "name": "many small weights summing to 100",
+      "weights": [
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "valid": true
+    },
+    {
+      "name": "weights summing under 100",
+      "weights": [
+        50,
+        40
+      ],
+      "valid": false,
+      "reason": "SUM_NOT_100"
+    },
+    {
+      "name": "weights summing over 100",
+      "weights": [
+        60,
+        50
+      ],
+      "valid": false,
+      "reason": "SUM_NOT_100"
+    },
+    {
+      "name": "a single weight under 100",
+      "weights": [
+        99
+      ],
+      "valid": false,
+      "reason": "SUM_NOT_100"
+    },
+    {
+      "name": "all weights zero",
+      "weights": [
+        0,
+        0
+      ],
+      "valid": false,
+      "reason": "SUM_NOT_100"
+    },
+    {
+      "name": "a negative weight",
+      "weights": [
+        -10,
+        110
+      ],
+      "valid": false,
+      "reason": "WEIGHT_OUT_OF_RANGE"
+    },
+    {
+      "name": "a weight above 100",
+      "weights": [
+        101,
+        -1
+      ],
+      "valid": false,
+      "reason": "WEIGHT_OUT_OF_RANGE"
+    }
+  ]
+}

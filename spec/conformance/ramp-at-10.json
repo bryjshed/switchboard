@@ -1,0 +1,531 @@
+{
+  "spec": "spec/evaluation.md#bucketing",
+  "kind": "evaluation",
+  "rampGroup": {
+    "flagKey": "checkout-ramp",
+    "trueVariationValue": "true",
+    "percent": 10
+  },
+  "description": "The flag \"checkout-ramp\" ramped to 10%. ramp-at-10.json and ramp-at-25.json use the SAME flag key and the SAME context keys: every context served \"true\" at 10% must still be served \"true\" at 25%. That monotonicity is what makes a ramp safe to increase.",
+  "flags": [
+    {
+      "key": "checkout-ramp",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+              "weight": 10
+            },
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+              "weight": 90
+            }
+          ]
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [],
+  "cases": [
+    {
+      "name": "user-1 at 10% (bucket 4373)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-2 at 10% (bucket 1179)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-3 at 10% (bucket 4211)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-4 at 10% (bucket 7370)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-5 at 10% (bucket 3432)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-6 at 10% (bucket 5065)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-7 at 10% (bucket 9151)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-7",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-8 at 10% (bucket 7429)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-8",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-9 at 10% (bucket 7982)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-9",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-10 at 10% (bucket 7530)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-10",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-11 at 10% (bucket 4611)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-11",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-12 at 10% (bucket 4995)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-12",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-13 at 10% (bucket 9894)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-13",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-14 at 10% (bucket 3379)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-14",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-15 at 10% (bucket 5401)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-15",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-16 at 10% (bucket 6774)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-16",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-17 at 10% (bucket 9166)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-17",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-18 at 10% (bucket 4264)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-18",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-19 at 10% (bucket 3542)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-19",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-20 at 10% (bucket 9971)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-20",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-21 at 10% (bucket 8382)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-21",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-22 at 10% (bucket 77)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-22",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-23 at 10% (bucket 1290)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-23",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-24 at 10% (bucket 1969)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-24",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-25 at 10% (bucket 2096)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-25",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-26 at 10% (bucket 8033)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-26",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-27 at 10% (bucket 5754)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-27",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-28 at 10% (bucket 9245)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-28",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-29 at 10% (bucket 5236)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-29",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-30 at 10% (bucket 567)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-30",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-31 at 10% (bucket 5739)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-31",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-32 at 10% (bucket 9672)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-32",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-33 at 10% (bucket 9481)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-33",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-34 at 10% (bucket 8732)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-34",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-35 at 10% (bucket 7414)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-35",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-36 at 10% (bucket 1638)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-36",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-37 at 10% (bucket 9617)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-37",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-38 at 10% (bucket 3618)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-38",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-39 at 10% (bucket 1913)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-39",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "user-40 at 10% (bucket 4430)",
+      "flagKey": "checkout-ramp",
+      "context": {
+        "key": "user-40",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    }
+  ]
+}

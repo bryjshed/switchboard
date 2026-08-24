@@ -1,0 +1,606 @@
+{
+  "spec": "spec/evaluation.md#precedence",
+  "kind": "evaluation",
+  "description": "The full precedence ladder for a two-variation boolean flag, plus the SDK fail-safe.",
+  "flags": [
+    {
+      "key": "checkout-killed",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": true,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+          }
+        ],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-off",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": false,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+          }
+        ],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-targeted",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+          }
+        ],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-rule-order",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": "first",
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          },
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000002",
+            "description": "second",
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-fallthrough-fixed",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-fallthrough-rollout",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+              "weight": 50
+            },
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+              "weight": 50
+            }
+          ]
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-rule-rollout",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "rollout": [
+                {
+                  "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+                  "weight": 50
+                },
+                {
+                  "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+                  "weight": 50
+                }
+              ]
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "checkout-zero-weight",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+              "weight": 0
+            },
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+              "weight": 100
+            }
+          ]
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [],
+  "cases": [
+    {
+      "name": "kill switch beats targets, rules and fallthrough",
+      "flagKey": "checkout-killed",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "KILL_SWITCH"
+      }
+    },
+    {
+      "name": "disabled beats targets, rules and fallthrough",
+      "flagKey": "checkout-off",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "FLAG_OFF"
+      }
+    },
+    {
+      "name": "individual target beats a matching rule",
+      "flagKey": "checkout-targeted",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "TARGET_MATCH"
+      }
+    },
+    {
+      "name": "rule beats fallthrough when no target matches",
+      "flagKey": "checkout-targeted",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "no rule matches falls through",
+      "flagKey": "checkout-targeted",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "plan": "free"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "first matching rule wins",
+      "flagKey": "checkout-rule-order",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "fixed fallthrough serves reason DEFAULT",
+      "flagKey": "checkout-fallthrough-fixed",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "fallthrough rollout serves reason ROLLOUT (user-1)",
+      "flagKey": "checkout-fallthrough-rollout",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "fallthrough rollout serves reason ROLLOUT (user-2)",
+      "flagKey": "checkout-fallthrough-rollout",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "fallthrough rollout serves reason ROLLOUT (user-3)",
+      "flagKey": "checkout-fallthrough-rollout",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "fallthrough rollout serves reason ROLLOUT (user-4)",
+      "flagKey": "checkout-fallthrough-rollout",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "fallthrough rollout serves reason ROLLOUT (user-5)",
+      "flagKey": "checkout-fallthrough-rollout",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "a rule serving a rollout keeps reason RULE_MATCH and buckets on the flag key",
+      "flagKey": "checkout-rule-rollout",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "a rule serving a rollout keeps reason RULE_MATCH (user-2)",
+      "flagKey": "checkout-rule-rollout",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "a zero-weight variation is never served (user-1)",
+      "flagKey": "checkout-zero-weight",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "a zero-weight variation is never served (user-2)",
+      "flagKey": "checkout-zero-weight",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "unknown flag serves the caller default with reason SDK_DEFAULT",
+      "flagKey": "no-such-flag",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "default": "fallback-x",
+      "expected": {
+        "value": "fallback-x",
+        "reason": "SDK_DEFAULT"
+      }
+    },
+    {
+      "name": "unknown flag with no caller default serves the empty string",
+      "flagKey": "no-such-flag",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "",
+        "reason": "SDK_DEFAULT"
+      }
+    }
+  ]
+}

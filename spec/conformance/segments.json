@@ -1,0 +1,491 @@
+{
+  "spec": "spec/evaluation.md#segments",
+  "kind": "evaluation",
+  "description": "SEGMENT_MATCH / NOT_SEGMENT_MATCH, the excluded-before-included-before-rules order inside a segment, unknown segment keys, and the rule that segment rules cannot nest segment operators.",
+  "flags": [
+    {
+      "key": "seg-match",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "SEGMENT_MATCH",
+                "values": [
+                  "beta-testers"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "seg-not-match",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "NOT_SEGMENT_MATCH",
+                "values": [
+                  "beta-testers"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "seg-unknown",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "SEGMENT_MATCH",
+                "values": [
+                  "ghost-segment"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "seg-not-match-unknown",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "NOT_SEGMENT_MATCH",
+                "values": [
+                  "ghost-segment"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "seg-any-of",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "SEGMENT_MATCH",
+                "values": [
+                  "ghost-segment",
+                  "pro-users"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "seg-nested",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "SEGMENT_MATCH",
+                "values": [
+                  "nested-segment-op"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [
+    {
+      "key": "beta-testers",
+      "name": "Beta testers",
+      "includedKeys": [
+        "user-1"
+      ],
+      "excludedKeys": [
+        "user-2"
+      ],
+      "rules": [
+        {
+          "clauses": [
+            {
+              "attribute": "key",
+              "op": "STARTS_WITH",
+              "values": [
+                "user-"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "pro-users",
+      "name": "Pro users",
+      "includedKeys": [],
+      "excludedKeys": [],
+      "rules": [
+        {
+          "clauses": [
+            {
+              "attribute": "plan",
+              "op": "EQUALS",
+              "values": [
+                "pro"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "nested-segment-op",
+      "name": "Nested segment op",
+      "includedKeys": [],
+      "excludedKeys": [],
+      "rules": [
+        {
+          "clauses": [
+            {
+              "attribute": "key",
+              "op": "SEGMENT_MATCH",
+              "values": [
+                "beta-testers"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "an included key matches the segment",
+      "flagKey": "seg-match",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "an excluded key loses even though a segment rule matches it",
+      "flagKey": "seg-match",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "a segment rule matches by the reserved key attribute",
+      "flagKey": "seg-match",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "a segment rule matches by attribute",
+      "flagKey": "seg-any-of",
+      "context": {
+        "key": "someone",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "SEGMENT_MATCH lists are any-of and all can fail",
+      "flagKey": "seg-any-of",
+      "context": {
+        "key": "someone",
+        "attributes": {
+          "plan": "free"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "no include, no exclude and no matching rule fails the segment",
+      "flagKey": "seg-match",
+      "context": {
+        "key": "other-9",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "NOT_SEGMENT_MATCH inverts a segment hit",
+      "flagKey": "seg-not-match",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "NOT_SEGMENT_MATCH matches a context outside the segment",
+      "flagKey": "seg-not-match",
+      "context": {
+        "key": "other-9",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "an excluded key is outside the segment, so NOT_SEGMENT_MATCH matches it",
+      "flagKey": "seg-not-match",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "an unknown segment key fails the clause instead of erroring",
+      "flagKey": "seg-unknown",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "an unknown segment key under NOT_SEGMENT_MATCH matches, it does not error",
+      "flagKey": "seg-not-match-unknown",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "a segment rule containing a segment operator never matches",
+      "flagKey": "seg-nested",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    }
+  ]
+}

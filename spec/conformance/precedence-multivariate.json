@@ -1,0 +1,363 @@
+{
+  "spec": "spec/evaluation.md#precedence",
+  "kind": "evaluation",
+  "description": "The same precedence ladder for a three-variation string flag, including an uneven rollout.",
+  "flags": [
+    {
+      "key": "planner-killed",
+      "kind": "STRING",
+      "variations": [
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000001",
+          "value": "control",
+          "name": "Control"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000002",
+          "value": "compact",
+          "name": "Compact"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000003",
+          "value": "expanded",
+          "name": "Expanded"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": true,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0b0b0b0b-0000-4000-8000-000000000003"
+          }
+        ],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0b0b0b0b-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0b0b0b0b-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0b0b0b0b-0000-4000-8000-000000000001",
+        "defaultVariationId": "0b0b0b0b-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "planner-off",
+      "kind": "STRING",
+      "variations": [
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000001",
+          "value": "control",
+          "name": "Control"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000002",
+          "value": "compact",
+          "name": "Compact"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000003",
+          "value": "expanded",
+          "name": "Expanded"
+        }
+      ],
+      "enabled": false,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0b0b0b0b-0000-4000-8000-000000000003"
+          }
+        ],
+        "rules": [],
+        "fallthrough": {
+          "variationId": "0b0b0b0b-0000-4000-8000-000000000002"
+        },
+        "offVariationId": "0b0b0b0b-0000-4000-8000-000000000001",
+        "defaultVariationId": "0b0b0b0b-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "planner-targeted",
+      "kind": "STRING",
+      "variations": [
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000001",
+          "value": "control",
+          "name": "Control"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000002",
+          "value": "compact",
+          "name": "Compact"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000003",
+          "value": "expanded",
+          "name": "Expanded"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [
+          {
+            "contextKey": "user-1",
+            "variationId": "0b0b0b0b-0000-4000-8000-000000000003"
+          }
+        ],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0b0b0b0b-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0b0b0b0b-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0b0b0b0b-0000-4000-8000-000000000001",
+        "defaultVariationId": "0b0b0b0b-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "planner-rollout",
+      "kind": "STRING",
+      "variations": [
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000001",
+          "value": "control",
+          "name": "Control"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000002",
+          "value": "compact",
+          "name": "Compact"
+        },
+        {
+          "id": "0b0b0b0b-0000-4000-8000-000000000003",
+          "value": "expanded",
+          "name": "Expanded"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0b0b0b0b-0000-4000-8000-000000000001",
+              "weight": 34
+            },
+            {
+              "variationId": "0b0b0b0b-0000-4000-8000-000000000002",
+              "weight": 33
+            },
+            {
+              "variationId": "0b0b0b0b-0000-4000-8000-000000000003",
+              "weight": 33
+            }
+          ]
+        },
+        "offVariationId": "0b0b0b0b-0000-4000-8000-000000000001",
+        "defaultVariationId": "0b0b0b0b-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [],
+  "cases": [
+    {
+      "name": "kill switch serves the off variation",
+      "flagKey": "planner-killed",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "control",
+        "reason": "KILL_SWITCH"
+      }
+    },
+    {
+      "name": "disabled serves the off variation, not the fallthrough",
+      "flagKey": "planner-off",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "FLAG_OFF"
+      }
+    },
+    {
+      "name": "individual target selects a non-default variation",
+      "flagKey": "planner-targeted",
+      "context": {
+        "key": "user-1",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "expanded",
+        "reason": "TARGET_MATCH"
+      }
+    },
+    {
+      "name": "rule selects a third variation",
+      "flagKey": "planner-targeted",
+      "context": {
+        "key": "user-2",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "compact",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "fallthrough serves the fixed variation",
+      "flagKey": "planner-targeted",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-1)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-2)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-3)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "compact",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-4)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-5)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "expanded",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-6)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "expanded",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-7)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-7",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "expanded",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "uneven 34/33/33 rollout (user-8)",
+      "flagKey": "planner-rollout",
+      "context": {
+        "key": "user-8",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "control",
+        "reason": "ROLLOUT"
+      }
+    }
+  ]
+}

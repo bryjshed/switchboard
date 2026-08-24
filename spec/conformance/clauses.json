@@ -1,0 +1,661 @@
+{
+  "spec": "spec/evaluation.md#clauses",
+  "kind": "evaluation",
+  "description": "Every attribute clause operator, positive and negative. Each flag has one rule serving false; a matching clause therefore yields false/RULE_MATCH and a failing clause true/DEFAULT.",
+  "flags": [
+    {
+      "key": "clause-equals",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-in",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "region",
+                "op": "IN",
+                "values": [
+                  "us",
+                  "eu"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-contains",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "email",
+                "op": "CONTAINS",
+                "values": [
+                  "@ex.com",
+                  "@example.com"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-starts-with",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "email",
+                "op": "STARTS_WITH",
+                "values": [
+                  "admin-"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-key-attribute",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "key",
+                "op": "STARTS_WITH",
+                "values": [
+                  "beta-"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-empty-values",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": []
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-conjunction",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [
+              {
+                "attribute": "plan",
+                "op": "EQUALS",
+                "values": [
+                  "pro"
+                ]
+              },
+              {
+                "attribute": "region",
+                "op": "IN",
+                "values": [
+                  "us",
+                  "eu"
+                ]
+              }
+            ],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "clause-empty-rule",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [
+          {
+            "id": "0c0c0c0c-0000-4000-8000-000000000001",
+            "description": null,
+            "clauses": [],
+            "serve": {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002"
+            }
+          }
+        ],
+        "fallthrough": {
+          "variationId": "0a0a0a0a-0000-4000-8000-000000000001"
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [],
+  "cases": [
+    {
+      "name": "EQUALS matches the exact attribute value",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "EQUALS does not match a different value",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "free"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "EQUALS is case sensitive",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "PRO"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "EQUALS does not substring match",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro-plus"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "a missing attribute fails the clause",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "region": "us"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "an empty attributes map fails the clause",
+      "flagKey": "clause-equals",
+      "context": {
+        "key": "u",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "IN matches the first listed value",
+      "flagKey": "clause-in",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "region": "us"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "IN matches a later listed value",
+      "flagKey": "clause-in",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "region": "eu"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "IN does not match an unlisted value",
+      "flagKey": "clause-in",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "region": "apac"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "CONTAINS matches a substring from any listed value",
+      "flagKey": "clause-contains",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "email": "bob@example.com"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "CONTAINS matches the first listed value too",
+      "flagKey": "clause-contains",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "email": "bob@ex.com"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "CONTAINS does not match when no value is a substring",
+      "flagKey": "clause-contains",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "email": "bob@other.org"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "STARTS_WITH matches a prefix",
+      "flagKey": "clause-starts-with",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "email": "admin-bob@ex.com"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "STARTS_WITH does not match a mid-string occurrence",
+      "flagKey": "clause-starts-with",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "email": "bob-admin-@ex.com"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "the reserved attribute \"key\" reads the context key",
+      "flagKey": "clause-key-attribute",
+      "context": {
+        "key": "beta-7",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "the reserved attribute \"key\" ignores an attribute named key",
+      "flagKey": "clause-key-attribute",
+      "context": {
+        "key": "user-7",
+        "attributes": {
+          "key": "beta-7"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "a clause with no values never matches",
+      "flagKey": "clause-empty-values",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "a rule matches only when ALL clauses match",
+      "flagKey": "clause-conjunction",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro",
+          "region": "eu"
+        }
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "one failing clause fails the whole rule",
+      "flagKey": "clause-conjunction",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro",
+          "region": "apac"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "one missing attribute fails the whole rule",
+      "flagKey": "clause-conjunction",
+      "context": {
+        "key": "u",
+        "attributes": {
+          "plan": "pro"
+        }
+      },
+      "expected": {
+        "value": "true",
+        "reason": "DEFAULT"
+      }
+    },
+    {
+      "name": "a rule with no clauses matches every context",
+      "flagKey": "clause-empty-rule",
+      "context": {
+        "key": "anyone",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "RULE_MATCH",
+        "ruleId": "0c0c0c0c-0000-4000-8000-000000000001"
+      }
+    }
+  ]
+}

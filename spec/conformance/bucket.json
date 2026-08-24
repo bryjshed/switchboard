@@ -1,0 +1,206 @@
+{
+  "spec": "spec/evaluation.md#bucketing",
+  "kind": "bucket",
+  "description": "Pure hash vectors. Verify these FIRST: if bucket() disagrees here, every rollout vector will disagree too. bucket = int(hex(md5(flagKey + \":\" + contextKey))[0:8], 16) % 10000. Keys are hashed as UTF-8 bytes.",
+  "bucketSpace": 10000,
+  "bucketVectors": [
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-1",
+      "input": "new-checkout:user-1",
+      "md5Hex": "d31ac13949c29c873e47e5a87ad5ccff",
+      "prefixHex": "d31ac139",
+      "prefixInt": 3541745977,
+      "bucket": 5977
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-2",
+      "input": "new-checkout:user-2",
+      "md5Hex": "8e78a3173277e59d6bf249f4ceef10c0",
+      "prefixHex": "8e78a317",
+      "prefixInt": 2390270743,
+      "bucket": 743
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-3",
+      "input": "new-checkout:user-3",
+      "md5Hex": "69be58fb38862cdd5e1b6feb12c3b5cf",
+      "prefixHex": "69be58fb",
+      "prefixInt": 1774082299,
+      "bucket": 2299
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-4",
+      "input": "new-checkout:user-4",
+      "md5Hex": "543cf29ecb173c59efaf6a111fb0d02e",
+      "prefixHex": "543cf29e",
+      "prefixInt": 1413280414,
+      "bucket": 414
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-5",
+      "input": "new-checkout:user-5",
+      "md5Hex": "795f10bc33dd3df0daae24eaa7900787",
+      "prefixHex": "795f10bc",
+      "prefixInt": 2036273340,
+      "bucket": 3340
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "agent-run-1",
+      "input": "new-checkout:agent-run-1",
+      "md5Hex": "341cfa5183eab5d8231ca773f982f58f",
+      "prefixHex": "341cfa51",
+      "prefixInt": 874314321,
+      "bucket": 4321
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "agent-run-2",
+      "input": "new-checkout:agent-run-2",
+      "md5Hex": "8f75dfcb62abbc965177b95362efc99f",
+      "prefixHex": "8f75dfcb",
+      "prefixInt": 2406866891,
+      "bucket": 6891
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "agent-run-3",
+      "input": "new-checkout:agent-run-3",
+      "md5Hex": "fb21b11f262fba6d44e702ead8433ccb",
+      "prefixHex": "fb21b11f",
+      "prefixInt": 4213289247,
+      "bucket": 9247
+    },
+    {
+      "flagKey": "planner-v2",
+      "contextKey": "user-1",
+      "input": "planner-v2:user-1",
+      "md5Hex": "5d160bab8fe00e2811ad3f3c9df90e24",
+      "prefixHex": "5d160bab",
+      "prefixInt": 1561725867,
+      "bucket": 5867
+    },
+    {
+      "flagKey": "planner-v2",
+      "contextKey": "user-2",
+      "input": "planner-v2:user-2",
+      "md5Hex": "b0445e4e4755769fa91d37725a95ed9a",
+      "prefixHex": "b0445e4e",
+      "prefixInt": 2957270606,
+      "bucket": 606
+    },
+    {
+      "flagKey": "planner-v2",
+      "contextKey": "user-3",
+      "input": "planner-v2:user-3",
+      "md5Hex": "481512b62dceb915bda6bd0648ab3b95",
+      "prefixHex": "481512b6",
+      "prefixInt": 1209340598,
+      "bucket": 598
+    },
+    {
+      "flagKey": "checkout-ramp",
+      "contextKey": "user-1",
+      "input": "checkout-ramp:user-1",
+      "md5Hex": "16ceb095e468b6b33d1012a991bcb2fd",
+      "prefixHex": "16ceb095",
+      "prefixInt": 382644373,
+      "bucket": 4373
+    },
+    {
+      "flagKey": "checkout-ramp",
+      "contextKey": "user-7",
+      "input": "checkout-ramp:user-7",
+      "md5Hex": "0fcaa68f57ccc843900e08ec8df062ba",
+      "prefixHex": "0fcaa68f",
+      "prefixInt": 264939151,
+      "bucket": 9151
+    },
+    {
+      "flagKey": "a",
+      "contextKey": "b",
+      "input": "a:b",
+      "md5Hex": "d8160c9b3dc20d4e931aeb4f45262155",
+      "prefixHex": "d8160c9b",
+      "prefixInt": 3625323675,
+      "bucket": 3675
+    },
+    {
+      "flagKey": "",
+      "contextKey": "user-1",
+      "input": ":user-1",
+      "md5Hex": "f81edd3cf11fa7f5acee7ac7061f251d",
+      "prefixHex": "f81edd3c",
+      "prefixInt": 4162772284,
+      "bucket": 2284
+    },
+    {
+      "flagKey": "flag-with-colon:in-key",
+      "contextKey": "user-1",
+      "input": "flag-with-colon:in-key:user-1",
+      "md5Hex": "60b16428dd7bdc955f007e34d0a982ca",
+      "prefixHex": "60b16428",
+      "prefixInt": 1622238248,
+      "bucket": 8248
+    },
+    {
+      "flagKey": "unicode-flag",
+      "contextKey": "user-éé",
+      "input": "unicode-flag:user-éé",
+      "md5Hex": "7fd9d5b9935d4d525066dbb034514465",
+      "prefixHex": "7fd9d5b9",
+      "prefixInt": 2144982457,
+      "bucket": 2457
+    },
+    {
+      "flagKey": "unicode-flag",
+      "contextKey": "日本語-key",
+      "input": "unicode-flag:日本語-key",
+      "md5Hex": "cbc1f6b07f037f74ac41a8ef7a0ab1c9",
+      "prefixHex": "cbc1f6b0",
+      "prefixInt": 3418486448,
+      "bucket": 6448
+    },
+    {
+      "flagKey": "emoji-flag",
+      "contextKey": "user-🚀",
+      "input": "emoji-flag:user-🚀",
+      "md5Hex": "6429322015fdd9cd693ba08f1e33722e",
+      "prefixHex": "64293220",
+      "prefixInt": 1680421408,
+      "bucket": 1408
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "4b1e0f4a-6c4a-4a3e-9d0e-1f2a3b4c5d6e",
+      "input": "new-checkout:4b1e0f4a-6c4a-4a3e-9d0e-1f2a3b4c5d6e",
+      "md5Hex": "788c3fb32e932ec1b61b6a50c7a8f7e4",
+      "prefixHex": "788c3fb3",
+      "prefixInt": 2022457267,
+      "bucket": 7267
+    },
+    {
+      "flagKey": "new-checkout",
+      "contextKey": "user-1000",
+      "input": "new-checkout:user-1000",
+      "md5Hex": "c4e91d16cf8c328275251ca2cb6d9142",
+      "prefixHex": "c4e91d16",
+      "prefixInt": 3303611670,
+      "bucket": 1670
+    },
+    {
+      "flagKey": "spaces flag",
+      "contextKey": "context key with spaces",
+      "input": "spaces flag:context key with spaces",
+      "md5Hex": "05cd51c328757b008dce21cb92b069f3",
+      "prefixHex": "05cd51c3",
+      "prefixInt": 97341891,
+      "bucket": 1891
+    }
+  ]
+}

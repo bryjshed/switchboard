@@ -1,0 +1,370 @@
+{
+  "spec": "spec/evaluation.md#bucketing",
+  "kind": "evaluation",
+  "description": "Repeating an identical evaluation must give an identical answer (no clock, no randomness), and two flags with identical weights must not agree on every context (the flagKey salt decorrelates rollouts). Contexts that differ between the two flags here: user-4, user-5, user-6.",
+  "flags": [
+    {
+      "key": "sticky-flag-a",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+              "weight": 50
+            },
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+              "weight": 50
+            }
+          ]
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "key": "sticky-flag-b",
+      "kind": "BOOLEAN",
+      "variations": [
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000001",
+          "value": "true",
+          "name": "True"
+        },
+        {
+          "id": "0a0a0a0a-0000-4000-8000-000000000002",
+          "value": "false",
+          "name": "False"
+        }
+      ],
+      "enabled": true,
+      "killSwitchActive": false,
+      "targeting": {
+        "individualTargets": [],
+        "rules": [],
+        "fallthrough": {
+          "rollout": [
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000001",
+              "weight": 50
+            },
+            {
+              "variationId": "0a0a0a0a-0000-4000-8000-000000000002",
+              "weight": 50
+            }
+          ]
+        },
+        "offVariationId": "0a0a0a0a-0000-4000-8000-000000000002",
+        "defaultVariationId": "0a0a0a0a-0000-4000-8000-000000000001"
+      }
+    }
+  ],
+  "segments": [],
+  "cases": [
+    {
+      "name": "sticky-flag-a / user-1 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-1 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-1 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-2 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-2 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-2 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-3 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-3 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-3 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-4 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-4 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-4 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-5 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-5 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-5 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-6 / evaluation 1 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-6 / evaluation 2 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-a / user-6 / evaluation 3 of 3",
+      "flagKey": "sticky-flag-a",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-1 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-1",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-2 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-2",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-3 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-3",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-4 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-4",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "true",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-5 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-5",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    },
+    {
+      "name": "sticky-flag-b / user-6 / same weights, different flag key",
+      "flagKey": "sticky-flag-b",
+      "context": {
+        "key": "user-6",
+        "attributes": {}
+      },
+      "expected": {
+        "value": "false",
+        "reason": "ROLLOUT"
+      }
+    }
+  ]
+}
