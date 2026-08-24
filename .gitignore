@@ -1,0 +1,29 @@
+# Build output
+target/
+dist/
+build/
+*.class
+
+# Dependencies
+node_modules/
+
+# Native build output (regenerate with `expo prebuild`)
+app/ios/
+app/android/
+app/.expo/
+*.xcuserstate
+Pods/
+
+# Local environment
+.env
+.env.local
+*.log
+
+# Editors / OS
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# Local emulator + database state
+emulator-data/
