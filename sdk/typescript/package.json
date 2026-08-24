@@ -1,0 +1,77 @@
+{
+  "name": "@switchboard/openfeature-provider",
+  "version": "0.1.0",
+  "description": "Switchboard feature-flag SDK for Node.js: in-memory local evaluation, SSE streaming updates, and an OpenFeature provider.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./core": {
+      "import": {
+        "types": "./dist/esm/core.d.ts",
+        "default": "./dist/esm/core.js"
+      },
+      "require": {
+        "types": "./dist/cjs/core.d.ts",
+        "default": "./dist/cjs/core.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && node scripts/finalize-build.mjs",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "conformance": "vitest run test/conformance.test.ts",
+    "live-check": "node scripts/live-check.mjs",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "peerDependencies": {
+    "@openfeature/server-sdk": "^1.13.0"
+  },
+  "peerDependenciesMeta": {
+    "@openfeature/server-sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@openfeature/server-sdk": "^1.23.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.39.4",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.0"
+  },
+  "keywords": [
+    "feature-flags",
+    "openfeature",
+    "switchboard",
+    "feature-toggles"
+  ]
+}
