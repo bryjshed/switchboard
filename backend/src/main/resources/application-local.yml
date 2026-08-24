@@ -1,0 +1,9 @@
+switchboard:
+  security:
+    dev-auth-enabled: true
+  jobs:
+    token: local-job-token
+
+logging:
+  level:
+    com.switchboard: DEBUG

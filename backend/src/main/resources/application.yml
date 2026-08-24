@@ -1,0 +1,36 @@
+spring:
+  application:
+    name: switchboard
+  r2dbc:
+    url: r2dbc:postgresql://${DB_HOST:localhost}:${DB_PORT:25432}/${DB_NAME:switchboard}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    pool:
+      initial-size: 2
+      max-size: 10
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:25432}/${DB_NAME:switchboard}
+    user: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    locations: classpath:db/migration
+
+server:
+  port: ${SERVER_PORT:28080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+switchboard:
+  security:
+    dev-auth-enabled: false
+  firebase:
+    project-id: ${FIREBASE_PROJECT_ID:demo-switchboard}
+  ai:
+    anthropic-api-key: ${ANTHROPIC_API_KEY:}
+  jobs:
+    token: ${JOB_TOKEN:}
+    scheduled-enabled: ${JOBS_SCHEDULED_ENABLED:true}

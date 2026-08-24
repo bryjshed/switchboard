@@ -1,0 +1,3177 @@
+openapi: 3.0.3
+info:
+  title: Switchboard API
+  description: AI-powered feature flag platform. Management surface (user bearer auth), SDK surface (SDK-key auth), and job triggers.
+  version: 0.1.0
+servers:
+  - url: http://localhost:28080
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Orgs
+  - name: Projects
+  - name: Environments
+  - name: Flags
+  - name: Segments
+  - name: Audit
+  - name: Evaluation
+  - name: Stream
+  - name: Events
+  - name: Ofrep
+  - name: Ai
+  - name: Access
+  - name: ChangeRequests
+  - name: Jobs
+
+paths:
+  /api/users/me:
+    get:
+      tags: [Auth]
+      operationId: getMe
+      summary: Current user; auto-provisions on first call.
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+
+  /api/orgs:
+    post:
+      tags: [Orgs]
+      operationId: createOrg
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgCreateRequest'
+      responses:
+        '201':
+          description: Created org
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgResponse'
+    get:
+      tags: [Orgs]
+      operationId: listOrgs
+      responses:
+        '200':
+          description: Orgs the caller belongs to
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrgResponse'
+
+  /api/orgs/{orgId}:
+    get:
+      tags: [Orgs]
+      operationId: getOrg
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Org detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgResponse'
+
+  /api/orgs/{orgId}/members:
+    get:
+      tags: [Orgs]
+      operationId: listOrgMembers
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrgMemberResponse'
+    post:
+      tags: [Orgs]
+      operationId: addOrgMember
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgMemberAddRequest'
+      responses:
+        '201':
+          description: Added member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgMemberResponse'
+
+  /api/orgs/{orgId}/members/{userId}:
+    delete:
+      tags: [Orgs]
+      operationId: removeOrgMember
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removed
+
+  /api/orgs/{orgId}/settings:
+    get:
+      tags: [Orgs]
+      operationId: getOrgSettings
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Org settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgSettingsResponse'
+    put:
+      tags: [Orgs]
+      operationId: updateOrgSettings
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgSettingsUpdateRequest'
+      responses:
+        '200':
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgSettingsResponse'
+
+  /api/orgs/{orgId}/projects:
+    post:
+      tags: [Projects]
+      operationId: createProject
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+      responses:
+        '201':
+          description: Created project (environments dev/staging/production auto-seeded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectResponse'
+
+  /api/projects/{projectId}:
+    get:
+      tags: [Projects]
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+    patch:
+      tags: [Projects]
+      operationId: updateProject
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectUpdateRequest'
+      responses:
+        '200':
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+
+  /api/projects/{projectId}/environments:
+    get:
+      tags: [Environments]
+      operationId: listEnvironments
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Environments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EnvironmentResponse'
+    post:
+      tags: [Environments]
+      operationId: createEnvironment
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentCreateRequest'
+      responses:
+        '201':
+          description: Created environment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentResponse'
+
+  /api/environments/{envId}/sdk-keys:
+    post:
+      tags: [Environments]
+      operationId: createSdkKey
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SdkKeyCreateRequest'
+      responses:
+        '201':
+          description: Created key. The full key is returned ONLY here.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SdkKeyCreatedResponse'
+    get:
+      tags: [Environments]
+      operationId: listSdkKeys
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+      responses:
+        '200':
+          description: Keys (prefixes only)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SdkKeyResponse'
+
+  /api/sdk-keys/{keyId}:
+    delete:
+      tags: [Environments]
+      operationId: revokeSdkKey
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Revoked
+
+  /api/projects/{projectId}/flags:
+    post:
+      tags: [Flags]
+      operationId: createFlag
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagCreateRequest'
+      responses:
+        '201':
+          description: Created flag with default env configs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagDetailResponse'
+    get:
+      tags: [Flags]
+      operationId: listFlags
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: query
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Flags with per-environment summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagListResponse'
+
+  /api/projects/{projectId}/flags/{flagKey}:
+    get:
+      tags: [Flags]
+      operationId: getFlag
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+      responses:
+        '200':
+          description: Flag detail incl. all environment configs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagDetailResponse'
+    patch:
+      tags: [Flags]
+      operationId: updateFlag
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagUpdateRequest'
+      responses:
+        '200':
+          description: Updated flag
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagDetailResponse'
+    delete:
+      tags: [Flags]
+      operationId: archiveFlag
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+      responses:
+        '204':
+          description: Archived (soft delete)
+
+  /api/projects/{projectId}/flags/{flagKey}/environments/{envKey}:
+    put:
+      tags: [Flags]
+      operationId: updateFlagEnvConfig
+      summary: Full targeting-config write; versioned with optimistic concurrency.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/EnvKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlagEnvConfigUpdateRequest'
+      responses:
+        '200':
+          description: New config version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagEnvConfigResponse'
+        '202':
+          description: >
+            The environment requires approval. NOTHING WAS WRITTEN: the flag is
+            unchanged and the body is the PENDING change request that now stands in
+            for this write. Clients must branch on the status code, not the body -
+            200 means a new config version exists, 202 means one is waiting for
+            review. The Location header points at the change request.
+          headers:
+            Location:
+              description: The change request this write was parked as.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '409':
+          description: expectedVersion is stale
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/projects/{projectId}/flags/{flagKey}/environments/{envKey}/kill-switch:
+    post:
+      tags: [Flags]
+      operationId: setKillSwitch
+      summary: One-tap kill switch; never version-conflicts.
+      description: >
+        THE KILL SWITCH BYPASSES APPROVAL BY DEFAULT, even in an environment with
+        requireApproval on. It is an emergency stop, and a review queue in front of
+        "turn it off now" turns an incident into an outage. Set
+        requireApprovalForKill on the environment to opt this route into review as
+        well, in which case it can answer 202 like the other writes.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/EnvKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KillSwitchRequest'
+      responses:
+        '200':
+          description: New config version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagEnvConfigResponse'
+        '202':
+          description: >
+            The environment requires approval. NOTHING WAS WRITTEN: the flag is
+            unchanged and the body is the PENDING change request that now stands in
+            for this write. Clients must branch on the status code, not the body -
+            200 means a new config version exists, 202 means one is waiting for
+            review. The Location header points at the change request.
+          headers:
+            Location:
+              description: The change request this write was parked as.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+
+  /api/projects/{projectId}/flags/{flagKey}/environments/{envKey}/versions:
+    get:
+      tags: [Flags]
+      operationId: listFlagVersions
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/EnvKey'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Version history, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagVersionListResponse'
+
+  /api/projects/{projectId}/flags/{flagKey}/environments/{envKey}/versions/{versionNumber}:
+    get:
+      tags: [Flags]
+      operationId: getFlagVersion
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/EnvKey'
+        - name: versionNumber
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: One version snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagVersionResponse'
+
+  /api/projects/{projectId}/flags/{flagKey}/environments/{envKey}/rollback:
+    post:
+      tags: [Flags]
+      operationId: rollbackFlagEnvConfig
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/FlagKey'
+        - $ref: '#/components/parameters/EnvKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackRequest'
+      responses:
+        '200':
+          description: New config version copying the target snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlagEnvConfigResponse'
+        '202':
+          description: >
+            The environment requires approval. NOTHING WAS WRITTEN: the flag is
+            unchanged and the body is the PENDING change request that now stands in
+            for this write. Clients must branch on the status code, not the body -
+            200 means a new config version exists, 202 means one is waiting for
+            review. The Location header points at the change request.
+          headers:
+            Location:
+              description: The change request this write was parked as.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+
+  /api/projects/{projectId}/segments:
+    post:
+      tags: [Segments]
+      operationId: createSegment
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentUpsertRequest'
+      responses:
+        '201':
+          description: Created segment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentResponse'
+    get:
+      tags: [Segments]
+      operationId: listSegments
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Segments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SegmentResponse'
+
+  /api/projects/{projectId}/segments/{segmentKey}:
+    get:
+      tags: [Segments]
+      operationId: getSegment
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/SegmentKey'
+      responses:
+        '200':
+          description: Segment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentResponse'
+    put:
+      tags: [Segments]
+      operationId: updateSegment
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/SegmentKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentUpsertRequest'
+      responses:
+        '200':
+          description: Updated segment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SegmentResponse'
+    delete:
+      tags: [Segments]
+      operationId: deleteSegment
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - $ref: '#/components/parameters/SegmentKey'
+      responses:
+        '204':
+          description: Deleted
+
+  /api/projects/{projectId}/audit:
+    get:
+      tags: [Audit]
+      operationId: listProjectAudit
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: env
+          in: query
+          schema:
+            type: string
+        - name: flagKey
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Audit entries, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+
+  /api/orgs/{orgId}/audit:
+    get:
+      tags: [Audit]
+      operationId: listOrgAudit
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Audit entries, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditListResponse'
+
+  /api/eval:
+    post:
+      tags: [Evaluation]
+      operationId: evaluateAll
+      security:
+        - sdkKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkEvalRequest'
+      responses:
+        '200':
+          description: Evaluation results for every non-archived flag in the key's environment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkEvalResponse'
+
+  /api/eval/{flagKey}:
+    post:
+      tags: [Evaluation]
+      operationId: evaluateFlag
+      security:
+        - sdkKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/FlagKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SingleEvalRequest'
+      responses:
+        '200':
+          description: Evaluation result. Unknown flag echoes the supplied default with reason SDK_DEFAULT - never an error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalResult'
+
+  /api/eval/bootstrap:
+    get:
+      tags: [Evaluation]
+      operationId: getBootstrap
+      security:
+        - sdkKeyAuth: []
+      parameters:
+        - name: contextKey
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full environment flag payload; ETag is the environment stateVersion.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BootstrapResponse'
+        '304':
+          description: Not modified (If-None-Match matched current stateVersion)
+
+  /api/stream:
+    get:
+      tags: [Stream]
+      operationId: streamChanges
+      security:
+        - sdkKeyAuth: []
+      responses:
+        '200':
+          description: SSE stream. Events - put (full payload on connect), patch (single flag config), ping (15s heartbeat). Event id is the environment stateVersion; reconnect with Last-Event-ID for catch-up.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/events/eval:
+    post:
+      tags: [Events]
+      operationId: ingestEvalEvents
+      security:
+        - sdkKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvalEventBatch'
+      responses:
+        '202':
+          description: Accepted
+
+  /api/events/metrics:
+    post:
+      tags: [Events]
+      operationId: ingestMetricEvents
+      security:
+        - sdkKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetricEventBatch'
+      responses:
+        '202':
+          description: Accepted
+
+  # ---------------------------------------------------------------- OFREP
+  # The OpenFeature Remote Evaluation Protocol (OFREP 0.3.0), served over the same SDK key and the
+  # same evaluation engine as /api/eval. Implementing it verbatim is what makes the six
+  # OpenFeature-maintained providers work against Switchboard with no Switchboard-specific code.
+  #
+  # These three operations are bound by HAND (OfrepController, OfrepStreamController) rather than
+  # by the generated OfrepApi, exactly as /api/stream is: one OFREP operation answers with three
+  # different body schemas (success, evaluationFailure, flagNotFound), the bulk operation answers
+  # with either a body or a bodiless 304, and the stream is infinite - none of which a generated
+  # single-response-type signature can express. The contract below is still the source of truth.
+  #
+  # 429 is documented by OFREP but NOT implemented: Switchboard has no rate limiter, so it is
+  # omitted here rather than advertised and never sent.
+  /ofrep/v1/evaluate/flags/{key}:
+    post:
+      tags: [Ofrep]
+      operationId: ofrepEvaluateFlag
+      summary: OFREP single flag evaluation (dynamic context, server-side providers).
+      description: >
+        Evaluates one flag through the same FlagEvaluator as POST /api/eval/{flagKey}.
+        Unlike that endpoint an unknown flag is a 404 FLAG_NOT_FOUND, because an OFREP provider
+        owns its code default and expects to be told the flag is missing.
+      security:
+        - sdkKeyAuth: []
+        - ofrepApiKeyAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfrepEvaluationRequest'
+      responses:
+        '200':
+          description: Evaluated flag
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepEvaluationSuccess'
+        '400':
+          description: Malformed body (PARSE_ERROR), non-object context (INVALID_CONTEXT) or missing targetingKey (TARGETING_KEY_MISSING).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepEvaluationFailure'
+        '401':
+          description: No credentials. No body, per OFREP.
+        '403':
+          description: Credentials that are not an SDK key. No body, per OFREP.
+        '404':
+          description: No such flag in this SDK key's environment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepEvaluationFailure'
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepGeneralError'
+
+  /ofrep/v1/evaluate/flags:
+    post:
+      tags: [Ofrep]
+      operationId: ofrepEvaluateFlags
+      summary: OFREP bulk evaluation (static context, client-side providers).
+      description: >
+        Evaluates every non-archived flag of the SDK key's environment. The ETag is the
+        environment stateVersion quoted the same way GET /api/eval/bootstrap quotes it, so both
+        conditional endpoints agree. The response advertises the OFREP SSE stream at
+        /ofrep/v1/stream so a connected provider can stop polling.
+      security:
+        - sdkKeyAuth: []
+        - ofrepApiKeyAuth: []
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: ETag from a previous bulk evaluation; a match answers 304 with no body.
+          schema:
+            type: string
+        - name: flagConfigEtag
+          in: query
+          required: false
+          description: OFREP change-triggered re-fetch metadata. Accepted and ignored - the ETag header is authoritative here.
+          schema:
+            type: string
+        - name: flagConfigLastModified
+          in: query
+          required: false
+          description: OFREP change-triggered re-fetch metadata. Accepted and ignored - Switchboard versions environments, it does not timestamp them.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfrepEvaluationRequest'
+      responses:
+        '200':
+          description: Every flag of the environment, each entry a success or a failure.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepBulkEvaluationResponse'
+        '304':
+          description: Not modified (If-None-Match matched the current stateVersion). No body.
+        '400':
+          description: Malformed body or unusable context. Carries no key - OFREP's bulkEvaluationFailure has none.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepEvaluationFailure'
+        '401':
+          description: No credentials. No body, per OFREP.
+        '403':
+          description: Credentials that are not an SDK key. No body, per OFREP.
+        '500':
+          description: Unexpected server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfrepGeneralError'
+
+  /ofrep/v1/stream:
+    get:
+      tags: [Ofrep]
+      operationId: ofrepStreamChanges
+      summary: OFREP change-notification stream (SSE).
+      description: >
+        One unnamed (default "message") event per change to this environment, carrying
+        OfrepSseEventData with type refetchEvaluation and the new quoted ETag, plus an SSE comment
+        every 30s as a keepalive. Fed by the same Postgres LISTEN and EnvironmentStreamHub as
+        /api/stream, so an OFREP client and a native SDK client see a change at the same moment.
+      security:
+        - sdkKeyAuth: []
+        - ofrepApiKeyAuth: []
+      responses:
+        '200':
+          description: SSE stream of refetchEvaluation events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: No credentials. No body, per OFREP.
+        '403':
+          description: Credentials that are not an SDK key. No body, per OFREP.
+
+  /api/projects/{projectId}/ai/proposals:
+    post:
+      tags: [Ai]
+      operationId: draftProposal
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalDraftRequest'
+      responses:
+        '201':
+          description: Drafted proposal with typed diff and rationale
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProposalResponse'
+        '503':
+          description: AI unavailable (no API key configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      tags: [Ai]
+      operationId: listProposals
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [DRAFT, APPLIED, REJECTED, EXPIRED]
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Proposals, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProposalListResponse'
+
+  /api/ai/proposals/{proposalId}:
+    get:
+      tags: [Ai]
+      operationId: getProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200':
+          description: Proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProposalResponse'
+
+  /api/ai/proposals/{proposalId}/apply:
+    post:
+      tags: [Ai]
+      operationId: applyProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalActionRequest'
+      summary: Apply a DRAFT proposal, subject to the environment's approval policy.
+      description: >
+        The write an AI proposal makes is a flag write, so it answers to the same
+        per-environment approval policy a hand edit does. In an environment with
+        requireApproval on, applying a proposal WRITES NOTHING and opens a PENDING
+        change request per environment instead, stamped with this proposal's id; the
+        proposal stays DRAFT and becomes APPLIED when the last of those requests is
+        approved and applied. A declined or stale request leaves the proposal DRAFT,
+        so it can simply be applied again.
+
+        THE ONE EXCEPTION IS AUTOMATION. The rollout monitor's auto-rollback and
+        auto-optimize applies bypass this gate while the environment keeps
+        allowAutomationBypass on, which is the default - a healing rollback that
+        waits for a reviewer during an error spike is not healing. Those writes are
+        audited as usual and additionally recorded as APPROVAL_BYPASS. This endpoint
+        is a human path, so it never takes the bypass.
+      responses:
+        '200':
+          description: Applied proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProposalResponse'
+        '202':
+          description: >
+            The environment requires approval. NOTHING WAS WRITTEN: the flag is
+            unchanged, the proposal is still DRAFT, and the body is the PENDING
+            change request that now stands in for this apply. Clients must branch on
+            the status code, not the body. The Location header points at the change
+            request. When the proposal touched more than one environment, one request
+            was opened per environment and this is the first of them.
+          headers:
+            Location:
+              description: The change request this apply was parked as.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '409':
+          description: Proposal is not in DRAFT status, or already has an open change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/ai/proposals/{proposalId}/reject:
+    post:
+      tags: [Ai]
+      operationId: rejectProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposalActionRequest'
+      responses:
+        '200':
+          description: Rejected proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiProposalResponse'
+
+  /api/environments/{envId}/anomalies:
+    get:
+      tags: [Ai]
+      operationId: listAnomalies
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [OPEN, ACKED, AUTO_ROLLED_BACK]
+      responses:
+        '200':
+          description: Anomaly findings, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnomalyFindingResponse'
+
+  /api/anomalies/{anomalyId}/ack:
+    post:
+      tags: [Ai]
+      operationId: ackAnomaly
+      parameters:
+        - name: anomalyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Acknowledged finding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnomalyFindingResponse'
+
+  /api/environments/{envId}/flags/{flagKey}/rollout-stats:
+    get:
+      tags: [Ai]
+      operationId: getRolloutStats
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+        - $ref: '#/components/parameters/FlagKey'
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            default: 48
+      responses:
+        '200':
+          description: Per-variant eval counts and metric rates, time-bucketed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RolloutStatsResponse'
+
+  /api/users/me/permissions:
+    get:
+      tags: [Access]
+      operationId: getMyPermissions
+      summary: What the caller may do at one scope, for hiding controls they cannot use.
+      description: >
+        Effective permissions are the UNION of the roles the caller holds at the
+        requested scope and at every scope containing it. Pass envId for the
+        narrowest answer, projectId for the project, or orgId alone. Exactly one of
+        the three should be given; the narrowest one wins if more than one is.
+      parameters:
+        - name: orgId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: projectId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: envId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The caller's effective permissions at that scope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyPermissionsResponse'
+
+  /api/roles:
+    get:
+      tags: [Access]
+      operationId: listRoles
+      summary: Every assignable role and the permissions it grants.
+      responses:
+        '200':
+          description: Roles
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListResponse'
+
+  /api/orgs/{orgId}/role-assignments:
+    get:
+      tags: [Access]
+      operationId: listRoleAssignments
+      summary: Role assignments anywhere under this org. Requires MANAGE_MEMBERS.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: scopeType
+          in: query
+          schema:
+            $ref: '#/components/schemas/ScopeType'
+        - name: scopeId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Assignments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignmentListResponse'
+    post:
+      tags: [Access]
+      operationId: grantRole
+      summary: Grant a role at a scope. Requires MANAGE_MEMBERS on the org.
+      description: >
+        Upserts on (user, scope): granting again at the same scope replaces the
+        role held there. The scope must belong to this org.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoleAssignmentCreateRequest'
+      responses:
+        '201':
+          description: The assignment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleAssignmentResponse'
+
+  /api/orgs/{orgId}/role-assignments/{assignmentId}:
+    delete:
+      tags: [Access]
+      operationId: revokeRole
+      summary: Revoke one role assignment. Requires MANAGE_MEMBERS on the org.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Revoked
+
+  /api/environments/{envId}/approval-settings:
+    get:
+      tags: [ChangeRequests]
+      operationId: getApprovalSettings
+      summary: This environment's approval policy.
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+      responses:
+        '200':
+          description: Approval policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalSettingsResponse'
+    put:
+      tags: [ChangeRequests]
+      operationId: updateApprovalSettings
+      summary: Turn approval on or off for this environment. Requires MANAGE_ENVIRONMENTS.
+      description: >
+        Every field defaults to off, so an environment nobody has configured
+        behaves exactly as it did before change requests existed. Omitted fields
+        are left unchanged.
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalSettingsUpdateRequest'
+      responses:
+        '200':
+          description: The stored policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalSettingsResponse'
+
+  /api/projects/{projectId}/change-requests:
+    get:
+      tags: [ChangeRequests]
+      operationId: listChangeRequests
+      summary: Change requests in this project, newest first (keyset cursor).
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: envKey
+          in: query
+          schema:
+            type: string
+        - name: flagKey
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ChangeRequestStatus'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+      responses:
+        '200':
+          description: Change requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestListResponse'
+
+  /api/change-requests/{changeRequestId}:
+    get:
+      tags: [ChangeRequests]
+      operationId: getChangeRequest
+      parameters:
+        - $ref: '#/components/parameters/ChangeRequestId'
+      responses:
+        '200':
+          description: One change request with its reviews
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+
+  /api/change-requests/{changeRequestId}/approve:
+    post:
+      tags: [ChangeRequests]
+      operationId: approveChangeRequest
+      summary: Approve. Requires APPROVE_CHANGES in the request's environment.
+      description: >
+        The approval that meets minApprovals applies the change in the same call,
+        through the normal versioned write path. If the flag has moved past the
+        request's baseVersion the request goes STALE instead of overwriting the
+        newer work, and the author has to rebase. Self-approval is refused unless
+        the environment allows it.
+      parameters:
+        - $ref: '#/components/parameters/ChangeRequestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestDecisionRequest'
+      responses:
+        '200':
+          description: The change request after the review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '403':
+          description: No APPROVE_CHANGES here, or self-approval is not allowed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: The request is no longer PENDING
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/change-requests/{changeRequestId}/decline:
+    post:
+      tags: [ChangeRequests]
+      operationId: declineChangeRequest
+      summary: Decline. One decline settles it. Requires APPROVE_CHANGES.
+      parameters:
+        - $ref: '#/components/parameters/ChangeRequestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestDecisionRequest'
+      responses:
+        '200':
+          description: The declined change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+
+  /api/change-requests/{changeRequestId}/withdraw:
+    post:
+      tags: [ChangeRequests]
+      operationId: withdrawChangeRequest
+      summary: Withdraw your own pending request.
+      parameters:
+        - $ref: '#/components/parameters/ChangeRequestId'
+      responses:
+        '200':
+          description: The withdrawn change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '403':
+          description: Only the author may withdraw
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/change-requests/{changeRequestId}/apply:
+    post:
+      tags: [ChangeRequests]
+      operationId: applyChangeRequest
+      summary: Idempotent retry for an APPROVED request whose write did not land.
+      description: >
+        Approvals auto-apply when the threshold is met, so this exists only for the
+        case where that write failed. It refuses anything not already APPROVED, so
+        it is not a way around review.
+      parameters:
+        - $ref: '#/components/parameters/ChangeRequestId'
+      responses:
+        '200':
+          description: The applied (or now STALE) change request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChangeRequestResponse'
+        '409':
+          description: The request is not APPROVED
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/jobs/rollout-scan:
+    post:
+      tags: [Jobs]
+      operationId: runRolloutScan
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+
+  /api/jobs/stale-flag-scan:
+    post:
+      tags: [Jobs]
+      operationId: runStaleFlagScan
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Scan result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+
+  /api/jobs/partition-roll:
+    post:
+      tags: [Jobs]
+      operationId: runPartitionRoll
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Partition maintenance result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Firebase ID token, or dev token (Bearer dev:email) in local profile.
+    sdkKeyAuth:
+      type: http
+      scheme: bearer
+      description: Environment SDK key (sb_srv_...).
+    ofrepApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        OFREP's apiKey scheme, carrying the same environment SDK key (sb_srv_...) as sdkKeyAuth.
+        Both headers resolve to the same SdkKeyPrincipal; Authorization wins when both are sent.
+
+  parameters:
+    OrgId:
+      name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EnvId:
+      name: envId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FlagKey:
+      name: flagKey
+      in: path
+      required: true
+      schema:
+        type: string
+    EnvKey:
+      name: envKey
+      in: path
+      required: true
+      schema:
+        type: string
+    SegmentKey:
+      name: segmentKey
+      in: path
+      required: true
+      schema:
+        type: string
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ChangeRequestId:
+      name: changeRequestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    JobToken:
+      name: X-Job-Token
+      in: header
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    ApiError:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum: [NOT_FOUND, FORBIDDEN, CONFLICT, VALIDATION_FAILED, UNAUTHORIZED, AI_UNAVAILABLE, UPGRADE_REQUIRED]
+        message:
+          type: string
+
+    UserResponse:
+      type: object
+      required: [id, email, onboardingCompleted, memberships]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        displayName:
+          type: string
+        onboardingCompleted:
+          type: boolean
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserMembership'
+
+    UserMembership:
+      type: object
+      required: [orgId, orgName, orgSlug, role]
+      properties:
+        orgId:
+          type: string
+          format: uuid
+        orgName:
+          type: string
+        orgSlug:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+
+    OrgRole:
+      type: string
+      enum: [OWNER, MEMBER]
+
+    OrgCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    OrgResponse:
+      type: object
+      required: [id, name, slug, role, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+        createdAt:
+          type: string
+          format: date-time
+
+    OrgMemberResponse:
+      type: object
+      required: [userId, email, role, joinedAt]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        displayName:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+        joinedAt:
+          type: string
+          format: date-time
+
+    OrgMemberAddRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+
+    OrgSettingsResponse:
+      type: object
+      required: [aiEnabled, autoRollbackEnabled, autoOptimizeEnabled, staleFlagWeeks]
+      properties:
+        aiEnabled:
+          type: boolean
+        autoRollbackEnabled:
+          type: boolean
+        autoOptimizeEnabled:
+          type: boolean
+        staleFlagWeeks:
+          type: integer
+        notificationWebhookSet:
+          type: boolean
+
+    OrgSettingsUpdateRequest:
+      type: object
+      properties:
+        aiEnabled:
+          type: boolean
+        autoRollbackEnabled:
+          type: boolean
+        autoOptimizeEnabled:
+          type: boolean
+        staleFlagWeeks:
+          type: integer
+          minimum: 1
+          maximum: 52
+        notificationWebhookUrl:
+          type: string
+
+    ProjectCreateRequest:
+      type: object
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    ProjectUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+    ProjectResponse:
+      type: object
+      required: [id, orgId, key, name, environments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        environments:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentResponse'
+
+    EnvironmentCreateRequest:
+      type: object
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 64
+        name:
+          type: string
+
+    EnvironmentResponse:
+      type: object
+      required: [id, projectId, key, name, stateVersion]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        stateVersion:
+          type: integer
+          format: int64
+        approvals:
+          $ref: '#/components/schemas/ApprovalSettingsResponse'
+
+    SdkKeyCreateRequest:
+      type: object
+      properties:
+        label:
+          type: string
+          maxLength: 100
+
+    SdkKeyCreatedResponse:
+      type: object
+      required: [id, environmentId, key, keyPrefix, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Full SDK key. Returned only at creation.
+        keyPrefix:
+          type: string
+        label:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SdkKeyResponse:
+      type: object
+      required: [id, environmentId, keyPrefix, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        keyPrefix:
+          type: string
+        label:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+
+    FlagKind:
+      type: string
+      enum: [BOOLEAN, STRING]
+
+    Variation:
+      type: object
+      required: [id, value]
+      properties:
+        id:
+          type: string
+          format: uuid
+        value:
+          type: string
+        name:
+          type: string
+
+    VariationCreate:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+        name:
+          type: string
+
+    FlagCreateRequest:
+      type: object
+      required: [key, name, kind]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 150
+        description:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        variations:
+          type: array
+          description: Required for STRING flags; ignored for BOOLEAN (always true/false).
+          items:
+            $ref: '#/components/schemas/VariationCreate'
+        tags:
+          type: array
+          items:
+            type: string
+
+    FlagUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        addVariations:
+          type: array
+          description: STRING flags only; variations are add-only.
+          items:
+            $ref: '#/components/schemas/VariationCreate'
+
+    ClauseOp:
+      type: string
+      enum: [EQUALS, IN, CONTAINS, STARTS_WITH, SEGMENT_MATCH, NOT_SEGMENT_MATCH]
+
+    Clause:
+      type: object
+      required: [attribute, op, values]
+      properties:
+        attribute:
+          type: string
+          description: Context attribute name; 'key' targets the context key. For SEGMENT_MATCH ops, values carry segment keys.
+        op:
+          $ref: '#/components/schemas/ClauseOp'
+        values:
+          type: array
+          items:
+            type: string
+
+    WeightedVariation:
+      type: object
+      required: [variationId, weight]
+      properties:
+        variationId:
+          type: string
+          format: uuid
+        weight:
+          type: integer
+          minimum: 0
+          maximum: 100
+
+    RolloutOrVariation:
+      type: object
+      description: Exactly one of variationId or rollout must be set.
+      properties:
+        variationId:
+          type: string
+          format: uuid
+        rollout:
+          type: array
+          description: Weights must sum to exactly 100.
+          items:
+            $ref: '#/components/schemas/WeightedVariation'
+
+    IndividualTarget:
+      type: object
+      required: [contextKey, variationId]
+      properties:
+        contextKey:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+
+    Rule:
+      type: object
+      required: [id, clauses, serve]
+      properties:
+        id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        clauses:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Clause'
+        serve:
+          $ref: '#/components/schemas/RolloutOrVariation'
+
+    FlagTargetingConfig:
+      type: object
+      required: [offVariationId, defaultVariationId, fallthrough]
+      properties:
+        individualTargets:
+          type: array
+          items:
+            $ref: '#/components/schemas/IndividualTarget'
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+        fallthrough:
+          $ref: '#/components/schemas/RolloutOrVariation'
+        offVariationId:
+          type: string
+          format: uuid
+        defaultVariationId:
+          type: string
+          format: uuid
+
+    FlagEnvConfigUpdateRequest:
+      type: object
+      required: [enabled, config]
+      properties:
+        enabled:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+        expectedVersion:
+          type: integer
+          description: Optimistic concurrency; 409 CONFLICT when stale. Omit to force-write.
+        comment:
+          type: string
+
+    KillSwitchRequest:
+      type: object
+      required: [active]
+      properties:
+        active:
+          type: boolean
+        reason:
+          type: string
+
+    RollbackRequest:
+      type: object
+      required: [toVersion]
+      properties:
+        toVersion:
+          type: integer
+        reason:
+          type: string
+
+    FlagEnvConfigResponse:
+      type: object
+      required: [flagId, environmentId, envKey, enabled, killSwitchActive, config, version, updatedAt, updatedBy]
+      properties:
+        flagId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        envKey:
+          type: string
+        enabled:
+          type: boolean
+        killSwitchActive:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+        version:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    FlagDetailResponse:
+      type: object
+      required: [id, projectId, key, name, kind, variations, tags, envConfigs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        variations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variation'
+        tags:
+          type: array
+          items:
+            type: string
+        envConfigs:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlagEnvConfigResponse'
+        createdAt:
+          type: string
+          format: date-time
+
+    FlagEnvSummary:
+      type: object
+      required: [envKey, enabled, killSwitchActive, version]
+      properties:
+        envKey:
+          type: string
+        enabled:
+          type: boolean
+        killSwitchActive:
+          type: boolean
+        rolloutPercentage:
+          type: integer
+          description: Percentage of traffic on a non-default variation when the fallthrough is a rollout; absent otherwise.
+        version:
+          type: integer
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+
+    FlagSummaryResponse:
+      type: object
+      required: [id, key, name, kind, tags, environments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        tags:
+          type: array
+          items:
+            type: string
+        environments:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlagEnvSummary'
+
+    FlagListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlagSummaryResponse'
+        nextCursor:
+          type: string
+
+    FlagVersionResponse:
+      type: object
+      required: [versionNumber, enabled, killSwitchActive, config, createdBy, createdAt]
+      properties:
+        versionNumber:
+          type: integer
+        enabled:
+          type: boolean
+        killSwitchActive:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+        versionNote:
+          type: string
+        createdBy:
+          type: string
+        createdFromProposalId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    FlagVersionListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FlagVersionResponse'
+        nextCursor:
+          type: string
+
+    SegmentUpsertRequest:
+      type: object
+      required: [key, name]
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+          maxLength: 128
+        name:
+          type: string
+        includedKeys:
+          type: array
+          items:
+            type: string
+        excludedKeys:
+          type: array
+          items:
+            type: string
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/SegmentRule'
+
+    SegmentRule:
+      type: object
+      required: [clauses]
+      properties:
+        clauses:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/Clause'
+
+    SegmentResponse:
+      type: object
+      required: [id, projectId, key, name, includedKeys, excludedKeys, rules]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        includedKeys:
+          type: array
+          items:
+            type: string
+        excludedKeys:
+          type: array
+          items:
+            type: string
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/SegmentRule'
+        updatedAt:
+          type: string
+          format: date-time
+
+    AuditAction:
+      type: string
+      enum: [CREATE, UPDATE, KILL_SWITCH_ON, KILL_SWITCH_OFF, ROLLBACK, AI_APPLY, ARCHIVE, SEGMENT_CREATE, SEGMENT_UPDATE, SEGMENT_DELETE, SDK_KEY_CREATE, SDK_KEY_REVOKE, MEMBER_ADD, MEMBER_REMOVE, SETTINGS_UPDATE, CHANGE_REQUEST_OPEN, CHANGE_REQUEST_APPLY, CHANGE_REQUEST_DECLINE, ROLE_GRANT, ROLE_REVOKE]
+
+    AuditEntryResponse:
+      type: object
+      required: [id, orgId, action, actor, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        envKey:
+          type: string
+        flagKey:
+          type: string
+        action:
+          $ref: '#/components/schemas/AuditAction'
+        actor:
+          type: string
+        reason:
+          type: string
+        versionFrom:
+          type: integer
+        versionTo:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEntryResponse'
+        nextCursor:
+          type: string
+
+    EvalContext:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+          description: Stable context key (e.g. user id). Bucketing input.
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+
+    BulkEvalRequest:
+      type: object
+      required: [context]
+      properties:
+        context:
+          $ref: '#/components/schemas/EvalContext'
+
+    SingleEvalRequest:
+      type: object
+      required: [context]
+      properties:
+        context:
+          $ref: '#/components/schemas/EvalContext'
+        default:
+          type: string
+          description: Value echoed back (reason SDK_DEFAULT) when the flag is unknown.
+
+    EvalReason:
+      type: string
+      enum: [KILL_SWITCH, FLAG_OFF, TARGET_MATCH, RULE_MATCH, ROLLOUT, DEFAULT, SDK_DEFAULT]
+
+    EvalResult:
+      type: object
+      required: [flagKey, value, reason]
+      properties:
+        flagKey:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+        value:
+          type: string
+          description: Variation value; boolean flags serve "true"/"false".
+        reason:
+          $ref: '#/components/schemas/EvalReason'
+        ruleId:
+          type: string
+          format: uuid
+        flagVersion:
+          type: integer
+
+    BulkEvalResponse:
+      type: object
+      required: [stateVersion, results]
+      properties:
+        stateVersion:
+          type: integer
+          format: int64
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalResult'
+
+    BootstrapFlag:
+      type: object
+      required: [key, kind, variations, enabled, killSwitchActive, config, version]
+      properties:
+        key:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        variations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variation'
+        enabled:
+          type: boolean
+        killSwitchActive:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+        version:
+          type: integer
+
+    BootstrapSegment:
+      type: object
+      required: [key, includedKeys, excludedKeys, rules]
+      properties:
+        key:
+          type: string
+        includedKeys:
+          type: array
+          items:
+            type: string
+        excludedKeys:
+          type: array
+          items:
+            type: string
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/SegmentRule'
+
+    BootstrapResponse:
+      type: object
+      required: [envKey, stateVersion, flags, segments]
+      properties:
+        envKey:
+          type: string
+        stateVersion:
+          type: integer
+          format: int64
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/BootstrapFlag'
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/BootstrapSegment'
+
+    EvalEventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/EvalEventItem'
+
+    EvalEventItem:
+      type: object
+      required: [flagKey, contextKey, occurredAt]
+      properties:
+        flagKey:
+          type: string
+        contextKey:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+        reason:
+          $ref: '#/components/schemas/EvalReason'
+        occurredAt:
+          type: string
+          format: date-time
+
+    MetricEventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/MetricEventItem'
+
+    MetricEventItem:
+      type: object
+      required: [contextKey, metricKey, occurredAt]
+      properties:
+        contextKey:
+          type: string
+        metricKey:
+          type: string
+          description: error, conversion, or a custom metric name.
+        value:
+          type: number
+          default: 1
+        occurredAt:
+          type: string
+          format: date-time
+
+    ProposalDraftRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        environmentKey:
+          type: string
+        flagKey:
+          type: string
+          description: Set when the prompt edits an existing flag.
+
+    ProposalActionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    ProposalKind:
+      type: string
+      enum: [FLAG_CREATE, FLAG_UPDATE, ROLLBACK, RETIREMENT]
+
+    ProposalStatus:
+      type: string
+      enum: [DRAFT, APPLIED, REJECTED, EXPIRED]
+
+    EnvChange:
+      type: object
+      required: [envKey]
+      properties:
+        envKey:
+          type: string
+        enabled:
+          type: boolean
+        killSwitchActive:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+
+    FlagChangeDiff:
+      type: object
+      required: [kind, flagKey]
+      properties:
+        kind:
+          $ref: '#/components/schemas/ProposalKind'
+        flagKey:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        flagKind:
+          $ref: '#/components/schemas/FlagKind'
+        variations:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariationCreate'
+        tags:
+          type: array
+          items:
+            type: string
+        envChanges:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvChange'
+        rollbackToVersion:
+          type: integer
+        retirementChecklist:
+          type: array
+          items:
+            type: string
+
+    AiProposalResponse:
+      type: object
+      required: [id, orgId, projectId, kind, diff, status, createdBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/ProposalKind'
+        sourcePrompt:
+          type: string
+        diff:
+          $ref: '#/components/schemas/FlagChangeDiff'
+        rationale:
+          type: string
+        status:
+          $ref: '#/components/schemas/ProposalStatus'
+        createdBy:
+          type: string
+        appliedBy:
+          type: string
+        appliedVersion:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    AiProposalListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiProposalResponse'
+        nextCursor:
+          type: string
+
+    AnomalyStatus:
+      type: string
+      enum: [OPEN, ACKED, AUTO_ROLLED_BACK]
+
+    AnomalyFindingResponse:
+      type: object
+      required: [id, environmentId, flagKey, metricKey, baselineRate, variantRate, zScore, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        flagKey:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+        metricKey:
+          type: string
+        baselineRate:
+          type: number
+        variantRate:
+          type: number
+        zScore:
+          type: number
+        summary:
+          type: string
+        status:
+          $ref: '#/components/schemas/AnomalyStatus'
+        suggestedProposalId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    VariantStats:
+      type: object
+      required: [variationId, evalCount, errorRate, conversionRate]
+      properties:
+        variationId:
+          type: string
+          format: uuid
+        variationName:
+          type: string
+        evalCount:
+          type: integer
+          format: int64
+        errorRate:
+          type: number
+        conversionRate:
+          type: number
+
+    RolloutStatsBucket:
+      type: object
+      required: [bucketStart, variants]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+        variants:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariantStats'
+
+    RolloutStatsResponse:
+      type: object
+      required: [flagKey, environmentId, totals, buckets]
+      properties:
+        flagKey:
+          type: string
+        environmentId:
+          type: string
+          format: uuid
+        totals:
+          type: array
+          items:
+            $ref: '#/components/schemas/VariantStats'
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/RolloutStatsBucket'
+
+    JobRunResponse:
+      type: object
+      required: [job, itemsScanned, findingsCreated]
+      properties:
+        job:
+          type: string
+        itemsScanned:
+          type: integer
+        findingsCreated:
+          type: integer
+        detail:
+          type: string
+
+    # ---------------------------------------------------------------- OFREP
+    # OFREP 0.3.0 wire shapes. Every one of these is bound by a hand-written record in
+    # com.switchboard.interfaces.rest.ofrep (see schemaMappings in pom.xml), because the generator
+    # cannot express "value is boolean|string|number|object" or the success/failure union below
+    # without losing the wire shape - and for OFREP the wire shape is the entire deliverable.
+    OfrepContext:
+      type: object
+      description: >
+        OpenFeature evaluation context. targetingKey is the Switchboard context key (the bucketing
+        input). Every other property becomes a Switchboard attribute; attributes are strings, so
+        scalars are coerced with String.valueOf - booleans become "true"/"false" and numbers their
+        JSON text. Nested objects and arrays are SKIPPED rather than stringified, since no
+        targeting clause could use the result.
+      required: [targetingKey]
+      properties:
+        targetingKey:
+          type: string
+      additionalProperties: true
+
+    OfrepEvaluationRequest:
+      type: object
+      required: [context]
+      properties:
+        context:
+          $ref: '#/components/schemas/OfrepContext'
+
+    OfrepReason:
+      type: string
+      description: >
+        OpenFeature resolution reason. Mapped from the Switchboard reason, which is preserved
+        verbatim in metadata["switchboard.reason"]:
+        KILL_SWITCH and FLAG_OFF -> DISABLED; TARGET_MATCH and RULE_MATCH -> TARGETING_MATCH;
+        ROLLOUT -> SPLIT; DEFAULT -> STATIC; a resolved variation that no longer exists -> UNKNOWN.
+      enum: [STATIC, TARGETING_MATCH, SPLIT, DISABLED, UNKNOWN]
+
+    OfrepErrorCode:
+      type: string
+      description: OpenFeature error codes Switchboard can emit.
+      enum: [PARSE_ERROR, TARGETING_KEY_MISSING, INVALID_CONTEXT, FLAG_NOT_FOUND, GENERAL]
+
+    OfrepMetadata:
+      type: object
+      description: >
+        Free-form flag metadata. OFREP restricts values to scalars. Switchboard fills it with what
+        OFREP has no field for - switchboard.reason (the native reason), switchboard.flagVersion,
+        switchboard.flagKind, switchboard.variationId and, on a rule match, switchboard.ruleId.
+      additionalProperties:
+        oneOf:
+          - type: boolean
+          - type: string
+          - type: number
+
+    OfrepEvaluationSuccess:
+      type: object
+      required: [key, value, reason]
+      properties:
+        key:
+          type: string
+        value:
+          description: >
+            BOOLEAN flags emit a real JSON boolean, never the string "true". STRING flags emit the
+            stored string verbatim - values are never sniffed for numbers or JSON, because
+            OpenFeature type-checks client side and a wrong guess is worse than a string.
+          oneOf:
+            - type: boolean
+            - type: string
+            - type: number
+            - type: object
+        reason:
+          $ref: '#/components/schemas/OfrepReason'
+        variant:
+          type: string
+          description: The variation's name, falling back to its value when the variation is unnamed.
+        metadata:
+          $ref: '#/components/schemas/OfrepMetadata'
+
+    OfrepEvaluationFailure:
+      type: object
+      description: >
+        OFREP evaluationFailure and flagNotFound. Also the bulk endpoint's 400 body
+        (bulkEvaluationFailure), which has no key - one shape, with nulls omitted.
+      required: [errorCode]
+      properties:
+        key:
+          type: string
+        errorCode:
+          $ref: '#/components/schemas/OfrepErrorCode'
+        errorDetails:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/OfrepMetadata'
+
+    OfrepFlagEvaluation:
+      description: One entry of the bulk flags array - a success or a failure.
+      oneOf:
+        - $ref: '#/components/schemas/OfrepEvaluationSuccess'
+        - $ref: '#/components/schemas/OfrepEvaluationFailure'
+
+    OfrepEventStreamEndpoint:
+      type: object
+      required: [requestUri]
+      properties:
+        origin:
+          type: string
+          description: Omitted by Switchboard, so the provider joins requestUri to its configured OFREP base URL.
+        requestUri:
+          type: string
+          example: /ofrep/v1/stream
+
+    OfrepEventStream:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          example: sse
+        endpoint:
+          $ref: '#/components/schemas/OfrepEventStreamEndpoint'
+        inactivityDelaySec:
+          type: integer
+          example: 120
+
+    OfrepBulkEvaluationResponse:
+      type: object
+      required: [flags]
+      properties:
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/OfrepFlagEvaluation'
+        metadata:
+          $ref: '#/components/schemas/OfrepMetadata'
+        eventStreams:
+          type: array
+          description: Advertised only because /ofrep/v1/stream really serves it - a connected provider stops polling.
+          items:
+            $ref: '#/components/schemas/OfrepEventStream'
+
+    OfrepSseEventData:
+      type: object
+      description: The JSON payload inside an SSE data line on /ofrep/v1/stream.
+      required: [type]
+      properties:
+        type:
+          type: string
+          example: refetchEvaluation
+        etag:
+          type: string
+          description: The new quoted ETag, byte-identical to what the bulk endpoint would return.
+          example: '"42"'
+
+    OfrepGeneralError:
+      type: object
+      properties:
+        errorDetails:
+          type: string
+
+    Permission:
+      type: string
+      description: A capability the backend checks by name. Roles bundle these.
+      enum: [FLAG_READ, FLAG_WRITE, FLAG_KILL, FLAG_ROLLBACK, SEGMENT_WRITE, APPROVE_CHANGES, MANAGE_MEMBERS, MANAGE_SDK_KEYS, MANAGE_SETTINGS, MANAGE_PROJECTS, MANAGE_ENVIRONMENTS, VIEW_AUDIT]
+
+    ScopeType:
+      type: string
+      description: Where a role is granted. Permissions union across containing scopes.
+      enum: [ORG, PROJECT, ENVIRONMENT]
+
+    RoleResponse:
+      type: object
+      required: [key, name, builtIn, permissions]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        builtIn:
+          type: boolean
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+
+    RoleListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleResponse'
+
+    RoleAssignmentResponse:
+      type: object
+      required: [id, userId, userEmail, scopeType, scopeId, roleKey, createdAt, createdBy]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userEmail:
+          type: string
+        scopeType:
+          $ref: '#/components/schemas/ScopeType'
+        scopeId:
+          type: string
+          format: uuid
+        roleKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+
+    RoleAssignmentListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleAssignmentResponse'
+
+    RoleAssignmentCreateRequest:
+      type: object
+      required: [scopeType, scopeId, roleKey]
+      description: Identify the user by id or by email; one of the two is required.
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        scopeType:
+          $ref: '#/components/schemas/ScopeType'
+        scopeId:
+          type: string
+          format: uuid
+        roleKey:
+          type: string
+
+    MyPermissionsResponse:
+      type: object
+      required: [scopeType, scopeId, permissions]
+      properties:
+        scopeType:
+          $ref: '#/components/schemas/ScopeType'
+        scopeId:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Permission'
+
+    ApprovalSettingsResponse:
+      type: object
+      required: [requireApproval, minApprovals, allowSelfApproval, requireApprovalForKill, allowAutomationBypass]
+      properties:
+        requireApproval:
+          type: boolean
+          description: Targeting writes and rollbacks open a change request instead of writing.
+        minApprovals:
+          type: integer
+          description: How many reviewers other than the author (unless allowSelfApproval) must approve.
+        allowSelfApproval:
+          type: boolean
+          description: When false the author's own approval is refused outright.
+        requireApprovalForKill:
+          type: boolean
+          description: >
+            Opt the kill switch into review as well. Off by default: the emergency
+            stop bypasses approval so an incident cannot be blocked on a reviewer.
+        allowAutomationBypass:
+          type: boolean
+          description: >
+            ON BY DEFAULT, AND THIS IS THE ONE SETTING THAT LEAVES AN UNREVIEWED
+            WRITE PATH OPEN. It only means anything when requireApproval is on, and
+            only automation can use it: the rollout monitor's auto-rollback and
+            auto-optimize keep writing immediately instead of opening a change
+            request. A HUMAN applying an AI proposal is never covered - they are
+            gated exactly like a hand edit. The default mirrors the kill switch:
+            an automated rollback fires during an error spike and puts traffic back
+            on the baseline variation that was already live, so making it wait for a
+            reviewer removes the reason to automate it. Set it to false and automated
+            healing parks in the review queue like everything else. Either way the
+            write is audited, and a bypassed write additionally records an
+            APPROVAL_BYPASS entry naming the automation as the actor.
+
+    ApprovalSettingsUpdateRequest:
+      type: object
+      description: Omitted fields are left unchanged.
+      properties:
+        requireApproval:
+          type: boolean
+        minApprovals:
+          type: integer
+          minimum: 1
+          maximum: 10
+        allowSelfApproval:
+          type: boolean
+        requireApprovalForKill:
+          type: boolean
+        allowAutomationBypass:
+          type: boolean
+          description: >
+            See ApprovalSettingsResponse.allowAutomationBypass. Defaults to true on
+            every environment; turning it off is what makes automated rollout healing
+            wait for review in a gated environment.
+
+    ChangeRequestKind:
+      type: string
+      enum: [TARGETING_UPDATE, KILL_SWITCH, ROLLBACK]
+
+    ChangeRequestStatus:
+      type: string
+      description: >
+        PENDING is the only reviewable state. STALE means the flag moved past the
+        request's baseVersion before it could be applied, so it was refused rather
+        than allowed to clobber the newer version.
+      enum: [PENDING, APPROVED, DECLINED, APPLIED, WITHDRAWN, STALE]
+
+    ReviewDecision:
+      type: string
+      enum: [APPROVE, DECLINE]
+
+    ChangeRequestPayload:
+      type: object
+      description: >
+        The proposed write, in the shape the flag write endpoints take. Exactly the
+        fields of one kind are populated - enabled+config for TARGETING_UPDATE,
+        active for KILL_SWITCH, toVersion for ROLLBACK.
+      properties:
+        enabled:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/FlagTargetingConfig'
+        active:
+          type: boolean
+        toVersion:
+          type: integer
+
+    ChangeRequestReviewResponse:
+      type: object
+      required: [id, reviewerUserId, reviewer, decision, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        reviewerUserId:
+          type: string
+          format: uuid
+        reviewer:
+          type: string
+        decision:
+          $ref: '#/components/schemas/ReviewDecision'
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ChangeRequestResponse:
+      type: object
+      required: [id, orgId, projectId, environmentId, envKey, flagId, flagKey, kind, payload, baseVersion, minApprovals, allowSelfApproval, status, requestedBy, requestedByUserId, createdAt, reviews, approvalsMet]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        envKey:
+          type: string
+        flagId:
+          type: string
+          format: uuid
+        flagKey:
+          type: string
+        kind:
+          $ref: '#/components/schemas/ChangeRequestKind'
+        payload:
+          $ref: '#/components/schemas/ChangeRequestPayload'
+        baseVersion:
+          type: integer
+          description: The head version the author edited against.
+        minApprovals:
+          type: integer
+          description: Snapshotted from the environment when the request was opened.
+        allowSelfApproval:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/ChangeRequestStatus'
+        requestedByUserId:
+          type: string
+          format: uuid
+        requestedBy:
+          type: string
+        comment:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        decidedAt:
+          type: string
+          format: date-time
+        appliedVersion:
+          type: integer
+          description: The config version this request produced once applied.
+        aiProposalId:
+          type: string
+          format: uuid
+          description: >
+            Set when this request exists because an AI proposal was applied into an
+            environment that requires approval. The proposal stays DRAFT until the
+            request applies, and becomes APPLIED when the last of its requests lands.
+        approvalsMet:
+          type: integer
+          description: Approvals that count toward the threshold right now.
+        reviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestReviewResponse'
+
+    ChangeRequestListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChangeRequestResponse'
+        nextCursor:
+          type: string
+
+    ChangeRequestDecisionRequest:
+      type: object
+      properties:
+        comment:
+          type: string
