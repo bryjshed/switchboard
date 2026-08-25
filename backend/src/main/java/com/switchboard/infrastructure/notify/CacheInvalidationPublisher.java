@@ -30,6 +30,9 @@ public class CacheInvalidationPublisher {
 
     public static final String CHANNEL = "cache_invalidate";
 
+    /** Key meaning "every entry in this cache". Not a valid key for anything else. */
+    public static final String WILDCARD = "*";
+
     private static final Logger log = LoggerFactory.getLogger(CacheInvalidationPublisher.class);
 
     private final DatabaseClient db;
@@ -49,6 +52,22 @@ public class CacheInvalidationPublisher {
     public void evict(CacheName cache, String key) {
         caches.cache(cache).evict(key);
         publish(cache.name() + ":" + key);
+    }
+
+    /**
+     * Drops an entire cache, everywhere.
+     *
+     * <p>Blunt on purpose, for the case where a single write invalidates an unknowable set of keys.
+     * A role granted at org scope changes that user's answer at every project and environment
+     * beneath it, because permissions are a union across scopes - so there is no key to evict, only
+     * a family. Clearing is correct; enumerating would be guesswork.
+     *
+     * <p>Affordable because the writes that trigger it are human-paced and rare, and the caches it
+     * applies to have short TTLs anyway: the cost is a brief re-resolve burst, not a stampede.
+     */
+    public void evictAll(CacheName cache) {
+        caches.cache(cache).clear();
+        publish(cache.name() + ":" + WILDCARD);
     }
 
     private void publish(String payload) {

@@ -12,7 +12,7 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 98 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 101 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
@@ -54,6 +54,12 @@ the omission invisible. `make backend` sets it. Reproduced deliberately; documen
 process was depending on. Find the specific PID.
 
 **macOS has no `timeout` command.** Do not use it in scripts.
+
+**Changing a `public static final String` needs `./mvnw clean`.** javac inlines compile-time
+String constants into every class that reads one, and the incremental build will not recompile
+those classes just because the constant changed — so tests keep asserting the *old* literal and
+fail with a message quoting a value that no longer exists in the source. Cost an unnecessary
+debugging detour once; a clean build is the whole fix.
 
 **Actuator lives on its own port** (`MANAGEMENT_PORT`, default 28081), and that includes
 `/actuator/health` — it 404s on 28080. Health checks and probes must target the management

@@ -1,5 +1,8 @@
 package com.switchboard.application.user;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.domain.identity.Identities;
 import com.switchboard.domain.identity.VerifiedIdentity;
 import com.switchboard.domain.org.MembershipView;
@@ -17,11 +20,13 @@ import reactor.core.publisher.Mono;
 public class UserService {
 
     private final UserRepository users;
+    private final SwitchboardCache<String, User> identities;
     private final DatabaseClient db;
 
-    public UserService(UserRepository users, DatabaseClient db) {
+    public UserService(UserRepository users, DatabaseClient db, CacheRegistry caches) {
         this.users = users;
         this.db = db;
+        this.identities = caches.cache(CacheName.USER_IDENTITY);
     }
 
     /**
@@ -58,7 +63,12 @@ public class UserService {
      * then share an email, which is why {@code users.email} is indexed but not unique.
      */
     public Mono<User> resolveIdentity(VerifiedIdentity identity) {
-        return users.findByIssuerAndSubject(identity.issuer(), identity.subject())
+        return identities.get(
+            identity.issuer() + "\u0000" + identity.subject(),
+            key -> users.findByIssuerAndSubject(identity.issuer(), identity.subject()))
+            // Provisioning is deliberately OUTSIDE the cache: it writes, and a write must not sit
+            // behind a read-through. The cache only ever holds an identity that already resolved,
+            // so the very next request after a provision is a miss that finds the new row.
             .switchIfEmpty(Mono.defer(() -> linkOrProvision(identity)));
     }
 

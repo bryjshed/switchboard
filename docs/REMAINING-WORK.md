@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (336 unit + 98 integration), web dashboard (329),
+**Status of the product today.** Backend (336 unit + 101 integration), web dashboard (329),
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
@@ -133,11 +133,12 @@ One environment snapshot cache does the heavy lifting and nothing else is cached
 fine at demo scale and wrong at any real one.
 
 ### What exists
-- **`EnvSnapshotCache`** — a Caffeine `AsyncCache`, 10,000 entries, 5-minute
-  expire-after-write, invalidated across instances by the Postgres `NOTIFY` listener. This
-  covers the hot path: evaluation, bootstrap and the SSE payload all read through it. The
-  async loader gives single-flight per key, so an eviction on a busy environment does not
-  stampede the database.
+- **`EnvSnapshotCache`** — now on the shared `CacheRegistry` seam (it was migrated first, on
+  purpose: it already worked, so the seam was proven against something known-good before anything
+  else depended on it). 10,000 entries, 5-minute expire-after-write, invalidated across instances by
+  the Postgres `NOTIFY` listener. Covers the hot path: evaluation, bootstrap and the SSE payload all
+  read through it, with single-flight per key so an eviction on a busy environment does not stampede
+  the database.
 - **HTTP validation caching** — `ETag` / `If-None-Match` returning 304 on the bootstrap and
   OFREP bulk endpoints.
 - **Client-side** — the TypeScript SDK holds config in memory and evaluates locally, so a
@@ -273,8 +274,13 @@ nothing is set up to serve it from an edge. Related to the multi-region non-goal
    instances, over a second `NOTIFY` channel.
 4. ~~**Negative caching**, which closes the denial-of-service vector.~~ **Done** for SDK keys, on a
    shorter TTL than positive entries.
-5. **Permissions**, then **identity**, then **rollout stats** — the caches are declared and their
-   meters are bound; the read-through call sites are not wired yet.
+5. ~~**Permissions**, then **identity**, then **rollout stats**.~~ **Done.** Measured live: 15
+   repeated flag-list requests add **0** permission resolutions. Permissions carry the shortest TTL
+   of any cache (30s) because staleness there means someone keeps access that was just taken away,
+   and grants, revocations and membership changes evict on top of that — `PermissionCacheIT` holds
+   revocation-takes-effect-immediately in place. Absence is deliberately not cached for permissions
+   or identity: "no standing" and "no such user" both change the moment somebody is granted a role
+   or signs in for the first time.
 
 Redis is not on this list on purpose. The seam makes it a configuration change whenever the
 deployment shape justifies it.

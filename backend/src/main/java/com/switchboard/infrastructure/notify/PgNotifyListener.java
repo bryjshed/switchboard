@@ -137,7 +137,12 @@ public class PgNotifyListener implements SmartLifecycle {
         String name = payload.substring(0, split);
         String key = payload.substring(split + 1);
         try {
-            caches.cache(CacheName.valueOf(name)).evict(key);
+            CacheName cacheName = CacheName.valueOf(name);
+            if (CacheInvalidationPublisher.WILDCARD.equals(key)) {
+                caches.cache(cacheName).clear();
+            } else {
+                caches.cache(cacheName).evict(key);
+            }
         } catch (IllegalArgumentException e) {
             log.debug("{} listener: unknown cache [{}], ignoring", CacheInvalidationPublisher.CHANNEL, name);
         }

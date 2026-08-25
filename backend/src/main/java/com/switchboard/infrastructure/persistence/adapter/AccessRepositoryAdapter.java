@@ -1,5 +1,8 @@
 package com.switchboard.infrastructure.persistence.adapter;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.domain.access.AccessRepository;
 import com.switchboard.domain.access.AccessScope;
 import com.switchboard.domain.access.Permission;
@@ -66,22 +69,41 @@ public class AccessRepositoryAdapter implements AccessRepository {
         """;
 
     private final DatabaseClient db;
+    private final SwitchboardCache<String, ResolvedAccess> cache;
     private final Timer resolveTimer;
 
-    public AccessRepositoryAdapter(DatabaseClient db, MeterRegistry meters) {
+    public AccessRepositoryAdapter(DatabaseClient db, CacheRegistry caches, MeterRegistry meters) {
         this.db = db;
+        this.cache = caches.cache(CacheName.PERMISSIONS);
         this.resolveTimer = Timer.builder(MetricsConfig.PERMISSION_RESOLVE_TIMER)
             .description("Resolving a user's permissions at one scope, unioned across org/project/env")
             .register(meters);
     }
 
     /**
-     * Timed and tagged by scope type: this runs once per authorization decision and a single
-     * dashboard page load makes several, so the count is what says whether caching per
-     * (user, scope) is worth doing.
+     * Resolves a user's permissions at one scope, through a short-lived cache.
+     *
+     * <p>This runs once per authorization decision and a single dashboard page load makes several,
+     * so it was a measurable share of management-request latency. The TTL is deliberately the
+     * shortest of any cache here: this is the one where staleness means someone keeps access that
+     * was just taken away, so it trades hit rate for a smaller window. Grants and revocations evict
+     * on top of that, across instances.
+     *
+     * <p><b>Absence is not cached</b>, and must not be. An empty result means "this scope does not
+     * exist, or you have no standing in it" - and the second half of that changes the moment
+     * somebody is granted a role, which is exactly when a user is most likely to retry.
      */
     @Override
     public Mono<ResolvedAccess> resolve(UUID userId, AccessScope scope) {
+        return cache.get(cacheKey(userId, scope), key -> load(userId, scope));
+    }
+
+    /** Text, because eviction rides NOTIFY - see CacheRegistry. */
+    private static String cacheKey(UUID userId, AccessScope scope) {
+        return userId + ":" + scope.type().name() + ":" + scope.id();
+    }
+
+    private Mono<ResolvedAccess> load(UUID userId, AccessScope scope) {
         return Mono.defer(() -> {
             long startedAt = System.nanoTime();
             return db.sql(resolveSql(scope.type()))
