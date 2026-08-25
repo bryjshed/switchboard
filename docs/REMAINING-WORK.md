@@ -76,7 +76,86 @@ client contexts.
 
 ---
 
-## 3. Now — what a serious buyer expects and we lack
+## 3. Caching — largely absent outside the evaluation path
+
+One environment snapshot cache does the heavy lifting and nothing else is cached. That is
+fine at demo scale and wrong at any real one.
+
+### What exists
+- **`EnvSnapshotCache`** — a Caffeine `AsyncCache`, 10,000 entries, 5-minute
+  expire-after-write, invalidated across instances by the Postgres `NOTIFY` listener. This
+  covers the hot path: evaluation, bootstrap and the SSE payload all read through it. The
+  async loader gives single-flight per key, so an eviction on a busy environment does not
+  stampede the database.
+- **HTTP validation caching** — `ETag` / `If-None-Match` returning 304 on the bootstrap and
+  OFREP bulk endpoints.
+- **Client-side** — the TypeScript SDK holds config in memory and evaluates locally, so a
+  flag check costs nothing after the initial load.
+
+### What is not cached, and where it hurts
+
+**SDK key resolution runs a SQL join on every evaluation request.** `sdk_keys` →
+`environments` → `projects`, per request, on the single hottest path in the product. At any
+meaningful evaluation QPS this is the database's dominant workload, and it is pure overhead:
+an SDK key's mapping to an environment changes only when a key is minted or revoked. Cache
+it keyed by the key hash, invalidated on those two events. **S** · **highest-value cache
+work.**
+
+**RBAC permission resolution runs a union query per authorization decision.** Every
+management request resolves permissions across org, project and environment scopes, and a
+single dashboard page load makes several. Cache per `(user, scope)` with invalidation on
+role-assignment change. **S–M**
+
+**Identity lookup per authenticated request.** Every request resolves the token subject to a
+user row. Same shape of fix. **S**
+
+**JWKS fetching in the new OIDC provider.** Key sets must be cached with a sane TTL and
+refreshed on an unknown `kid` — without it, every login is an outbound HTTPS round-trip to
+the identity provider, and an IdP hiccup becomes a Switchboard outage. Verify this is
+actually implemented rather than assumed. **S**
+
+**Rollout statistics are aggregated from scratch every time.** The Monitor screen and every
+`rollout-scan` run a `GROUP BY` across the partitioned event tables over a 48-hour window.
+This is the most expensive query in the system and it is recomputed on every page load.
+Needs either a short-TTL cache or incremental rollups. **M**
+
+**No negative caching.** An unknown flag key or an invalid SDK key hits the database every
+time. Besides the waste, a scanner spraying bad keys turns into unbounded database load —
+this is a denial-of-service vector as much as a performance one. **S**
+
+**Dashboard list queries** — flags, audit, change requests — are uncached. Lower stakes,
+since they are human-paced. **S**
+
+### Architectural gaps
+
+**There is no shared cache tier.** Caffeine is per-instance, so every instance keeps its own
+copy and a cold start pays full price. Correctness is fine — `NOTIFY` invalidates every
+instance — but there is no Redis or equivalent, which means no warm cache for a new pod and
+N× the database load on rollout. Whether this matters depends entirely on the deployment
+shape, which does not exist yet, so it should be decided alongside it rather than now. **M**
+
+**No cache observability.** Hit rate, eviction count and load latency are not measured
+anywhere, so none of the above can be prioritised with evidence rather than reasoning.
+Caffeine exposes these directly; wiring them to metrics is small and should come *first*.
+**S**
+
+**The SDK has no local persistence.** Config lives in memory only, so a process restart
+always requires a successful network fetch before the first evaluation is accurate. If
+Switchboard is unreachable at exactly that moment, the application serves its own defaults
+rather than the flags you last configured. LaunchDarkly's SDKs persist last-known config to
+disk for this reason. **M**
+
+**No CDN or edge story.** The bootstrap payload is per-environment and highly cacheable, but
+nothing is set up to serve it from an edge. Related to the multi-region non-goal below.
+**L**
+
+### Suggested order within this area
+Metrics first (so the rest is evidence-driven), then the SDK-key cache (largest win, small
+change), then negative caching (closes the DoS vector), then permissions, then rollout stats.
+
+---
+
+## 4. Now — what a serious buyer expects and we lack
 
 ### Richer targeting · effort **M** · highest visible deficit in a demo
 Six operators (`EQUALS`, `IN`, `CONTAINS`, `STARTS_WITH`, `SEGMENT_MATCH`,
@@ -108,7 +187,7 @@ HMAC-SHA256 signing, resource filtering, and delivery retries. Everyone has this
 
 ---
 
-## 4. Next — the enterprise and lifecycle cluster
+## 5. Next — the enterprise and lifecycle cluster
 
 ### Identity and access
 - **SSO/SAML + SCIM** · **M** — every vendor gates this behind a paid tier, which is what
@@ -141,6 +220,39 @@ healing/optimizing useful beyond the two built-in signals.
   reseed to reshuffle a split deliberately.
 - **Bulk targeting / CSV import-export** · **S–M**
 
+### Environment management at scale · effort **M**
+Environments **are** configurable — `POST /api/projects/{id}/environments` creates as many
+as you like, there is no limit in the schema or the code, and `dev` / `staging` /
+`production` are merely what a new project is seeded with, not a fixed set. A team that
+wants ten environments can have ten today.
+
+What breaks at that scale is everything around them:
+
+- **Environments can only be created and listed.** There is no rename, no delete, no
+  archive. One created by mistake, or one belonging to a decommissioned region, is permanent
+  and will appear in every environment picker and on every flag detail page forever. This is
+  incomplete CRUD on a shipped feature and the sharpest edge here.
+- **Only three environments have a visual identity.** `envColors.ts` maps `dev`, `staging`
+  and `production` (plus a `prod` alias); every other key falls back to neutral, so seven of
+  ten environments look identical at a glance.
+- **The UI assumes a handful.** The flags list uses a segmented control for environment
+  selection, which is unusable past about five, and flag detail renders one card per
+  environment — a long scroll at ten. Both need to become a searchable picker and a
+  collapsed or filtered list.
+- **Ordering is conventional, not declared.** Environments sort by a hardcoded
+  dev → staging → production preference with extras appended. There is no sort key, so a
+  team with `dev`, `qa`, `uat`, `perf`, `staging-eu`, `staging-us`, `prod-eu`, `prod-us`
+  gets an arbitrary order they cannot fix.
+- **No cloning or templates.** Standing up environment ten means configuring every flag in
+  it from scratch. "Copy configuration from production" is the obvious primitive and does
+  not exist.
+- **No environment classification.** Nothing marks an environment as production-like, so
+  sensible defaults — require approval, disable automation bypass — must be set by hand on
+  each one rather than inherited from a type.
+- **Cost is linear and silent.** Creating a flag writes one config row plus one version
+  snapshot per environment, and flag detail loads them all. Ten environments is ten times
+  the write and payload of one, which nothing currently surfaces.
+
 ### Developer lifecycle
 - **Code references scanner** · **M** — runs in the customer's CI, uploads paths and line
   numbers only. This also **materially strengthens the stale-flag sweep**, which today can
@@ -160,7 +272,7 @@ implementation has an objective acceptance bar: **pass all 201 vectors**.
 
 ---
 
-## 5. Operations — never started
+## 6. Operations — never started
 
 None of this exists. It is what stands between "runs on a laptop" and "runs for customers".
 
@@ -175,7 +287,7 @@ None of this exists. It is what stands between "runs on a laptop" and "runs for 
 
 ---
 
-## 6. Deliberate non-goals
+## 7. Deliberate non-goals
 
 Consciously not building, so nobody re-litigates them by accident:
 
@@ -194,7 +306,10 @@ Consciously not building, so nobody re-litigates them by accident:
 2. **Peeking fix.** A defect in the headline differentiator; small and contained.
 3. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
    from a browser.
-4. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
-5. **Targeting operators and typed attributes.** The most visible gap in a live demo.
-6. **CI and a deployment story.** The bridge from laptop to product.
-7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+4. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
+   for authorization; this is the cheapest large win in the system.
+5. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
+6. **Targeting operators and typed attributes.** The most visible gap in a live demo.
+7. **CI and a deployment story.** The bridge from laptop to product — and the point at
+   which the shared-cache-tier question needs an answer.
+8. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
