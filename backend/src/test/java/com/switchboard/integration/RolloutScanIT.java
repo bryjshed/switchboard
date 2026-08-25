@@ -23,24 +23,35 @@ import org.springframework.http.HttpHeaders;
 /**
  * The healing loop end to end, over real event rows.
  *
- * <p>A 50/50 rollout is fed telemetry in which the treatment errors at 25%
- * against the control's 1.8%. The monitor must notice (two-proportion z well
- * past its threshold of 3), record exactly one finding, and - when the org has
- * opted into auto-rollback - put the baseline back in front of all traffic as an
- * ordinary versioned write.
+ * <p>A 50/50 rollout is fed telemetry in which the treatment errors at 25% against the control's
+ * 2%. The monitor must notice, record exactly one finding, and - when the org has opted into
+ * auto-rollback - put the baseline back in front of all traffic as an ordinary versioned write.
  *
- * <p>The rescan assertion is the important one: the scan is wired to a scheduler
- * AND to an external job trigger, so it will be run repeatedly over the same
- * window. Without the unique {@code dedupe_key} every run would file another
- * finding and another proposal for one incident.
+ * <p><b>Counts here are subjects.</b> The fixture emits exactly one eval event per generated
+ * context key, so event counts and subject counts coincide. That is deliberate: it is the case
+ * where the old event-denominator arithmetic and the correct subject-denominator arithmetic agree,
+ * which keeps this test about the healing loop. The case where they diverge - many evaluations per
+ * subject - is {@link RepeatedEvaluationIT}, and it is the more important of the two.
+ *
+ * <p>The rescan assertion is the important one here: the scan is wired to a scheduler AND to an
+ * external job trigger, so it will be run repeatedly. Note that it used to prove less than it
+ * looked like it did - the old dedupe key ended in the current hour, so a rescan was only a no-op
+ * because it happened within the same wall-clock hour as the first scan. Keyed on the allocation
+ * epoch, it is a no-op for as long as the allocation stands.
  */
 class RolloutScanIT extends IntegrationTestBase {
 
     private static final String ENV_KEY = "production";
-    private static final int CONTROL_EVALS = 220;
-    private static final int CONTROL_ERRORS = 4;
-    private static final int TREATMENT_EVALS = 200;
-    private static final int TREATMENT_ERRORS = 50;
+    /**
+     * Above the 200-subject floor with room to spare. One eval event per generated context key,
+     * so these are subject counts as well as event counts - see the class note.
+     */
+    private static final int CONTROL_EVALS = 400;
+    private static final int CONTROL_ERRORS = 8;
+    private static final int TREATMENT_EVALS = 400;
+    private static final int TREATMENT_ERRORS = 100;
+    /** How far back the allocation epoch is opened, so the seeded telemetry falls inside it. */
+    private static final Duration EPOCH_AGE = Duration.ofHours(6);
 
     @Autowired
     private RolloutMonitorService monitor;
@@ -55,6 +66,7 @@ class RolloutScanIT extends IntegrationTestBase {
 
         JobResult first = monitor.scan().block(DB_TIMEOUT);
         assertThat(first.job()).isEqualTo("rollout-scan");
+        assertThat(first.findingsCreated()).as("one finding, from %s", first).isEqualTo(1);
 
         assertThat(findingIds(rollout.environmentId())).hasSize(1);
         UUID findingId = findingIds(rollout.environmentId()).get(0);
@@ -62,6 +74,24 @@ class RolloutScanIT extends IntegrationTestBase {
         assertThat(findingColumn(findingId, "variation_id", UUID.class))
             .isEqualTo(rollout.treatmentId());
         assertThat(findingColumn(findingId, "status", String.class)).isEqualTo("OPEN");
+        assertThat(findingColumn(findingId, "kind", String.class)).isEqualTo("DEGRADATION");
+
+        // The decision inputs. z_score is still written but is descriptive now: what actually
+        // cleared the bar is the e-value against the e-BH threshold.
+        assertThat(findingColumn(findingId, "test_kind", String.class))
+            .isEqualTo("MSPRT_GAUSSIAN_MIXTURE");
+        assertThat(findingColumn(findingId, "log_e_value", Double.class))
+            .isGreaterThan(Math.log(1 / 0.05));
+        assertThat(findingColumn(findingId, "p_value", Double.class)).isLessThan(0.05);
+        assertThat(findingColumn(findingId, "alpha", Double.class)).isEqualTo(0.05);
+        assertThat(findingColumn(findingId, "epoch_started_at", Instant.class)).isNotNull();
+        assertThat(findingColumn(findingId, "window_truncated", Boolean.class)).isFalse();
+        assertThat(findingColumn(findingId, "baseline_variation_id", UUID.class))
+            .isEqualTo(rollout.controlId());
+        assertThat(findingColumn(findingId, "variant_subjects", Long.class))
+            .isEqualTo(TREATMENT_EVALS);
+        assertThat(findingColumn(findingId, "variant_hits", Long.class))
+            .isEqualTo(TREATMENT_ERRORS);
         assertThat(findingColumn(findingId, "z_score", BigDecimal.class).doubleValue())
             .isGreaterThan(3.0)
             .isLessThan(20.0);
@@ -143,6 +173,13 @@ class RolloutScanIT extends IntegrationTestBase {
             .exchange()
             .expectStatus().isOk();
 
+        // The evidence window runs from the allocation epoch, which is this PUT's version row -
+        // roughly "now". Seeded events at now-2h would all fall BEFORE it and the scan would find
+        // nothing, so the version row is backdated to open the epoch before the telemetry starts.
+        // Backdating here rather than seeding events in the future keeps the events inside a real
+        // partition.
+        backdateVersion(flag.getId(), environmentId, 2, EPOCH_AGE);
+
         String controlPrefix = flagKey + "-ctl-";
         String treatmentPrefix = flagKey + "-trt-";
         seedEvalEvents(environmentId, flagKey, controlId, controlPrefix, CONTROL_EVALS);
@@ -151,6 +188,18 @@ class RolloutScanIT extends IntegrationTestBase {
         seedMetricEvents(environmentId, treatmentPrefix, TREATMENT_ERRORS);
 
         return new Rollout(flag.getId(), flagKey, environmentId, controlId, treatmentId);
+    }
+
+    /** Moves one config version's created_at back, which is what moves the allocation epoch. */
+    private void backdateVersion(UUID flagId, UUID environmentId, int versionNumber, Duration age) {
+        execute("""
+            UPDATE flag_env_config_versions SET created_at = now() - :age::interval
+            WHERE flag_id = :flagId AND environment_id = :envId AND version_number = :version
+            """, Map.of(
+            "flagId", flagId,
+            "envId", environmentId,
+            "version", versionNumber,
+            "age", age.toHours() + " hours"));
     }
 
     private void seedEvalEvents(

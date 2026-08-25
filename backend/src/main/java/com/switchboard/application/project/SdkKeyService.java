@@ -4,7 +4,11 @@ import com.switchboard.application.audit.AuditWriter;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.NotFoundException;
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.domain.common.ValidationException;
+import com.switchboard.infrastructure.notify.CacheInvalidationPublisher;
 import com.switchboard.domain.project.SdkKey;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.domain.project.SdkKeyRepository;
 import com.switchboard.interfaces.security.AuthenticatedUser;
 import com.switchboard.interfaces.security.SwitchboardAuthenticationManager;
@@ -25,27 +29,47 @@ public class SdkKeyService {
     private final SdkKeyRepository keys;
     private final OrgAccessService access;
     private final AuditWriter audit;
+    private final CacheInvalidationPublisher cacheInvalidation;
     private final TransactionalOperator tx;
 
     public SdkKeyService(
         SdkKeyRepository keys,
         OrgAccessService access,
         AuditWriter audit,
+        CacheInvalidationPublisher cacheInvalidation,
         TransactionalOperator tx) {
         this.keys = keys;
         this.access = access;
         this.audit = audit;
+        this.cacheInvalidation = cacheInvalidation;
         this.tx = tx;
     }
 
-    /** Mints a key for the environment. The full key is returned once and never stored. */
-    public Mono<CreatedSdkKey> create(UUID environmentId, AuthenticatedUser caller, String label) {
+    /**
+     * Mints a key for the environment. The full key is returned once and never stored.
+     *
+     * <p>The hash is still SHA-256 for every kind, including the public ones. Hashing a value that
+     * is going to be published is not theatre: it means a database leak does not hand over live
+     * credentials, and it keeps one lookup path for all kinds. What changes for a public key is the
+     * threat model, not the storage - see {@link SdkKeyKind}.
+     */
+    public Mono<CreatedSdkKey> create(
+        UUID environmentId, AuthenticatedUser caller, String label, SdkKeyKind kind) {
+        SdkKeyKind minted = kind == null ? SdkKeyKind.SERVER : kind;
+        if (!minted.isMintable()) {
+            return Mono.error(new ValidationException(
+                minted + " keys cannot be minted yet: no SDK holds one."));
+        }
         return access.requireEnvironmentPermission(environmentId, caller.userId(), Permission.MANAGE_SDK_KEYS)
             .flatMap(env -> {
-                String fullKey = "sb_srv_" + env.environmentKey() + "_" + randomHex();
+                String fullKey = minted.prefix() + env.environmentKey() + "_" + randomHex();
                 String prefix = fullKey.substring(0, PREFIX_LENGTH) + "…";
                 String hash = SwitchboardAuthenticationManager.sha256(fullKey);
-                return keys.create(environmentId, prefix, hash, label, caller.email())
+                // Evict the negative entry this hash may already carry: a client that guessed or
+                // pre-fetched the key before it existed would otherwise be told "unknown" for the
+                // rest of the negative TTL, which makes minting look broken.
+                cacheInvalidation.evict(CacheName.SDK_KEY, hash);
+                return keys.create(environmentId, minted, prefix, hash, label, caller.email())
                     .flatMap(stored -> audit
                         .insert(env.orgId(), env.projectId(), environmentId, null,
                             "SDK_KEY_CREATE", caller.email(), null, null, null, null)
@@ -59,7 +83,14 @@ public class SdkKeyService {
             .thenMany(Flux.defer(() -> keys.findByEnvironment(environmentId)));
     }
 
-    /** Sets revoked_at; idempotent for an already-revoked key. */
+    /**
+     * Sets revoked_at; idempotent for an already-revoked key.
+     *
+     * <p>Revocation must reach every instance's cache, not just this one, or a revoked key keeps
+     * working elsewhere for the rest of its TTL - which is the difference between a revocation and
+     * a suggestion. The eviction is keyed by the stored hash, which is why it is read back here
+     * rather than derived: the plaintext key is long gone by now.
+     */
     public Mono<Void> revoke(UUID keyId, AuthenticatedUser caller) {
         return keys.findById(keyId)
             .switchIfEmpty(Mono.error(new NotFoundException("SDK key not found")))
@@ -68,7 +99,16 @@ public class SdkKeyService {
                     .flatMap(revoked -> audit.insert(
                         env.orgId(), env.projectId(), key.environmentId(), null,
                         "SDK_KEY_REVOKE", caller.email(), null, null, null, null))
-                    .as(tx::transactional)));
+                    .as(tx::transactional)
+                    // After commit, so no instance can reload the row and re-cache it as live.
+                    .then(hashOf(keyId)
+                        .doOnNext(hash -> cacheInvalidation.evict(CacheName.SDK_KEY, hash))
+                        .then())));
+    }
+
+    /** The stored hash, which is the cache key. */
+    private Mono<String> hashOf(UUID keyId) {
+        return keys.findHashById(keyId);
     }
 
     private static String randomHex() {

@@ -1,5 +1,7 @@
 package com.switchboard.application.access;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.infrastructure.notify.CacheInvalidationPublisher;
 import com.switchboard.application.audit.AuditWriter;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.AccessRepository;
@@ -35,6 +37,7 @@ public class AccessAdminService {
     private final OrgAccessService access;
     private final UserRepository users;
     private final AuditWriter audit;
+    private final CacheInvalidationPublisher cacheInvalidation;
     private final TransactionalOperator tx;
 
     public AccessAdminService(
@@ -42,11 +45,13 @@ public class AccessAdminService {
         OrgAccessService access,
         UserRepository users,
         AuditWriter audit,
+        CacheInvalidationPublisher cacheInvalidation,
         TransactionalOperator tx) {
         this.roles = roles;
         this.access = access;
         this.users = users;
         this.audit = audit;
+        this.cacheInvalidation = cacheInvalidation;
         this.tx = tx;
     }
 
@@ -78,7 +83,13 @@ public class AccessAdminService {
                         target.email() + " -> " + roleKey + " at " + scopeType + " " + scopeId,
                         null, null, null)
                     .thenReturn(assignment))
-                .as(tx::transactional));
+                .as(tx::transactional)
+                // After commit. Clearing rather than evicting one key is deliberate: permissions
+                // are a UNION across scopes, so a grant at org scope changes this user's answer at
+                // every project and environment beneath it. There is no key to evict, only a
+                // family - and role changes are rare enough that clearing a 30-second cache costs
+                // a brief re-resolve, not a stampede.
+                .doOnSuccess(ignored -> cacheInvalidation.evictAll(CacheName.PERMISSIONS)));
     }
 
     public Mono<Void> revoke(UUID orgId, AuthenticatedUser caller, UUID assignmentId) {
@@ -95,7 +106,10 @@ public class AccessAdminService {
                         assignment.userEmail() + " lost " + assignment.roleKey()
                             + " at " + assignment.scopeType() + " " + assignment.scopeId(),
                         null, null, null))
-                    .as(tx::transactional);
+                    .as(tx::transactional)
+                    // Revocation especially: a cached grant that outlives its revocation is the
+                    // difference between taking access away and asking nicely.
+                    .doOnSuccess(ignored -> cacheInvalidation.evictAll(CacheName.PERMISSIONS));
             });
     }
 

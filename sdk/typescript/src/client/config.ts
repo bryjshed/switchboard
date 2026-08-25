@@ -1,9 +1,24 @@
-import type { BootstrapResponse } from '../types.js';
+import type { BootstrapResponse, EvalContext } from '../types.js';
 import type { Logger } from './logger.js';
 import { defaultLogger, safeLogger } from './logger.js';
 
 /** How the SDK keeps its in-memory config fresh. */
 export type UpdateMode = 'streaming' | 'polling';
+
+/**
+ * Which surface the SDK talks to, derived from the key's prefix rather than configured.
+ *
+ * `server` holds the rule set and evaluates in-process. `client` holds evaluated values fetched for
+ * one context, because a key shipped in a browser is public and is never given the rules.
+ *
+ * Deriving this instead of accepting a `mode: 'client'` option makes the mismatch unrepresentable -
+ * there is no way to configure a client key that thinks it is a server key. The prefix is only a
+ * local hint; the server is authoritative, so a wrong guess produces a clear 403 rather than a
+ * silent downgrade.
+ */
+export type KeyKind = 'server' | 'client';
+
+const CLIENT_KEY_PATTERN = /^sb_(cli|mob)_/;
 
 /** Telemetry settings. Telemetry is what feeds Switchboard's healing and optimizing loops. */
 export interface TelemetryOptions {
@@ -39,12 +54,21 @@ export interface SwitchboardConfig {
   fetch?: FetchLike;
   /** Seed the store from a previous snapshot so the very first evaluation is never a default. */
   initialBootstrap?: BootstrapResponse;
+  /**
+   * The context to evaluate for. REQUIRED for a client key and rejected for a server key.
+   *
+   * Client mode is static-context: the server evaluates once for this context and the SDK holds the
+   * answers, so there is no per-evaluation context to pass. Change it with `setContext()`.
+   */
+  context?: EvalContext;
 }
 
 export type ResolvedTelemetryOptions = Required<TelemetryOptions>;
 
 export interface ResolvedConfig {
   sdkKey: string;
+  keyKind: KeyKind;
+  context?: EvalContext;
   baseUrl: string;
   mode: UpdateMode;
   pollIntervalMs: number;
@@ -97,6 +121,25 @@ export function resolveConfig(config: SwitchboardConfig): ResolvedConfig {
     throw new SwitchboardConfigError(`mode must be "streaming" or "polling", got ${String(mode)}`);
   }
 
+  const keyKind: KeyKind = CLIENT_KEY_PATTERN.test(config.sdkKey.trim()) ? 'client' : 'server';
+  if (keyKind === 'client' && config.context === undefined) {
+    throw new SwitchboardConfigError(
+      'a client-side SDK key requires config.context: the server evaluates for one context and ' +
+        'this SDK holds the result. Use setContext() to change it later.',
+    );
+  }
+  if (keyKind === 'server' && config.context !== undefined) {
+    throw new SwitchboardConfigError(
+      'config.context is only for client-side keys. A server key holds the rule set and takes a ' +
+        'context per evaluation instead.',
+    );
+  }
+  if (keyKind === 'client' && config.initialBootstrap !== undefined) {
+    throw new SwitchboardConfigError(
+      'config.initialBootstrap is a rule-set snapshot and cannot seed a client-side key.',
+    );
+  }
+
   const telemetryInput: TelemetryOptions =
     config.telemetry === undefined
       ? {}
@@ -113,6 +156,8 @@ export function resolveConfig(config: SwitchboardConfig): ResolvedConfig {
 
   return {
     sdkKey: config.sdkKey.trim(),
+    keyKind,
+    context: config.context,
     baseUrl: (config.baseUrl ?? DEFAULTS.baseUrl).replace(/\/+$/, ''),
     mode,
     pollIntervalMs: positive(config.pollIntervalMs, DEFAULTS.pollIntervalMs, 'pollIntervalMs'),

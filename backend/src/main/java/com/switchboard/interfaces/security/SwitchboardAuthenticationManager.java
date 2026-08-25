@@ -1,17 +1,28 @@
 package com.switchboard.interfaces.security;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.SwitchboardCache;
+import com.switchboard.application.token.PersonalAccessTokenService;
 import com.switchboard.application.user.UserService;
+import com.switchboard.domain.token.PersonalAccessTokenRepository;
 import com.switchboard.domain.identity.IdentityProviderPort;
 import com.switchboard.domain.identity.IdentityVerificationException;
 import com.switchboard.domain.identity.VerifiedIdentity;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.domain.user.User;
+import com.switchboard.infrastructure.config.MetricsConfig;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.r2dbc.spi.Readable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
@@ -33,21 +44,40 @@ import reactor.core.publisher.Mono;
 @Component
 public class SwitchboardAuthenticationManager implements ReactiveAuthenticationManager {
 
-    static final String SDK_KEY_PREFIX = "sb_srv_";
+    /**
+     * Every SDK key kind starts with this. Deliberately a WIDENING of the old {@code "sb_srv_"}
+     * test rather than a prefix-to-kind map: it is a strict widening (no OIDC JWT starts
+     * {@code eyJ}, no dev token starts {@code dev:}, and neither begins {@code sb_}), it makes
+     * adding a kind a data-only change, and it keeps the prefix from carrying any authority.
+     * The kind itself is read from the row - see {@link #authenticateSdkKey}.
+     */
+    static final String SDK_KEY_PREFIX = SdkKeyKind.COMMON_PREFIX;
+    /** Marks a principal that arrived by personal access token rather than an interactive login. */
+    public static final String PAT_ISSUER = "switchboard:pat";
+
     private static final List<SimpleGrantedAuthority> USER_AUTHORITIES =
         List.of(new SimpleGrantedAuthority("ROLE_USER"));
     private static final List<SimpleGrantedAuthority> SDK_AUTHORITIES =
         List.of(new SimpleGrantedAuthority("ROLE_SDK"));
 
     private final UserService userService;
+    private final PersonalAccessTokenRepository tokens;
     private final DatabaseClient db;
     private final IdentityProviderPort identities;
+    private final SwitchboardCache<String, SdkKeyPrincipal> sdkKeys;
+    private final Timer sdkKeyResolve;
 
     public SwitchboardAuthenticationManager(
-        UserService userService, DatabaseClient db, IdentityProviderPort identities) {
+        UserService userService, PersonalAccessTokenRepository tokens, DatabaseClient db,
+        IdentityProviderPort identities, CacheRegistry caches, MeterRegistry meters) {
         this.userService = userService;
+        this.tokens = tokens;
         this.db = db;
         this.identities = identities;
+        this.sdkKeys = caches.cache(CacheName.SDK_KEY);
+        this.sdkKeyResolve = Timer.builder(MetricsConfig.SDK_KEY_RESOLVE_TIMER)
+            .description("Resolving an SDK key to its environment: sdk_keys -> environments -> projects")
+            .register(meters);
     }
 
     @Override
@@ -56,10 +86,46 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
             return Mono.empty();
         }
         String token = bearer.token();
+        // Order matters only because sb_pat_ would otherwise be swallowed by the widened sb_
+        // SDK-key test. Checked first, and both are exact prefixes, so there is no ambiguity.
+        if (token.startsWith(PersonalAccessTokenService.TOKEN_PREFIX)) {
+            return authenticatePersonalAccessToken(token);
+        }
         if (token.startsWith(SDK_KEY_PREFIX)) {
             return authenticateSdkKey(token);
         }
         return authenticateUser(token);
+    }
+
+    /**
+     * A personal access token authenticates <b>as its owner</b>.
+     *
+     * <p>It produces the same {@link AuthenticatedUser} principal a browser session does, so every
+     * downstream permission check is the one that already exists and already gets exercised on
+     * every request - rather than a second, parallel authorization path that would only be tested
+     * by whoever happened to use a token.
+     *
+     * <p>The issuer and subject are synthetic and say plainly where the request came from, so an
+     * audit row reads "acted via a token" rather than silently impersonating an interactive login.
+     */
+    private Mono<Authentication> authenticatePersonalAccessToken(String token) {
+        String hash = sha256(token);
+        return tokens.findUsableUserIdByHash(hash, Instant.now())
+            .switchIfEmpty(Mono.error(new BadCredentialsException(
+                "Unknown, revoked or expired personal access token")))
+            .flatMap(userService::findById)
+            .switchIfEmpty(Mono.error(new BadCredentialsException("Token owner no longer exists")))
+            .map(user -> {
+                // Advisory, and deliberately not awaited: a write on the request path would undo
+                // the point of keeping authentication cheap, and a lost timestamp costs nothing.
+                tokens.touchLastUsed(hash, Instant.now())
+                    .onErrorResume(e -> Mono.empty())
+                    .subscribe();
+                AuthenticatedUser principal = new AuthenticatedUser(
+                    user.id(), user.email(), PAT_ISSUER, user.id().toString());
+                return UsernamePasswordAuthenticationToken.authenticated(
+                    principal, null, USER_AUTHORITIES);
+            });
     }
 
     private Mono<Authentication> authenticateUser(String token) {
@@ -76,24 +142,51 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
         return UsernamePasswordAuthenticationToken.authenticated(principal, null, USER_AUTHORITIES);
     }
 
+    /**
+     * Resolves an SDK key to its environment, through the cache.
+     *
+     * <p>This ran a three-table join on <b>every</b> evaluation request - the single hottest path in
+     * the product - to answer a question whose answer changes only when a key is minted or revoked.
+     * Both of those evict, locally and across instances, so the cache is not merely TTL-bounded.
+     *
+     * <p><b>The key is the hash, never the token.</b> The token is a live credential; the hash is
+     * what the database already stores and what a heap dump may safely contain.
+     *
+     * <p>Absence is cached too, briefly. An unknown key used to reach the database on every attempt,
+     * so spraying invented keys was an unbounded-load denial-of-service vector rather than just
+     * waste. The timer stays: it is now the evidence that the cache is working, and it is the
+     * before/after that justified writing it.
+     */
     private Mono<Authentication> authenticateSdkKey(String token) {
-        return db.sql("""
-                SELECT k.id AS key_id, k.environment_id, e.project_id, p.org_id, e.key AS env_key
-                FROM sdk_keys k
-                JOIN environments e ON e.id = k.environment_id
-                JOIN projects p ON p.id = e.project_id
-                WHERE k.key_hash = :hash AND k.revoked_at IS NULL
-                """)
-            .bind("hash", sha256(token))
-            .map(SwitchboardAuthenticationManager::mapSdkKey)
-            .one()
+        String hash = sha256(token);
+        return sdkKeys.get(hash, this::loadSdkKey)
             .switchIfEmpty(Mono.error(new BadCredentialsException("Unknown or revoked SDK key")))
             .map(p -> UsernamePasswordAuthenticationToken.authenticated(p, null, SDK_AUTHORITIES));
+    }
+
+    private Mono<SdkKeyPrincipal> loadSdkKey(String hash) {
+        return Mono.defer(() -> {
+            long startedAt = System.nanoTime();
+            return db.sql("""
+                    SELECT k.id AS key_id, k.kind, k.environment_id, e.project_id, p.org_id,
+                           e.key AS env_key
+                    FROM sdk_keys k
+                    JOIN environments e ON e.id = k.environment_id
+                    JOIN projects p ON p.id = e.project_id
+                    WHERE k.key_hash = :hash AND k.revoked_at IS NULL
+                    """)
+                .bind("hash", hash)
+                .map(SwitchboardAuthenticationManager::mapSdkKey)
+                .one()
+                .doFinally(signal -> sdkKeyResolve.record(
+                    System.nanoTime() - startedAt, TimeUnit.NANOSECONDS));
+        });
     }
 
     private static SdkKeyPrincipal mapSdkKey(Readable row) {
         return new SdkKeyPrincipal(
             row.get("key_id", UUID.class),
+            SdkKeyKind.valueOf(row.get("kind", String.class)),
             row.get("environment_id", UUID.class),
             row.get("project_id", UUID.class),
             row.get("org_id", UUID.class),

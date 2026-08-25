@@ -12,11 +12,11 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 280 unit + 74 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 111 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
-| `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
-| `app/` | Expo mobile companion (secondary; keep-or-drop undecided) | 95 |
-| `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
+| `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
+| `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
+| `spec/` | Normative evaluation spec + 508 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
 **Two contracts, both enforced rather than described.** `backend/src/main/resources/openapi/switchboard-api.yaml`
@@ -31,7 +31,6 @@ make deps-up     # postgres 18 (:25432) + firebase auth emulator (:29099)
 make backend     # :28080, local profile
 make seed        # demo workspace via the public API; prints SDK keys once
 make dashboard   # :5273 -- the main UI
-make app         # expo, Metro pinned to :8092
 ```
 
 Seed logins, password `password123`: `alice@switchboard.dev` (owner),
@@ -52,25 +51,26 @@ every real login with a 401 — *while dev tokens keep working*, which is exactl
 the omission invisible. `make backend` sets it. Reproduced deliberately; documented in
 `backend/README.md`.
 
+**The packaged jar cannot talk to the Firebase emulator.** `firebase-admin` is `<optional>`
+and Spring Boot's fat jar leaves optional dependencies out, so `java -jar target/*.jar` with
+`FIREBASE_AUTH_EMULATOR_HOST` set **refuses to start**. `./mvnw spring-boot:run` has it, which
+is why `make backend` works. Deliberate in both directions — a production deployment on Okta
+should not carry the SDK — and the reason CI's `live` job uses `spring-boot:run`.
+
 **Never run a broad `pkill -f spring-boot:run`.** It has twice killed a backend another
 process was depending on. Find the specific PID.
 
 **macOS has no `timeout` command.** Do not use it in scripts.
 
-**A competing Metro on :8081 hijacks the mobile app.** If another Expo project (e.g.
-`nexus-app`) is serving on the default port, this app's dev client attaches to *that*
-bundler and loads someone else's JavaScript into Switchboard's native shell, red-screening
-on native modules we do not ship. The stack trace names files that exist in both projects,
-so it reads like a bug here and is not. Metro is pinned to 8092 for this reason. See
-`.maestro/README.md`.
+**Changing a `public static final String` needs `./mvnw clean`.** javac inlines compile-time
+String constants into every class that reads one, and the incremental build will not recompile
+those classes just because the constant changed — so tests keep asserting the *old* literal and
+fail with a message quoting a value that no longer exists in the source. Cost an unnecessary
+debugging detour once; a clean build is the whole fix.
 
-**Metro logs never show JS runtime errors.** They report bundling only. A red-screened app
-looks perfectly healthy in Metro's output — check the actual screen or a Maestro
-screen-hierarchy dump.
-
-**`app/.expo/types` is gitignored**, so `npm run check` in `app/` can pass on a clean clone
-and fail after Metro has run once (typed routes narrow `Href`). CI on a fresh checkout will
-not catch that class of bug.
+**Actuator lives on its own port** (`MANAGEMENT_PORT`, default 28081), and that includes
+`/actuator/health` — it 404s on 28080. Health checks and probes must target the management
+port. That listener is unauthenticated by design: keep it off the public interface.
 
 ## Conventions
 
@@ -90,23 +90,34 @@ loading/error/refreshing flags and toasts for writes. Semantic tokens only, no r
 the `warning` token rather than amber. Filter and tab state lives in query params. One API
 module per endpoint group over `src/lib/apiClient.ts`.
 
-**App.** Semantic tokens only; `npm run lint:tokens` fails on raw hex outside
-`shared/theme`.
+**Two compose files, two project names.** `docker-compose.yml` is the dev stack;
+`docker-compose.prod.yml` is the deployable one and sets `name: switchboard-prod`. That line
+is load-bearing: without it Compose derives the project name from the directory, both files
+become `switchboard`, and `up` on the prod file **recreates the dev postgres container in
+place** against the dev volume with production's credentials. Done accidentally once; the
+volume survived, the running backend did not.
 
-**Caching goes through Spring's cache abstraction**, backed by Caffeine and swappable to
-Redis by configuration — not hand-rolled per call site. Note the reactive trap: `@Cacheable`
-on a method returning `Mono` caches the cold publisher rather than the value, so it appears
-to work while doing nothing. The Caffeine manager needs async cache mode, `@Cacheable`
-methods must live in their own loader bean (self-invocation bypasses the proxy), and cache
-keys must survive the `NOTIFY` invalidation channel intact. Design in
-`docs/REMAINING-WORK.md`.
+**Dashboard configuration is runtime, not build-time** — the container writes `/config.js`
+from its environment and `src/lib/runtimeConfig.ts` layers it over `import.meta.env`, so one
+image serves any environment. The exception is `VITE_AUTH_PROVIDER`, which decides which auth
+implementation is *bundled*; a runtime override of it is reported as an error rather than
+silently ignored.
+
+**Caching goes through `CacheRegistry` / `SwitchboardCache`** — a reactive seam over Caffeine,
+provider chosen by `switchboard.cache.provider`. **Do not reach for `@Cacheable`**: on a method
+returning `Mono` it caches the cold publisher rather than the value, so it appears to work while
+doing nothing. The seam sidesteps that (and the self-invocation trap) by not using proxies at all.
+Add a cache by adding a `CacheName` enum constant — names are an enum so a typo is a compile error,
+and keys are Strings so they survive the `NOTIFY` invalidation channel intact. Reasoning in
+`docs/DECISIONS.md`.
 
 **Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
-bucketing must land as a `spec/evaluation.md` edit **plus regenerated conformance vectors in
-the same commit**. That rule is the only thing keeping the server and every SDK in
-agreement.
+bucketing must land as a `spec/evaluation.md` edit **plus updated conformance vectors in the
+same commit**. That rule is the only thing keeping the server and every SDK in agreement.
+`spec/tools/generate-vectors.mjs` writes the combinatorial vectors (`operators.json`); the rest
+are hand-authored. `--check` fails when they are stale. The runners no longer hardcode a count.
 
-**Flyway.** Migrations are `V1`–`V4` today; the next is **V5**. They run automatically
+**Flyway.** Migrations are `V1`–`V7` today; the next is **V8**. They run automatically
 locally.
 
 ## Verifying
@@ -116,23 +127,34 @@ cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
 cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
 cd dashboard  && npm run check && npm run build
 cd sdk/typescript && npx vitest run
-cd app        && npm run check
+cd mcp        && npm run check
 ```
 
-Six live scripts run against a **running** stack and are the real regression net — they
+Seven live scripts run against a **running** stack and are the real regression net — they
 catch contract drift that unit tests cannot:
 
 ```bash
 node scripts/smoke-test.mjs                    # 34  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
 node dashboard/scripts/service-check.mjs       # 67
-node dashboard/scripts/ai-check.mjs            # 53
+node dashboard/scripts/ai-check.mjs            # 54
 node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
+node mcp/scripts/live-check.mjs                # 19
 ```
+
+**Two of them import from `dist/`, not from source** — `sdk/typescript` and `mcp` — because a
+live check should exercise what ships. On a clean checkout they need `npm run build` in that
+package first, or they fail with `ERR_MODULE_NOT_FOUND` rather than anything about the stack.
 
 Run all of them after any backend change. If one fails in a tree you do not own, say so
 rather than "fixing" it.
+
+All of it runs in `.github/workflows/ci.yml` on every PR, live checks included. The `live`
+job configures the second OIDC provider up front so auth-check's OIDC leg actually runs; the
+`containers` job builds both production images and brings `docker-compose.prod.yml` up for
+real. If you change a check script, a port, or a seed default, that workflow is the other
+place it has to be true.
 
 ### Tight loops
 
@@ -147,7 +169,6 @@ cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify -Dit.test=
 
 cd dashboard && npx vitest run src/lib/__tests__/rollout.test.ts
 cd sdk/typescript && npx vitest run test/conformance.test.ts
-cd app && npx jest __tests__/design-tokens.test.ts
 ```
 
 Backend logs go to `/tmp/sb-boot.log` when started the way `make backend` starts it. A
@@ -162,7 +183,7 @@ docker compose down -v && docker compose up -d --wait   # then restart backend, 
 
 ## Working with multiple agents
 
-**One writer per tree.** `backend/`, `dashboard/`, `app/`, `sdk/` and `spec/` are separate
+**One writer per tree.** `backend/`, `dashboard/`, `sdk/` and `spec/` are separate
 trees; two agents writing the same one will collide. Reading any tree is always fine.
 
 Agents have stalled mid-task more than once. When resuming, **inventory what actually exists
@@ -171,8 +192,8 @@ and only the verification step is missing.
 
 **Verify agent reports rather than trusting them.** A stalled agent's unverified work is not
 working code. Re-running claimed results has repeatedly found real problems: a test querying
-a column that does not exist, a mobile red screen invisible in Metro's logs, a check script
-defaulting to a user that was never seeded.
+a column that does not exist, a baseline chosen by random UUID that only showed up as a
+flaky test, a check script defaulting to a user that was never seeded.
 
 ## Where things stand
 
@@ -181,11 +202,13 @@ and a suggested order. `docs/DECISIONS.md` records the choices that look wrong u
 why — **read it before "fixing" something that seems obviously broken**, because several
 things are deliberate (the kill switch bypassing approval, MD5 bucketing, permissions
 unioning rather than narrowing, an unknown flag returning 200). `docs/competitive-gaps.md`
-is the market research the backlog derives from.
+is the market research the backlog derives from. `docs/DEPLOYMENT.md` covers containers,
+configuration, migrations, retention and when Redis actually becomes necessary.
 
-Three things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
+Two things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
 flag creation has never actually executed — everything else in the AI layer works without
-one), the mobile app's keep-or-drop decision, and a visual pass in light and dark.
+one), and a visual pass in light and dark. The Expo mobile companion was **deleted** on
+2026-08-24; see `docs/DECISIONS.md`. It is in git history if it is ever wanted back.
 
 The local dev database accumulates throwaway data from verification runs. `docker compose
 down -v` then `make deps-up`, restart the backend, and re-seed for a clean demo state.

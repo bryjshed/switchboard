@@ -1,6 +1,7 @@
 package com.switchboard.infrastructure.persistence.adapter;
 
 import com.switchboard.domain.project.SdkKey;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.domain.project.SdkKeyRepository;
 import io.r2dbc.spi.Parameters;
 import io.r2dbc.spi.R2dbcType;
@@ -25,6 +26,7 @@ public class SdkKeyRepositoryAdapter implements SdkKeyRepository {
         return new SdkKey(
             row.get("id", UUID.class),
             row.get("environment_id", UUID.class),
+            SdkKeyKind.valueOf(row.get("kind", String.class)),
             row.get("key_prefix", String.class),
             row.get("label", String.class),
             row.get("created_by", String.class),
@@ -33,13 +35,16 @@ public class SdkKeyRepositoryAdapter implements SdkKeyRepository {
     }
 
     @Override
-    public Mono<SdkKey> create(UUID environmentId, String keyPrefix, String keyHash, String label, String createdBy) {
+    public Mono<SdkKey> create(
+        UUID environmentId, SdkKeyKind kind, String keyPrefix, String keyHash,
+        String label, String createdBy) {
         return db.sql("""
-                INSERT INTO sdk_keys (environment_id, key_prefix, key_hash, label, created_by)
-                VALUES (:environmentId, :keyPrefix, :keyHash, :label, :createdBy)
+                INSERT INTO sdk_keys (environment_id, kind, key_prefix, key_hash, label, created_by)
+                VALUES (:environmentId, :kind, :keyPrefix, :keyHash, :label, :createdBy)
                 RETURNING *
                 """)
             .bind("environmentId", environmentId)
+            .bind("kind", kind.name())
             .bind("keyPrefix", keyPrefix)
             .bind("keyHash", keyHash)
             .bind("label", label == null ? Parameters.in(R2dbcType.VARCHAR) : label)
@@ -61,6 +66,14 @@ public class SdkKeyRepositoryAdapter implements SdkKeyRepository {
         return db.sql("SELECT * FROM sdk_keys WHERE id = :id")
             .bind("id", keyId)
             .map(SdkKeyRepositoryAdapter::map)
+            .one();
+    }
+
+    @Override
+    public Mono<String> findHashById(UUID keyId) {
+        return db.sql("SELECT key_hash FROM sdk_keys WHERE id = :id")
+            .bind("id", keyId)
+            .map(row -> row.get("key_hash", String.class))
             .one();
     }
 

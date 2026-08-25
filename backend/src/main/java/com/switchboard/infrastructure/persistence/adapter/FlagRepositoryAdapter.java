@@ -53,10 +53,14 @@ public class FlagRepositoryAdapter implements FlagRepository {
     @Override
     public Mono<Flag> insertFlag(Flag flag) {
         DatabaseClient.GenericExecuteSpec spec = db.sql("""
-                INSERT INTO flags (project_id, key, name, description, kind, variations, tags)
-                VALUES (:projectId, :key, :name, :description, :kind, CAST(:variations AS jsonb), :tags)
+                INSERT INTO flags
+                    (project_id, key, name, description, kind, variations, tags,
+                     client_side_available)
+                VALUES (:projectId, :key, :name, :description, :kind, CAST(:variations AS jsonb),
+                        :tags, :clientSideAvailable)
                 RETURNING *
                 """)
+            .bind("clientSideAvailable", flag.clientSideAvailable())
             .bind("projectId", flag.projectId())
             .bind("key", flag.key())
             .bind("name", flag.name())
@@ -114,10 +118,12 @@ public class FlagRepositoryAdapter implements FlagRepository {
         DatabaseClient.GenericExecuteSpec spec = db.sql("""
                 UPDATE flags
                 SET name = :name, description = :description, tags = :tags,
-                    variations = CAST(:variations AS jsonb)
+                    variations = CAST(:variations AS jsonb),
+                    client_side_available = :clientSideAvailable
                 WHERE id = :id
                 RETURNING *
                 """)
+            .bind("clientSideAvailable", flag.clientSideAvailable())
             .bind("id", flag.id())
             .bind("name", flag.name())
             .bind("tags", flag.tags().toArray(String[]::new))
@@ -198,7 +204,7 @@ public class FlagRepositoryAdapter implements FlagRepository {
     public Mono<FlagDetail> findDetail(UUID projectId, String key) {
         return db.sql("""
                 SELECT f.id AS f_id, f.project_id, f.key AS f_key, f.name AS f_name, f.description,
-                       f.kind, f.variations, f.tags,
+                       f.kind, f.variations, f.tags, f.client_side_available,
                        e.key AS env_key, c.flag_id, c.environment_id, c.enabled, c.kill_switch_active,
                        c.config, c.version, c.updated_at, c.updated_by
                 FROM flags f
@@ -237,6 +243,7 @@ public class FlagRepositoryAdapter implements FlagRepository {
 
         String sql = """
             SELECT f.id AS f_id, f.key AS f_key, f.name AS f_name, f.kind, f.tags, f.variations,
+                   f.client_side_available,
                    e.key AS env_key, c.enabled, c.kill_switch_active, c.config, c.version,
                    c.updated_at, c.updated_by
             FROM flags f
@@ -298,7 +305,7 @@ public class FlagRepositoryAdapter implements FlagRepository {
     public Flux<FlagAndConfig> findAllForEnvironment(UUID environmentId) {
         return db.sql("""
                 SELECT f.id AS f_id, f.project_id, f.key AS f_key, f.name AS f_name, f.description,
-                       f.kind, f.variations, f.tags,
+                       f.kind, f.variations, f.tags, f.client_side_available,
                        c.flag_id, c.environment_id, c.enabled, c.kill_switch_active,
                        c.config, c.version, c.updated_at, c.updated_by
                 FROM flag_env_configs c
@@ -315,7 +322,7 @@ public class FlagRepositoryAdapter implements FlagRepository {
     public Mono<FlagHead> findHead(UUID environmentId, String flagKey) {
         return db.sql("""
                 SELECT f.id AS f_id, f.project_id, f.key AS f_key, f.name AS f_name, f.description,
-                       f.kind, f.variations, f.tags,
+                       f.kind, f.variations, f.tags, f.client_side_available,
                        e.key AS env_key, e.state_version,
                        c.flag_id, c.environment_id, c.enabled, c.kill_switch_active,
                        c.config, c.version, c.updated_at, c.updated_by
@@ -358,7 +365,8 @@ public class FlagRepositoryAdapter implements FlagRepository {
             FlagKind.valueOf(row.get("kind", String.class)),
             readVariations(row.get("variations", String.class)),
             List.of(row.get("tags", String[].class)),
-            false);
+            false,
+            Boolean.TRUE.equals(row.get("client_side_available", Boolean.class)));
     }
 
     /** Flag columns aliased f_id / f_key / f_name in joined queries. */
@@ -372,7 +380,8 @@ public class FlagRepositoryAdapter implements FlagRepository {
             FlagKind.valueOf(row.get("kind", String.class)),
             readVariations(row.get("variations", String.class)),
             List.of(row.get("tags", String[].class)),
-            false);
+            false,
+            Boolean.TRUE.equals(row.get("client_side_available", Boolean.class)));
     }
 
     private FlagEnvConfig mapHead(Readable row) {

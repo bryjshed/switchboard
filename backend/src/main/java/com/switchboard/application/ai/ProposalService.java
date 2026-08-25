@@ -463,7 +463,9 @@ public class ProposalService {
                 proposal.projectId(), actor.userId(), actor.label(), diff.flagKey(),
                 diff.name() == null ? diff.flagKey() : diff.name(), diff.description(),
                 diff.flagKind() == null ? FlagKind.BOOLEAN : diff.flagKind(),
-                variations, diff.tags())
+                // The assistant does not decide exposure: a flag it creates is server-only until
+                // a human says otherwise.
+                variations, diff.tags(), false)
             .then();
     }
 

@@ -1,5 +1,7 @@
 package com.switchboard.application.org;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.infrastructure.notify.CacheInvalidationPublisher;
 import com.switchboard.application.audit.AuditWriter;
 import com.switchboard.domain.access.AccessRepository;
 import com.switchboard.domain.access.AccessScope;
@@ -33,6 +35,7 @@ public class OrgService {
     private final OrgAccessService access;
     private final AccessRepository roles;
     private final AuditWriter audit;
+    private final CacheInvalidationPublisher cacheInvalidation;
     private final TransactionalOperator tx;
 
     public OrgService(
@@ -41,12 +44,14 @@ public class OrgService {
         OrgAccessService access,
         AccessRepository roles,
         AuditWriter audit,
+        CacheInvalidationPublisher cacheInvalidation,
         TransactionalOperator tx) {
         this.orgs = orgs;
         this.users = users;
         this.access = access;
         this.roles = roles;
         this.audit = audit;
+        this.cacheInvalidation = cacheInvalidation;
         this.tx = tx;
     }
 
@@ -105,6 +110,9 @@ public class OrgService {
                         orgId, null, null, null, "MEMBER_ADD", caller.email(), null, null, null, null))
                     .thenReturn(member))
                 .as(tx::transactional))
+            // Membership feeds permission resolution as a compatibility floor, so it invalidates
+            // the same family a role grant does.
+            .doOnSuccess(ignored -> cacheInvalidation.evictAll(CacheName.PERMISSIONS))
             .onErrorMap(DataIntegrityViolationException.class,
                 e -> new ConflictException("User is already a member of this org"));
     }
@@ -117,7 +125,8 @@ public class OrgService {
                 .then(orgs.removeMember(orgId, targetUserId))
                 .then(roles.revokeAtScope(targetUserId, AccessScope.org(orgId)))
                 .then(audit.insert(orgId, null, null, null, "MEMBER_REMOVE", caller.email(), null, null, null, null))
-                .as(tx::transactional));
+                .as(tx::transactional))
+            .doOnSuccess(ignored -> cacheInvalidation.evictAll(CacheName.PERMISSIONS));
     }
 
     private Mono<Void> guardLastOwner(UUID orgId, String targetRole) {

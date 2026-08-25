@@ -1,0 +1,5 @@
+# The build stage compiles from source; a host `target/` would be copied in, ignored, and would
+# still cost the time to send it -- it is ~600 MB with dependencies unpacked.
+target/
+*.log
+.DS_Store

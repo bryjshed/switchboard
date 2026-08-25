@@ -7,9 +7,13 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (280 unit + 74 integration), web dashboard (329),
-TypeScript SDK (249), mobile companion (95), an evaluation spec with 201 conformance vectors
-executed by both the server and the SDK, and six live-check scripts against a running stack.
+**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (329),
+an evaluation spec with 508 conformance vectors executed by both the server and
+the SDK, and seven live-check scripts against a running stack.
+
+**The Expo mobile companion was deleted on 2026-08-24** — see
+[DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost, and
+it is in git history if it is ever wanted back.
 
 Working end to end: flags, targeting, percentage rollouts, versioning, audit, rollback, SSE
 delivery, the AI layer (natural language, healing, optimizing, stale sweep), OFREP,
@@ -20,10 +24,14 @@ and the dashboard.
 Identity is `(issuer, subject)` in `user_identities`, providers are configuration, and both
 the backend and the dashboard work with any OIDC provider — proven against a real
 non-Firebase issuer, not just unit-tested. See `backend/README.md` and `dashboard/README.md`.
+Also landed: **the repo is committed** — the tree is under version control on `main`
+(2026-08-24), so the former top item here (an entirely uncommitted working tree) is gone.
+
+**Ordering note.** Sections below are the original backlog; items that have landed are struck
+through in place rather than deleted, so the reasoning stays next to the work.
 
 **For anyone picking this up:** read `CLAUDE.md` first — it carries the environment traps
-(Java 25, the Firebase emulator host variable, the Metro port hijack) that have each cost
-real time. This document is what is left to build.
+(Java 25, the Firebase emulator host variable) that have each cost real time. This document is what is left to build.
 
 ---
 
@@ -33,11 +41,8 @@ Nothing here is a technical problem. Each needs a human.
 
 | Item | What is blocked | Why it matters |
 |---|---|---|
-| **The repo has zero commits** | Everything | Four applications, a spec, an SDK, three migrations and all documentation exist only as an uncommitted working tree on one disk. This is the highest-value, lowest-effort item on the entire list, and the only one whose downside is losing work rather than lacking a feature. Suggested shape: several coherent commits on a branch (backend foundation, AI layer, spec, SDK, dashboard, governance), not one giant one. |
 | **No `ANTHROPIC_API_KEY`** | Natural-language flag creation | The Claude adapter, its forced-tool schema, and the calm `503 AI_UNAVAILABLE` degradation are all built and tested, but the real prompt-to-diff-to-apply loop **has never executed**. Everything else in the AI layer (healing, optimizing, stale sweep) works without a key. |
-| **`nexus-app`'s Metro holds port 8081** | Mobile e2e | The dev client attaches to whichever bundler owns 8081 and loads *that* project's JavaScript into Switchboard's native shell, red-screening on native modules Switchboard does not ship. Resolutions: stop the competing Metro, or produce a release build where the bundler-URL fallback does not apply. See `.maestro/README.md`. |
-| **Mobile app: keep or drop?** | Roadmap clarity | The web dashboard is now the primary surface. The app builds, runs, and has 95 tests, but every feature added to the product is a second implementation cost while it lives. No competitor ships a first-party mobile management app — it is a genuine differentiator, but a demo asset rather than something anyone buys on. |
-| **Visual review in light and dark** | Design sign-off | Never done. Both UIs use semantic tokens only and are theme-aware by construction, but nobody has looked at the pixels. |
+| **Visual review in light and dark** | Design sign-off | Never done. The dashboard uses semantic tokens only and is theme-aware by construction, but nobody has looked at the pixels. |
 
 ---
 
@@ -46,44 +51,82 @@ Nothing here is a technical problem. Each needs a human.
 These are not missing features. They are things Switchboard already claims to do, done
 wrong or incompletely — cheaper to fix now than to explain later.
 
-### The peeking problem — `RolloutMonitorService` · effort **S–M** · **fix first**
-The healing/optimizing loop runs a **fixed-horizon two-proportion z-test (z > 3, 48h window,
-min 50 samples) repeatedly on a schedule**. Repeatedly testing a fixed-horizon statistic
-inflates the false-positive rate without bound as the loop runs — the textbook peeking
-problem. There is also no sample-ratio-mismatch gate and no correction across the metrics
-screened simultaneously.
+### ~~The peeking problem~~ — `RolloutMonitorService` · **Landed 2026-08-24**
+The healing/optimizing loop ran a fixed-horizon two-proportion z-test repeatedly on a
+schedule, which inflates the false-positive rate without bound. Now a Gaussian-mixture SPRT
+reported as an e-value, so Ville's inequality bounds the error however often the monitor looks.
+**The acceptance property: the scan interval no longer appears in any decision.**
 
-This is the statistical core of the product's headline differentiator. It is not a
-theoretical objection: LaunchDarkly publicly replaced the core of Guarded Releases with
-frequentist sequential testing plus multiple-comparisons correction in January 2026 and
-said false positives were the reason. Fix: an anytime-valid/sequential statistic, an SRM
-gate, and a correction across screened metrics.
+Also landed with it, and mostly larger than the defect this item named:
 
-### Client-side exposure in the bootstrap payload · effort **M**
-`GET /api/eval/bootstrap` returns the full rule set **and every segment's `includedKeys`** —
-raw user identifiers. Any browser or mobile use of Switchboard today leaks the entire
-targeting configuration and cohort membership to the client. There is exactly one kind of
-SDK key.
+- **Rates are proportions of distinct subjects, not ratios of event counts.** The denominator
+  used to be evaluation events, so a server SDK evaluating in a hot loop made one unhappy user
+  look like a thousand — understating the variance by roughly the evaluations-per-subject and
+  inflating z by roughly its square root. **No sequential statistic fixes that**; an
+  anytime-valid test on those counts is rigorously testing the wrong null.
+- **Evidence accumulates from the allocation epoch** rather than a rolling 48h window. A
+  rolling window is not a filtration, so the argument that makes repeated looks safe does not
+  apply to one.
+- **The baseline comes from configuration**, not from whichever arm had the most traffic.
+- **An SRM gate** (Dirichlet-multinomial e-value) suppresses a flag's comparisons when traffic
+  did not arrive as configured, counting only rollout-served subjects so a targeting rule does
+  not trip it.
+- **e-BH across the environment, per direction**, replacing an uncorrected max-over-challengers
+  that was hiding inside a tie-break.
+- **The dedupe key is epoch-anchored.** It used to end in the current hour, so one incident
+  could file up to 48 findings — and the old rescan test only passed because it re-ran inside
+  the same wall-clock hour.
+- Constants are now `switchboard.rollout-monitor.*` rather than `private static final`.
 
-Competitors all solve this and none the same way: LaunchDarkly separates SDK key / mobile
-key / client-side ID and gates each flag on per-platform availability; DevCycle separates
-server/client/mobile keys and adds feature obfuscation; Flagsmith makes client SDKs
-remote-evaluation-only by design; ConfigCat hashes comparison values with a per-config salt
-so emails never appear in the public payload. Needs: distinct key kinds, per-flag
-client-side availability, and an evaluated-payload (rather than rule-set) bootstrap for
-client contexts.
+Reasoning in [DECISIONS.md](DECISIONS.md#rollout-monitoring), operator-facing summary in
+[ai-layer.md](ai-layer.md). `PeekingTest` asserts both that the new rule holds its error rate
+across 48 looks at A/A traffic (0.0025 against alpha 0.01) and that the old one does not
+(0.0090 against a nominal 0.00135) — the second is what gives the first meaning.
+
+### ~~Client-side exposure in the bootstrap payload~~ · **Landed 2026-08-24 (server side)**
+`GET /api/eval/bootstrap` returned the full rule set and every segment's raw `includedKeys` to
+any SDK-key holder, and there was exactly one kind of key — so there was no way to hand a
+browser a key without handing it the entire targeting configuration and every cohort's
+membership list.
+
+Now: `sdk_keys.kind` is `SERVER` | `CLIENT` (`MOBILE` reserved), `flags.client_side_available`
+gates per-flag exposure and **defaults to false**, and `POST /api/eval/bootstrap` returns
+evaluated values — served variation only, no rules, no segments, no sibling variations.
+
+Details worth knowing before changing any of it:
+
+- **The filter applies to every evaluation endpoint**, not just the bootstrap. Filtering only
+  the bootstrap would make the flag a fig leaf, since `POST /api/eval/{key}` would still
+  confirm a hidden flag exists and say what it serves. A hidden flag reads as *absent*, not
+  forbidden — same default, same `SDK_DEFAULT`.
+- **The ETag is a body digest, not the `stateVersion`.** Once the payload depends on the
+  caller's context, a version ETag is a cross-user leak: two contexts at one version produce
+  different bodies under identical ETags. The same bug existed on `POST /ofrep/v1/evaluate/flags`
+  and is fixed there too — observable as one 200 instead of a 304 for a provider holding a
+  cached ETag.
+- **A client key is refused `POST /api/events/metrics`.** Those rows drive automated rollbacks,
+  so accepting them from a key anyone can read out of a JS bundle is accepting unauthenticated
+  flag changes. Neither the SRM gate nor the sequential test catches forged-but-real evidence.
+- **A server key is unaffected** and still sees every flag regardless of the new column — the
+  guarantee that makes the fail-closed default safe, asserted by `ClientSdkKeyIT`.
+
+Remaining: the TypeScript SDK has no client mode yet, so a client key is usable from `fetch`
+but not yet from the first-party SDK. **S–M**
 
 ### Smaller
-- **The mobile app still hardcodes Firebase.** The backend and dashboard are now
-  provider-agnostic; the Expo app still authenticates through a Firebase emulator REST
-  bridge. Contained work, mirroring what `dashboard/src/auth/` already does — but pointless
-  if the app is dropped, so it waits on that decision. **S–M**
-- **Flag list pagination is not wired in the dashboard** (`listFlags` returns `nextCursor`;
-  the page requests 50 and stops). Invisible at nine seeded flags, breaks at real volume. **S**
-- **429 is not implemented** — no rate limiter exists anywhere. OFREP documents a
-  `Retry-After` path that will never fire. **S–M**
-- **Dashboard ships as one 589 kB chunk** (Firebase dominates). Fine internally; route-level
-  lazy loading is the fix. **S**
+- ~~**Flag list pagination**~~ **Done 2026-08-25.** The cursor existed end to end; the page dropped
+  it and silently truncated at 50. Now a Load-more button, matching the three other pages that
+  already had it.
+- ~~**429 is not implemented**~~ **Done 2026-08-25.** A per-credential token bucket, in front of
+  authentication so a client spraying invented keys is refused before it reaches the database.
+  Sends a real `Retry-After`, which OFREP has always documented and nothing could produce.
+  **Per instance:** two instances mean two buckets, and this is the first thing here that genuinely
+  wants a shared store.
+- ~~**Dashboard ships as one 589 kB chunk**~~ **Done 2026-08-25.** Route-level lazy loading: 49
+  chunks, largest 352 kB, with Firebase (104 kB) now deferred to its own. Login and the auth
+  callbacks stay eager — they are the first paint for a signed-out visitor, so a chunk request in
+  front of the login form would be latency for nothing.
+- ~~**`listEnvironments()` is dead code**~~ — removed; environments arrive embedded in `Project`.
 - **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Step 1 is done — AI applies now
   route through the approval gate. Remaining: make `ai_proposals` a *source* table and
   `change_requests` the single lifecycle for every proposed write, then collapse the status
@@ -97,11 +140,12 @@ One environment snapshot cache does the heavy lifting and nothing else is cached
 fine at demo scale and wrong at any real one.
 
 ### What exists
-- **`EnvSnapshotCache`** — a Caffeine `AsyncCache`, 10,000 entries, 5-minute
-  expire-after-write, invalidated across instances by the Postgres `NOTIFY` listener. This
-  covers the hot path: evaluation, bootstrap and the SSE payload all read through it. The
-  async loader gives single-flight per key, so an eviction on a busy environment does not
-  stampede the database.
+- **`EnvSnapshotCache`** — now on the shared `CacheRegistry` seam (it was migrated first, on
+  purpose: it already worked, so the seam was proven against something known-good before anything
+  else depended on it). 10,000 entries, 5-minute expire-after-write, invalidated across instances by
+  the Postgres `NOTIFY` listener. Covers the hot path: evaluation, bootstrap and the SSE payload all
+  read through it, with single-flight per key so an eviction on a busy environment does not stampede
+  the database.
 - **HTTP validation caching** — `ETag` / `If-None-Match` returning 304 on the bootstrap and
   OFREP bulk endpoints.
 - **Client-side** — the TypeScript SDK holds config in memory and evaluates locally, so a
@@ -201,10 +245,20 @@ polymorphic type handling has to be configured deliberately; unknown-property fa
 be tolerated or a rolling deploy breaks the moment two versions share a cache; and
 replicated entries need a real TTL rather than living forever. **M**
 
-**No cache observability.** Hit rate, eviction count and load latency are not measured
-anywhere, so none of the above can be prioritised with evidence rather than reasoning.
-Caffeine exposes these directly; wiring them to metrics is small and should come *first*.
-**S**
+**~~No cache observability.~~ Landed 2026-08-24.** `micrometer-registry-prometheus` is wired
+and `/actuator/prometheus` is served on a **separate management port** (`MANAGEMENT_PORT`,
+default 28081), so the scrape endpoint is not on the public listener. `EnvSnapshotCache` now
+calls `recordStats()` — without it every meter reads zero, which looks exactly like a working
+cache with no traffic — and is bound under cache name `envSnapshot` for hit rate, evictions,
+load latency and size. The two paths this section argues for caching are timed:
+`switchboard.auth.sdk_key.resolve` and `switchboard.access.permissions.resolve`. SSE
+subscribers and tracked environments are gauged, the second so the never-evicted sink map
+shows up as a widening gap against the first. `MetricsIT` asserts each meter **moves**, not
+merely that it exists.
+
+**The management port is unauthenticated** — the management child context does not inherit
+`SecurityConfig`'s filter chain. It must be bound to the pod or host network and never
+published; this needs restating in the deployment story.
 
 **The SDK has no local persistence.** Config lives in memory only, so a process restart
 always requires a successful network fetch before the first evaluation is accurate. If
@@ -217,14 +271,23 @@ nothing is set up to serve it from an edge. Related to the multi-region non-goal
 **L**
 
 ### Suggested order within this area
-1. **Metrics**, so everything after is evidence-driven rather than reasoned. Caffeine exposes
-   hit rate, evictions and load latency directly.
-2. **Introduce the Spring cache abstraction** and migrate `EnvSnapshotCache` onto it — one
-   cache, already working, so the seam is proven against something known-good before
-   anything depends on it.
-3. **The SDK-key cache**, the largest single win, written through the new seam.
-4. **Negative caching**, which closes the denial-of-service vector.
-5. **Permissions**, then **rollout stats**.
+1. ~~**Metrics**, so everything after is evidence-driven rather than reasoned.~~ **Done** —
+   see above. The remaining items below are now measurable before and after.
+2. ~~**Introduce the cache abstraction**~~ **Done** — a reactive `SwitchboardCache` seam rather
+   than Spring's synchronous one; see [DECISIONS.md](DECISIONS.md) for why the mechanism changed
+   while the intent did not.
+3. ~~**The SDK-key cache**, the largest single win.~~ **Done** — measured live at 20 evaluation
+   requests to **1** database resolution (19 hits). Invalidated on mint and revoke, across
+   instances, over a second `NOTIFY` channel.
+4. ~~**Negative caching**, which closes the denial-of-service vector.~~ **Done** for SDK keys, on a
+   shorter TTL than positive entries.
+5. ~~**Permissions**, then **identity**, then **rollout stats**.~~ **Done.** Measured live: 15
+   repeated flag-list requests add **0** permission resolutions. Permissions carry the shortest TTL
+   of any cache (30s) because staleness there means someone keeps access that was just taken away,
+   and grants, revocations and membership changes evict on top of that — `PermissionCacheIT` holds
+   revocation-takes-effect-immediately in place. Absence is deliberately not cached for permissions
+   or identity: "no standing" and "no such user" both change the moment somebody is granted a role
+   or signs in for the first time.
 
 Redis is not on this list on purpose. The seam makes it a configuration change whenever the
 deployment shape justifies it.
@@ -233,29 +296,47 @@ deployment shape justifies it.
 
 ## 4. Now — what a serious buyer expects and we lack
 
-### Richer targeting · effort **M** · highest visible deficit in a demo
-Six operators (`EQUALS`, `IN`, `CONTAINS`, `STARTS_WITH`, `SEGMENT_MATCH`,
-`NOT_SEGMENT_MATCH`), **no negation**, and **string-only attributes**. "Release to app
-version ≥ 4.2.0 on iOS" is currently inexpressible. Every serious competitor has numeric,
-date, semver and set operators; most have regex; ConfigCat has 30+ comparators.
+### ~~Richer targeting~~ · **Landed 2026-08-25**
+"Release to app version ≥ 4.2.0 on iOS" is one rule now, verified live. Typed attributes
+(string / number / boolean / array), sixteen operators across text, numeric, time and semver, and
+per-clause `negate`.
 
-Needs typed attributes (not `Map<String,String>`), the full operator set, and per-clause
-negation. **Any change here must land as a spec change plus regenerated conformance vectors
-in the same commit** — that rule is what keeps the server and every SDK in agreement.
+**Clause values stayed strings and the operator decides how to read both sides.** That keeps the
+wire stable and a rule legible in a form, a diff and a JSON blob — one rule to learn instead of a
+type system to negotiate.
 
-### MCP server · effort **S** (after PATs) · table stakes, not a differentiator
-LaunchDarkly (~120 tools), Statsig, ConfigCat, DevCycle, Kameleoon, Flagsmith, PostHog,
-Unleash, Flipt, GrowthBook, Harness and Optimizely all ship one. Switchboard has none, and
-consequently no IDE or CLI surface at all. A thin server over the existing REST API.
+Landed spec-first, in one commit: `spec/evaluation.md` sections 1.1, 3.1, 3.2 and a new 3.3, plus
+**306 generated vectors** executed by both the Java server and the TypeScript SDK. The vector
+generator that `spec/README.md` and `CLAUDE.md` had been promising since the spec was written now
+exists, and the runners no longer hardcode a count.
 
-**Blocked on personal access tokens** (below) — an MCP server cannot authenticate with
-expiring Firebase tokens.
+Two things worth knowing before relying on them, both pinned by vectors: a **negated clause on a
+missing attribute is TRUE** (LaunchDarkly's semantics, and what the English means), and `MATCHES` is
+a **restricted regex** — unanchored, no lookaround, no backreferences, 512-character cap — both to
+stop a pathological pattern stalling evaluation and so Java and JavaScript cannot disagree.
 
-### Personal access tokens · effort **S** · unblocks MCP and the CLI
-There is no non-interactive authentication for the management API. Everything today is
-either a Firebase user token (expires) or an SDK key (evaluation surface only). Needs
-scoped, revocable, hashed tokens reusing the `sdk_keys` storage pattern and resolving to
-the RBAC permission model already in place.
+`NOT_SEGMENT_MATCH` is deprecated but still accepted, normalised at read time to `SEGMENT_MATCH` +
+negate, so configs written before negation existed evaluate identically without being rewritten.
+
+### ~~MCP server~~ · **Landed 2026-08-25**
+A new `mcp/` workspace: twelve tools over the existing REST API, no backend surface of its own,
+authenticated by a personal access token. `mcp/scripts/live-check.mjs` drives every tool against a
+running stack (19 assertions) and confirms revocation stops it working.
+
+The detail that mattered most: **a gated write returns 202 and changes nothing**, so every write
+tool returns an explicit `applied` field and says "Do not report it as done" when queued. An agent
+that read 202 as success would tell its user a rollout happened when it had not — worse than an
+error. Writes also carry `expectedVersion`, so a conflict surfaces as a conflict.
+
+### ~~Personal access tokens~~ · **Landed 2026-08-25**
+`V7` adds `personal_access_tokens`, reusing the `sdk_keys` storage pattern (display prefix,
+SHA-256, `revoked_at`) plus `expires_at` and `last_used_at`. An `sb_pat_` token resolves to the
+**user** principal, so the existing RBAC applies unchanged.
+
+**No scope column, deliberately.** A second authorization vocabulary is a second place for a
+permission bug to live, and it would only ever be exercised by whoever used a token — where the
+RBAC that already exists is checked on every request. To narrow a token, create a user with a
+narrower role and mint it as them. Tokens are personal: somebody else's reads as 404, not 403.
 
 ### Signed webhooks · effort **S**
 No general flag-change webhook exists (the AI layer has a narrow notification hook). Needs
@@ -311,10 +392,11 @@ What breaks at that scale is everything around them:
 - **Only three environments have a visual identity.** `envColors.ts` maps `dev`, `staging`
   and `production` (plus a `prod` alias); every other key falls back to neutral, so seven of
   ten environments look identical at a glance.
-- **The UI assumes a handful.** The flags list uses a segmented control for environment
-  selection, which is unusable past about five, and flag detail renders one card per
-  environment — a long scroll at ten. Both need to become a searchable picker and a
-  collapsed or filtered list.
+- **The UI assumes a handful.** Environment selection is one global `Select` in the header
+  (`WorkspaceSwitchers.tsx`), but the flags list renders **one state chip per environment on
+  every row** (`FlagsPage.tsx`) — at ten environments each row carries ten chips — and flag
+  detail renders a left rail with one entry per environment plus an at-a-glance chip row
+  (`FlagDetailPage.tsx`). Both need to collapse or filter rather than enumerate.
 - **Ordering is conventional, not declared.** Environments sort by a hardcoded
   dev → staging → production preference with extras appended. There is no sort key, so a
   team with `dev`, `qa`, `uat`, `perf`, `staging-eu`, `staging-us`, `prod-eu`, `prod-us`
@@ -348,18 +430,30 @@ implementation has an objective acceptance bar: **pass all 201 vectors**.
 
 ---
 
-## 6. Operations — never started
+## 6. Operations
 
-None of this exists. It is what stands between "runs on a laptop" and "runs for customers".
+Most of this landed on 2026-08-25. What is left is the part that needs traffic rather than code.
 
-- **No CI.** No workflows at all; every check is run by hand. **S**
-- **No Dockerfiles, no deployment story, no hosting.** **M**
-- **No load or performance testing.** Every latency claim in the docs is untested. Worth
-  knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
-- **No monitoring, alerting, or backup/restore.** **M**
-- **Event table growth is unbounded in practice** — `eval_events` and `metric_events` are
-  monthly-partitioned and a partition-roll job exists, but retention has never run against
-  real volume. **S**
+- ~~**No CI.**~~ **Done.** `.github/workflows/ci.yml`: backend, dashboard, sdk, mcp, conformance,
+  live and containers. The live job brings up a real stack, seeds it and runs all seven check
+  scripts — including `auth-check`'s OIDC leg, which needed a second identity provider configured
+  and had never actually run.
+- ~~**No Dockerfiles, no deployment story.**~~ **Done.** Multi-stage images for both, a production
+  compose file, and [DEPLOYMENT.md](DEPLOYMENT.md). The dashboard's configuration moved from
+  build-time to runtime so one image serves any environment; `VITE_AUTH_PROVIDER` stayed a build
+  argument because it decides which provider is *compiled in*, and a runtime override of it is now
+  reported rather than ignored.
+- ~~**Event table growth is unbounded in practice.**~~ **Configuration now**
+  (`switchboard.events.retention-months`, default 3) rather than a constant, documented as
+  destructive-on-lowering, and clamped at one month because the current month's partition is the
+  one being written to. It still has not run against real volume — that is the part below.
+- **No load or performance testing.** Every latency claim in the docs is untested, retention
+  included. Worth knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
+- **No monitoring or alerting.** `/actuator/prometheus` exposes the meters; nothing scrapes them
+  and no alert is defined on them. Backup/restore is documented but has never been rehearsed. **M**
+- **Hosting.** The compose file is a single node by construction. The order in which that stops
+  being enough is written down in [DEPLOYMENT.md](DEPLOYMENT.md#scaling-past-one-node); the first
+  rung is the per-instance rate limiter. **M**
 
 ---
 
@@ -378,14 +472,16 @@ Consciously not building, so nobody re-litigates them by accident:
 
 ## Suggested order
 
-1. **Commit the repo.** Nothing else matters if this is lost.
-2. **Peeking fix.** A defect in the headline differentiator; small and contained.
-3. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
+1. **Peeking fix.** A defect in the headline differentiator; small and contained.
+2. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
    from a browser.
-4. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
+3. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
    for authorization; this is the cheapest large win in the system.
-5. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
-6. **Targeting operators and typed attributes.** The most visible gap in a live demo.
-7. **CI and a deployment story.** The bridge from laptop to product — and the point at
-   which the shared-cache-tier question needs an answer.
-8. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+4. ~~**Personal access tokens → MCP server.**~~ **Done.**
+5. ~~**Targeting operators and typed attributes.**~~ **Done.**
+6. ~~**CI and a deployment story.**~~ **Done.** The shared-cache question it was meant to force
+   has an answer: not yet, and the reason is written down — the caches are read-through over
+   `NOTIFY`-invalidated data, so a shared store buys nothing there. The rate limiter is the one
+   thing that genuinely wants Redis, and only above one instance.
+7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+8. **Load and performance testing**, which is now the largest untested claim in the repo.

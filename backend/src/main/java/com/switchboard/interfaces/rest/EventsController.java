@@ -2,11 +2,14 @@ package com.switchboard.interfaces.rest;
 
 import com.switchboard.domain.common.ValidationException;
 import com.switchboard.interfaces.rest.api.EventsApi;
+import com.switchboard.domain.common.ForbiddenException;
 import com.switchboard.interfaces.rest.model.EvalEventBatch;
 import com.switchboard.interfaces.rest.model.EvalEventItem;
 import com.switchboard.interfaces.rest.model.MetricEventBatch;
 import com.switchboard.interfaces.rest.model.MetricEventItem;
 import com.switchboard.interfaces.security.Principals;
+import com.switchboard.interfaces.security.SdkKeyPrincipal;
+import org.springframework.beans.factory.annotation.Value;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -27,9 +30,13 @@ public class EventsController implements EventsApi {
     private static final int MAX_BATCH = 1000;
 
     private final DatabaseClient db;
+    private final boolean allowPublicMetricEvents;
 
-    public EventsController(DatabaseClient db) {
+    public EventsController(
+        DatabaseClient db,
+        @Value("${switchboard.sdk.client-keys.allow-metric-events:false}") boolean allowPublicMetricEvents) {
         this.db = db;
+        this.allowPublicMetricEvents = allowPublicMetricEvents;
     }
 
     @Override
@@ -41,10 +48,33 @@ public class EventsController implements EventsApi {
             .thenReturn(ResponseEntity.accepted().build());
     }
 
+    /**
+     * Metric ingestion, refused for public keys by default.
+     *
+     * <p>These rows are the input to an <b>automated write path</b>: the rollout monitor reads them
+     * and can roll a flag back on what they say. A key shipped inside a browser bundle is readable
+     * by anyone, so accepting metrics from one means accepting unauthenticated instructions to
+     * change flags - post enough {@code {"metricKey":"error"}} and a healthy rollout gets reverted.
+     * Neither the SRM gate nor the sequential test catches that: the allocation is fine and the
+     * evidence is real, it is just forged.
+     *
+     * <p>Eval events stay open to public keys. Since rates are computed per distinct subject rather
+     * than per event, forging them inflates a denominator and, if anything, makes the monitor less
+     * likely to act.
+     *
+     * <p>If browser-side metrics are genuinely needed later, the fix is a {@code key_kind} stamp on
+     * the rows plus excluding public-origin rows from the healing loop - a column, not a policy
+     * argument. The property exists so an operator who has thought about that can opt in.
+     */
     @Override
     public Mono<ResponseEntity<Void>> ingestMetricEvents(
         Mono<MetricEventBatch> metricEventBatch, ServerWebExchange exchange) {
         return Principals.currentSdkKey()
+            .flatMap(principal -> principal.isPublic() && !allowPublicMetricEvents
+                ? Mono.<SdkKeyPrincipal>error(new ForbiddenException(
+                    "Metric events cannot be reported with a client-side SDK key: they drive "
+                        + "automated rollbacks. Report them from your server."))
+                : Mono.just(principal))
             .zipWith(metricEventBatch)
             .flatMap(t -> insertMetricEvents(t.getT1().environmentId(), t.getT2().getEvents()))
             .thenReturn(ResponseEntity.accepted().build());

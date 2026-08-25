@@ -6,103 +6,142 @@ import com.switchboard.domain.ai.AiProposal;
 import com.switchboard.domain.ai.AnomalyFinding;
 import com.switchboard.domain.ai.AnomalyFindingRepository;
 import com.switchboard.domain.ai.AnomalyInput;
+import com.switchboard.domain.ai.AnomalyKind;
+import com.switchboard.domain.ai.AnomalyStatistics;
 import com.switchboard.domain.ai.AnomalyStatus;
+import com.switchboard.domain.ai.AnomalyTestKind;
 import com.switchboard.domain.ai.EnvChange;
+import com.switchboard.domain.ai.EpochEvidenceRepository;
 import com.switchboard.domain.ai.FlagAssistantPort;
 import com.switchboard.domain.ai.FlagChangeDiff;
 import com.switchboard.domain.ai.ProposalKind;
 import com.switchboard.domain.ai.ProposalStatus;
+import com.switchboard.domain.ai.RolloutBaseline;
 import com.switchboard.domain.ai.RolloutCandidate;
 import com.switchboard.domain.ai.RolloutMetricsRepository;
+import com.switchboard.domain.ai.RolloutRamp;
 import com.switchboard.domain.ai.TargetingDraft;
 import com.switchboard.domain.ai.ValueServe;
 import com.switchboard.domain.ai.ValueWeight;
 import com.switchboard.domain.ai.VariantAggregate;
+import com.switchboard.domain.ai.stats.EBenjaminiHochberg;
+import com.switchboard.domain.ai.stats.MixtureSequentialTest;
+import com.switchboard.domain.ai.stats.SampleRatioMismatch;
+import com.switchboard.domain.ai.stats.TwoProportionZ;
 import com.switchboard.domain.flag.Flag;
 import com.switchboard.domain.flag.RolloutOrVariation;
 import com.switchboard.domain.flag.Variation;
+import com.switchboard.domain.flag.WeightedVariation;
 import com.switchboard.domain.org.OrgRepository;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
  * The healing / optimizing loop.
  *
- * <p>Every live rollout is measured over the last 48 hours and screened with a
- * two-proportion z-test against its highest-traffic variation. A variant whose
- * ERROR rate is significantly worse produces an anomaly finding plus a suggested
- * rollback to the baseline (auto-applied when the org opted in). A variant whose
- * CONVERSION rate is significantly better produces an optimization proposal that
- * ramps it to the next step of 25/50/75/100.
+ * <p>Every live rollout is measured from the start of its current allocation epoch and screened
+ * with an anytime-valid mixture SPRT against the variation the <em>configuration</em> names as the
+ * baseline. A challenger doing significantly worse on the error metric produces an anomaly finding
+ * plus a suggested rollback (auto-applied when the org opted in); one doing significantly better on
+ * conversion produces a proposal ramping it to the next step of 25/50/75/100.
  *
- * <p>The scan is safe to run as often as you like: findings are deduplicated on
- * {@code envId:flagKey:variationId:metric:windowStartHour}, and a flag+env that
- * already has an open draft of the same kind is skipped.
+ * <h2>The property that makes this safe to schedule</h2>
+ *
+ * <p><b>The scan interval does not appear in any decision.</b> Run it every minute or once a day:
+ * the error guarantees are identical, because the statistic is valid at every stopping time rather
+ * than at one pre-committed sample size. The predecessor ran a fixed-horizon z-test hourly, which
+ * meant more frequent scanning bought more false rollbacks, and nothing in the code said so.
+ *
+ * <h2>Two phases, and why</h2>
+ *
+ * <p>The scan measures <em>everything</em>, then decides. That shape is forced by the multiplicity
+ * correction: e-BH needs the whole family of hypotheses in hand, and the family spans every
+ * rolling-out flag in the environment. Deciding one flag at a time - as the predecessor did, taking
+ * the maximum z across challengers and testing only that one - is a maximum of dependent statistics
+ * judged against a single-hypothesis threshold.
+ *
+ * <h2>Gates, in order</h2>
+ *
+ * <ol>
+ *   <li>The flag must actually split traffic, and have an epoch.
+ *   <li>Each arm needs {@code min-subjects} distinct subjects - subjects, not evaluation events.
+ *   <li>The sample-ratio-mismatch gate must pass. If it fails, every comparison for that flag is
+ *       suppressed for the rest of the epoch and an SRM finding is raised for a human instead.
+ *   <li>e-BH across the environment's family, at the direction's alpha.
+ * </ol>
+ *
+ * <p>Findings dedupe on {@code envId:flagKey:variationId:metric:epochStart}, so one hypothesis
+ * yields one finding per epoch however often the scan runs.
  */
 @Service
 public class RolloutMonitorService {
 
     private static final Logger log = LoggerFactory.getLogger(RolloutMonitorService.class);
 
-    private static final Duration WINDOW = Duration.ofHours(48);
-    private static final long MIN_SAMPLES = 50;
-    private static final double Z_THRESHOLD = 3.0;
     private static final String ACTOR = "switchboard-monitor";
-    private static final String ERROR_METRIC = "error";
-    private static final String CONVERSION_METRIC = "conversion";
+    private static final String SRM_METRIC = "allocation";
 
     private final RolloutMetricsRepository metrics;
     private final AnomalyFindingRepository findings;
+    private final EpochEvidenceRepository evidence;
     private final ProposalService proposals;
     private final FlagAssistantPort assistant;
     private final OrgSettingsService orgSettings;
     private final OrgRepository orgs;
     private final NotificationWebhook webhook;
+    private final RolloutMonitorProperties properties;
 
     @SuppressWarnings("checkstyle:ParameterNumber")
     public RolloutMonitorService(
         RolloutMetricsRepository metrics,
         AnomalyFindingRepository findings,
+        EpochEvidenceRepository evidence,
         ProposalService proposals,
         FlagAssistantPort assistant,
         OrgSettingsService orgSettings,
         OrgRepository orgs,
-        NotificationWebhook webhook) {
+        NotificationWebhook webhook,
+        RolloutMonitorProperties properties) {
         this.metrics = metrics;
         this.findings = findings;
+        this.evidence = evidence;
         this.proposals = proposals;
         this.assistant = assistant;
         this.orgSettings = orgSettings;
         this.orgs = orgs;
         this.webhook = webhook;
+        this.properties = properties;
     }
 
     public Mono<JobResult> scan() {
-        Instant since = Instant.now().minus(WINDOW).truncatedTo(ChronoUnit.HOURS);
+        if (!properties.isEnabled()) {
+            return Mono.just(new JobResult("rollout-scan", 0, 0, "disabled"));
+        }
+        Instant now = Instant.now();
         return metrics.findRolloutCandidates()
             .filter(RolloutMonitorService::isLiveRollout)
-            .concatMap(candidate -> examine(candidate, since)
+            .concatMap(candidate -> measure(candidate, now)
                 .onErrorResume(e -> {
                     log.warn("Rollout scan failed for {}/{}: {}",
                         candidate.flag().key(), candidate.envKey(), e.toString());
-                    return Mono.just(0);
+                    return Mono.empty();
                 }))
-            .reduce(new int[] {0, 0}, (acc, created) -> new int[] {acc[0] + 1, acc[1] + created})
-            .map(acc -> new JobResult("rollout-scan", acc[0], acc[1],
-                "window=48h zThreshold=" + Z_THRESHOLD + " minSamples=" + MIN_SAMPLES));
+            .collectList()
+            .flatMap(this::decide);
     }
 
     /** Only heads that actually split traffic are worth measuring. */
@@ -119,82 +158,273 @@ public class RolloutMonitorService {
             && serve.rollout().stream().filter(weight -> weight.weight() > 0).count() >= 2;
     }
 
-    // ---------------------------------------------------------------- one flag-env
+    // ---------------------------------------------------------------- phase one: measure
 
-    private Mono<Integer> examine(RolloutCandidate candidate, Instant since) {
+    /**
+     * Measures one flag-env over its epoch and turns it into hypotheses. Takes no action and
+     * writes nothing except the e-process supremum, which has to be recorded before the family can
+     * be assembled.
+     */
+    private Mono<RolloutEvidence> measure(RolloutCandidate candidate, Instant now) {
+        Instant epochStart = candidate.epochStartedAt();
+        if (epochStart == null) {
+            // No version history for a head that exists. Cannot establish an origin, so cannot
+            // make an anytime-valid claim - decline to measure rather than guess a window.
+            return Mono.empty();
+        }
+        Instant floor = now.minus(properties.getMaxLookback());
+        boolean truncated = epochStart.isBefore(floor);
+        Instant since = truncated ? floor : epochStart;
+
+        Optional<UUID> baselineId = RolloutBaseline.pick(candidate.config());
+        if (baselineId.isEmpty()) {
+            return Mono.empty();
+        }
+
         return metrics.aggregate(candidate.environmentId(), candidate.flag().key(), since)
             .flatMap(aggregates -> {
                 Optional<VariantAggregate> baseline = aggregates.stream()
-                    .max(Comparator.comparingLong(VariantAggregate::evalCount))
-                    .filter(agg -> agg.evalCount() >= MIN_SAMPLES);
+                    .filter(agg -> baselineId.get().equals(agg.variationId()))
+                    .findFirst()
+                    .filter(agg -> agg.subjectCount() >= properties.getMinSubjects());
                 if (baseline.isEmpty()) {
-                    return Mono.just(0);
+                    return Mono.empty();
                 }
-                return orgSettings.get(candidate.orgId())
-                    .flatMap(settings -> judge(candidate, since, aggregates, baseline.get(), settings));
+                return assemble(candidate, since, truncated, aggregates, baseline.get());
             });
     }
 
-    private Mono<Integer> judge(
-        RolloutCandidate candidate, Instant since, List<VariantAggregate> aggregates,
-        VariantAggregate baseline, OrgSettings settings) {
+    private Mono<RolloutEvidence> assemble(
+        RolloutCandidate candidate, Instant since, boolean truncated,
+        List<VariantAggregate> aggregates, VariantAggregate baseline) {
+
+        double srmLogE = sampleRatioLogEValue(candidate, aggregates);
+        boolean srmFailed = srmLogE >= -Math.log(properties.getAlpha().getSrm());
+        if (srmFailed) {
+            // Randomization is broken. Every rate comparison on these arms is confounded, so none
+            // of them join a family - suppression is the entire point of the gate.
+            return Mono.just(new RolloutEvidence(
+                candidate, since, truncated, aggregates, baseline, true, srmLogE, List.of()));
+        }
 
         List<VariantAggregate> challengers = aggregates.stream()
             .filter(agg -> !agg.variationId().equals(baseline.variationId()))
-            .filter(agg -> agg.evalCount() >= MIN_SAMPLES)
+            .filter(agg -> agg.subjectCount() >= properties.getMinSubjects())
             .toList();
 
-        Optional<VariantAggregate> degraded = challengers.stream()
-            .filter(agg -> errorZ(agg, baseline) > Z_THRESHOLD)
-            .max(Comparator.comparingDouble(agg -> errorZ(agg, baseline)));
-        if (degraded.isPresent()) {
-            return heal(candidate, since, degraded.get(), baseline, settings);
+        RolloutEvidence shell = new RolloutEvidence(
+            candidate, since, truncated, aggregates, baseline, false, srmLogE, List.of());
+
+        return Flux.fromIterable(challengers)
+            .concatMap(challenger -> Flux.merge(
+                hypothesis(shell, challenger, RolloutEvidence.Direction.DEGRADATION),
+                hypothesis(shell, challenger, RolloutEvidence.Direction.IMPROVEMENT)))
+            .collectList()
+            .map(hypotheses -> new RolloutEvidence(
+                candidate, since, truncated, aggregates, baseline, false, srmLogE, hypotheses));
+    }
+
+    /**
+     * One challenger-versus-baseline comparison on one metric, with its e-value folded into the
+     * epoch's running supremum. The supremum, not this look, is what the decision and the
+     * always-valid p-value are built from.
+     */
+    private Mono<RolloutEvidence.Hypothesis> hypothesis(
+        RolloutEvidence shell, VariantAggregate challenger, RolloutEvidence.Direction direction) {
+
+        boolean degradation = direction == RolloutEvidence.Direction.DEGRADATION;
+        String metricKey = degradation
+            ? properties.getMetrics().getErrorKey()
+            : properties.getMetrics().getConversionKey();
+        double tau = degradation
+            ? properties.getTau().getError()
+            : properties.getTau().getConversion();
+
+        VariantAggregate baseline = shell.baseline();
+        long challengerHits = degradation ? challenger.errorSubjects() : challenger.conversionSubjects();
+        long baselineHits = degradation ? baseline.errorSubjects() : baseline.conversionSubjects();
+
+        double logE = MixtureSequentialTest.logEValueOneSided(
+            challengerHits, challenger.subjectCount(), baselineHits, baseline.subjectCount(), tau);
+        double zScore = TwoProportionZ.zScore(
+            challengerHits, challenger.subjectCount(), baselineHits, baseline.subjectCount());
+
+        EpochEvidenceRepository.EpochEvidenceKey key = new EpochEvidenceRepository.EpochEvidenceKey(
+            shell.candidate().environmentId(), shell.candidate().flag().key(),
+            shell.candidate().epochStartedAt(), metricKey, challenger.variationId());
+
+        return evidence.record(key, logE, tau, baseline.variationId())
+            .defaultIfEmpty(logE)
+            .map(supremum -> new RolloutEvidence.Hypothesis(
+                shell, direction, metricKey, challenger,
+                challengerHits, challenger.subjectCount(),
+                baselineHits, baseline.subjectCount(),
+                tau, supremum, zScore));
+    }
+
+    /**
+     * The allocation gate.
+     *
+     * <p>Observed counts are narrowed to rollout-served subjects: traffic served by an individual
+     * target or a matched rule never went through the fallthrough, so counting it against the
+     * configured weights would report a mismatch the moment anyone adds a targeting rule.
+     */
+    private double sampleRatioLogEValue(RolloutCandidate candidate, List<VariantAggregate> aggregates) {
+        if (!properties.getSrm().isEnabled()) {
+            return SampleRatioMismatch.NO_EVIDENCE;
+        }
+        List<WeightedVariation> allocation = RolloutBaseline.allocation(candidate.config());
+        if (allocation.isEmpty()) {
+            return SampleRatioMismatch.NO_EVIDENCE;
+        }
+        Map<UUID, Long> observedByVariation = new LinkedHashMap<>();
+        aggregates.forEach(agg -> observedByVariation.put(agg.variationId(), agg.rolloutSubjectCount()));
+
+        long[] observed = new long[allocation.size()];
+        int[] weights = new int[allocation.size()];
+        long total = 0;
+        for (int i = 0; i < allocation.size(); i++) {
+            WeightedVariation weighted = allocation.get(i);
+            weights[i] = weighted.weight();
+            observed[i] = observedByVariation.getOrDefault(weighted.variationId(), 0L);
+            if (weights[i] > 0) {
+                total += observed[i];
+            }
+        }
+        // Firing suppresses the whole flag, so it is far too blunt to trigger on a handful of
+        // subjects' worth of noise.
+        if (total < properties.getSrm().getMinSubjects()) {
+            return SampleRatioMismatch.NO_EVIDENCE;
+        }
+        return SampleRatioMismatch.logEValue(observed, weights, properties.getSrm().getConcentration());
+    }
+
+    // ---------------------------------------------------------------- phase two: decide
+
+    /**
+     * Applies e-BH per (environment, direction) and acts on what survives.
+     *
+     * <p>The family is the environment rather than the flag: with two hundred flags a per-flag
+     * family gives no protection at all, and the question an operator actually has is "how many
+     * bogus rollbacks landed in production this hour". Not the whole org either - one noisy team's
+     * flags would suppress another team's true findings.
+     */
+    private Mono<JobResult> decide(List<RolloutEvidence> measured) {
+        List<RolloutEvidence.Hypothesis> rejected = new ArrayList<>();
+        Map<RolloutEvidence.Hypothesis, Correction> corrections = new LinkedHashMap<>();
+
+        for (RolloutEvidence.Direction direction : RolloutEvidence.Direction.values()) {
+            double alpha = direction == RolloutEvidence.Direction.DEGRADATION
+                ? properties.getAlpha().getHeal()
+                : properties.getAlpha().getOptimize();
+
+            Map<UUID, List<RolloutEvidence.Hypothesis>> byEnvironment = new LinkedHashMap<>();
+            for (RolloutEvidence evidence : measured) {
+                for (RolloutEvidence.Hypothesis hypothesis : evidence.hypotheses()) {
+                    if (hypothesis.direction() == direction) {
+                        byEnvironment
+                            .computeIfAbsent(evidence.candidate().environmentId(), k -> new ArrayList<>())
+                            .add(hypothesis);
+                    }
+                }
+            }
+
+            byEnvironment.forEach((environmentId, family) -> {
+                double[] logEValues = family.stream()
+                    .mapToDouble(RolloutEvidence.Hypothesis::logEValue)
+                    .toArray();
+                boolean[] survives = EBenjaminiHochberg.reject(logEValues, alpha);
+                List<RolloutEvidence.Hypothesis> ranked = family.stream()
+                    .sorted(Comparator.comparingDouble(RolloutEvidence.Hypothesis::logEValue).reversed())
+                    .toList();
+                for (int i = 0; i < family.size(); i++) {
+                    if (survives[i]) {
+                        RolloutEvidence.Hypothesis hypothesis = family.get(i);
+                        rejected.add(hypothesis);
+                        corrections.put(hypothesis,
+                            new Correction(alpha, family.size(), ranked.indexOf(hypothesis) + 1));
+                    }
+                }
+            });
         }
 
-        Optional<VariantAggregate> winner = challengers.stream()
-            .filter(agg -> conversionZ(agg, baseline) > Z_THRESHOLD)
-            .max(Comparator.comparingDouble(agg -> conversionZ(agg, baseline)));
-        return winner
-            .map(agg -> optimize(candidate, agg, baseline, settings))
-            .orElse(Mono.just(0));
+        // Degradation before improvement, strongest evidence first: a flag that is both erroring
+        // and converting better should be healed, not ramped.
+        List<RolloutEvidence.Hypothesis> ordered = rejected.stream()
+            .sorted(Comparator
+                .comparing(RolloutEvidence.Hypothesis::direction)
+                .thenComparing(Comparator.comparingDouble(
+                    RolloutEvidence.Hypothesis::logEValue).reversed()))
+            .toList();
+
+        Set<String> actedOn = new HashSet<>();
+        int scanned = measured.size();
+
+        return Flux.fromIterable(measured)
+            .filter(RolloutEvidence::srmFailed)
+            .concatMap(this::raiseSampleRatioFinding)
+            .reduce(0, Integer::sum)
+            .flatMap(srmFindings -> Flux.fromIterable(ordered)
+                .concatMap(hypothesis -> act(hypothesis, corrections.get(hypothesis), actedOn)
+                    .onErrorResume(e -> {
+                        log.warn("Acting on {}/{} failed: {}",
+                            hypothesis.evidence().candidate().flag().key(),
+                            hypothesis.metricKey(), e.toString());
+                        return Mono.just(0);
+                    }))
+                .reduce(srmFindings, Integer::sum))
+            .map(created -> new JobResult("rollout-scan", scanned, created, detail(ordered.size())))
+            .defaultIfEmpty(new JobResult("rollout-scan", scanned, 0, detail(0)));
     }
 
-    private static double errorZ(VariantAggregate variant, VariantAggregate baseline) {
-        return TwoProportionZ.zScore(
-            variant.errorCount(), variant.evalCount(), baseline.errorCount(), baseline.evalCount());
+    private String detail(int rejectedCount) {
+        return String.format(Locale.ROOT,
+            "test=mSPRT alphaHeal=%s alphaOptimize=%s minSubjects=%d maxLookback=%s rejected=%d",
+            properties.getAlpha().getHeal(), properties.getAlpha().getOptimize(),
+            properties.getMinSubjects(), properties.getMaxLookback(), rejectedCount);
     }
 
-    private static double conversionZ(VariantAggregate variant, VariantAggregate baseline) {
-        return TwoProportionZ.zScore(
-            variant.conversionCount(), variant.evalCount(),
-            baseline.conversionCount(), baseline.evalCount());
+    /** One action per flag-env per scan; the rest are recorded as findings by {@link #act}. */
+    private Mono<Integer> act(
+        RolloutEvidence.Hypothesis hypothesis, Correction correction, Set<String> actedOn) {
+
+        RolloutCandidate candidate = hypothesis.evidence().candidate();
+        String flagEnv = candidate.environmentId() + ":" + candidate.flag().key();
+        boolean alreadyActed = !actedOn.add(flagEnv);
+
+        return orgSettings.get(candidate.orgId())
+            .flatMap(settings -> hypothesis.direction() == RolloutEvidence.Direction.DEGRADATION
+                ? heal(hypothesis, correction, settings, alreadyActed)
+                : optimize(hypothesis, correction, settings, alreadyActed));
     }
 
     // ---------------------------------------------------------------- healing
 
     private Mono<Integer> heal(
-        RolloutCandidate candidate, Instant since, VariantAggregate variant,
-        VariantAggregate baseline, OrgSettings settings) {
+        RolloutEvidence.Hypothesis hypothesis, Correction correction,
+        OrgSettings settings, boolean alreadyActed) {
 
+        RolloutEvidence evidence = hypothesis.evidence();
+        RolloutCandidate candidate = evidence.candidate();
         Flag flag = candidate.flag();
-        double zScore = errorZ(variant, baseline);
-        String dedupeKey = String.join(":",
-            candidate.environmentId().toString(), flag.key(), String.valueOf(variant.variationId()),
-            ERROR_METRIC, String.valueOf(since.getEpochSecond() / 3600));
+        VariantAggregate baseline = evidence.baseline();
+        double baselineRate = baseline.errorProportion();
+        double variantRate = hypothesis.challenger().errorProportion();
 
         AnomalyInput input = new AnomalyInput(
             flag.key(), candidate.envKey(),
-            label(flag, variant.variationId()), label(flag, baseline.variationId()),
-            ERROR_METRIC, baseline.errorRate(), variant.errorRate(), zScore,
-            variant.evalCount(), baseline.evalCount());
+            label(flag, hypothesis.variationId()), label(flag, baseline.variationId()),
+            hypothesis.metricKey(), baselineRate, variantRate, hypothesis.zScore(),
+            hypothesis.challengerSubjects(), hypothesis.baselineSubjects());
 
         return assistant.summarizeAnomaly(input)
-            .flatMap(summary -> findings.insertIfAbsent(new AnomalyFinding(
-                        null, candidate.environmentId(), flag.key(), variant.variationId(),
-                        ERROR_METRIC, baseline.errorRate(), variant.errorRate(), zScore,
-                        summary, AnomalyStatus.OPEN, null, null),
-                    dedupeKey)
-                .flatMap(finding -> attachRemediation(candidate, baseline, finding, summary, settings))
+            .flatMap(summary -> findings.insertIfAbsent(
+                    finding(hypothesis, correction, AnomalyKind.DEGRADATION,
+                        baselineRate, variantRate, summary),
+                    dedupeKey(hypothesis))
+                .flatMap(saved -> alreadyActed
+                    ? Mono.just(1)
+                    : attachRemediation(candidate, baseline, saved, summary, settings))
                 .defaultIfEmpty(0));
     }
 
@@ -232,8 +462,13 @@ public class RolloutMonitorService {
     // ---------------------------------------------------------------- optimizing
 
     private Mono<Integer> optimize(
-        RolloutCandidate candidate, VariantAggregate winner, VariantAggregate baseline,
-        OrgSettings settings) {
+        RolloutEvidence.Hypothesis hypothesis, Correction correction,
+        OrgSettings settings, boolean alreadyActed) {
+
+        RolloutEvidence evidence = hypothesis.evidence();
+        RolloutCandidate candidate = evidence.candidate();
+        VariantAggregate baseline = evidence.baseline();
+        VariantAggregate winner = hypothesis.challenger();
 
         RolloutOrVariation fallthrough = candidate.config().fallthrough();
         if (!fallthrough.hasRollout()) {
@@ -250,32 +485,45 @@ public class RolloutMonitorService {
             return Mono.just(0);
         }
 
+        String rationale = String.format(
+            Locale.ROOT,
+            "Variation %s converts at %.1f%% of %d exposed subjects against %.1f%% of %d for %s "
+                + "(always-valid p=%.4g, screened against %d hypotheses at alpha=%s). "
+                + "Ramping it from %d%% to %d%% of traffic.",
+            label(candidate.flag(), winner.variationId()), winner.conversionProportion() * 100,
+            hypothesis.challengerSubjects(), baseline.conversionProportion() * 100,
+            hypothesis.baselineSubjects(), label(candidate.flag(), baseline.variationId()),
+            MixtureSequentialTest.alwaysValidP(hypothesis.logEValue()),
+            correction.familySize(), correction.alpha(), current, target);
+
+        Mono<Integer> recorded = findings.insertIfAbsent(
+                finding(hypothesis, correction, AnomalyKind.IMPROVEMENT,
+                    baseline.conversionProportion(), winner.conversionProportion(), rationale),
+                dedupeKey(hypothesis))
+            .thenReturn(1)
+            .defaultIfEmpty(0);
+
+        if (alreadyActed) {
+            return recorded;
+        }
+
         Map<UUID, Integer> ramped = RolloutRamp.ramp(weights, winner.variationId(), target);
         List<ValueWeight> rollout = new ArrayList<>();
         for (Map.Entry<UUID, Integer> entry : ramped.entrySet()) {
             String value = value(candidate.flag(), entry.getKey());
             if (value == null) {
-                return Mono.just(0);
+                return recorded;
             }
             rollout.add(new ValueWeight(value, entry.getValue()));
         }
-
-        String rationale = String.format(
-            Locale.ROOT,
-            "Variation %s converts at %.1f%% over %d evaluations against %.1f%% for %s over %d "
-                + "(z=%.2f). Ramping it from %d%% to %d%% of traffic.",
-            label(candidate.flag(), winner.variationId()), winner.conversionRate() * 100,
-            winner.evalCount(), baseline.conversionRate() * 100,
-            label(candidate.flag(), baseline.variationId()), baseline.evalCount(),
-            conversionZ(winner, baseline), current, target);
 
         TargetingDraft draft = new TargetingDraft(
             null, null, ValueServe.ofRollout(rollout), null, null);
         FlagChangeDiff diff = updateDiff(candidate, draft);
 
-        return proposals.draftExists(
+        return recorded.then(proposals.draftExists(
                 candidate.projectId(), candidate.environmentId(), candidate.flag().key(),
-                ProposalKind.FLAG_UPDATE)
+                ProposalKind.FLAG_UPDATE))
             .flatMap(exists -> exists
                 ? Mono.just(0)
                 : proposals.insertDraft(proposal(candidate, diff, rationale))
@@ -288,7 +536,133 @@ public class RolloutMonitorService {
                 .thenReturn(created));
     }
 
+    // ---------------------------------------------------------------- sample ratio mismatch
+
+    /**
+     * Raises the SRM finding. No proposal and no remediation: there is nothing safe to automate
+     * about a broken randomizer, and the fix is always a human looking at why traffic is not
+     * arriving where it was sent.
+     */
+    private Mono<Integer> raiseSampleRatioFinding(RolloutEvidence evidence) {
+        RolloutCandidate candidate = evidence.candidate();
+        List<WeightedVariation> allocation = RolloutBaseline.allocation(candidate.config());
+
+        Map<UUID, Long> observed = new LinkedHashMap<>();
+        evidence.aggregates().forEach(agg -> observed.put(agg.variationId(), agg.rolloutSubjectCount()));
+        long total = allocation.stream()
+            .filter(weighted -> weighted.weight() > 0)
+            .mapToLong(weighted -> observed.getOrDefault(weighted.variationId(), 0L))
+            .sum();
+
+        // The arm furthest from where it should be, so the finding points somewhere useful.
+        WeightedVariation worst = allocation.stream()
+            .filter(weighted -> weighted.weight() > 0)
+            .max(Comparator.comparingDouble(weighted -> {
+                double expected = weighted.weight() / 100d;
+                double actual = total == 0 ? 0
+                    : observed.getOrDefault(weighted.variationId(), 0L) / (double) total;
+                return Math.abs(actual - expected);
+            }))
+            .orElse(null);
+        if (worst == null || total == 0) {
+            return Mono.just(0);
+        }
+
+        double expectedShare = worst.weight() / 100d;
+        double actualShare = observed.getOrDefault(worst.variationId(), 0L) / (double) total;
+        String summary = String.format(Locale.ROOT,
+            "Traffic is not arriving as configured for %s in %s: %s was allocated %.0f%% of the "
+                + "rollout but received %.1f%% of %d exposed subjects. Comparisons for this flag "
+                + "are suppressed until the allocation is fixed - with randomization broken, the "
+                + "variations are not comparable populations and any rate difference between them "
+                + "is confounded.",
+            candidate.flag().key(), candidate.envKey(),
+            label(candidate.flag(), worst.variationId()),
+            expectedShare * 100, actualShare * 100, total);
+
+        AnomalyStatistics statistics = new AnomalyStatistics(
+            AnomalyTestKind.DIRICHLET_MULTINOMIAL,
+            evidence.srmLogEValue(),
+            SampleRatioMismatch.pValue(evidence.srmLogEValue()),
+            properties.getAlpha().getSrm(),
+            1, 1,
+            SampleRatioMismatch.pValue(evidence.srmLogEValue()),
+            null,
+            candidate.epochStartedAt(),
+            evidence.windowTruncated(),
+            null,
+            null,
+            observed.getOrDefault(worst.variationId(), 0L),
+            null,
+            total,
+            null);
+
+        String dedupeKey = String.join(":",
+            candidate.environmentId().toString(), candidate.flag().key(), "SRM",
+            String.valueOf(epochSeconds(candidate)));
+
+        return findings.insertIfAbsent(new AnomalyFinding(
+                    null, candidate.environmentId(), candidate.flag().key(), worst.variationId(),
+                    SRM_METRIC, expectedShare, actualShare, 0d, summary,
+                    AnomalyStatus.OPEN, null, null, AnomalyKind.SRM, statistics),
+                dedupeKey)
+            .flatMap(saved -> webhook.notify(
+                    candidate.orgId(), "srm", candidate.flag().key(), candidate.envKey(), summary)
+                .thenReturn(1))
+            .defaultIfEmpty(0);
+    }
+
     // ---------------------------------------------------------------- shared
+
+    private AnomalyFinding finding(
+        RolloutEvidence.Hypothesis hypothesis, Correction correction, AnomalyKind kind,
+        double baselineRate, double variantRate, String summary) {
+
+        RolloutEvidence evidence = hypothesis.evidence();
+        RolloutCandidate candidate = evidence.candidate();
+        AnomalyStatistics statistics = new AnomalyStatistics(
+            AnomalyTestKind.MSPRT_GAUSSIAN_MIXTURE,
+            hypothesis.logEValue(),
+            MixtureSequentialTest.alwaysValidP(hypothesis.logEValue()),
+            correction.alpha(),
+            correction.familySize(),
+            correction.familyRank(),
+            SampleRatioMismatch.pValue(evidence.srmLogEValue()),
+            hypothesis.tau(),
+            candidate.epochStartedAt(),
+            evidence.windowTruncated(),
+            hypothesis.zScore(),
+            evidence.baseline().variationId(),
+            hypothesis.challengerSubjects(),
+            hypothesis.challengerHits(),
+            hypothesis.baselineSubjects(),
+            hypothesis.baselineHits());
+
+        return new AnomalyFinding(
+            null, candidate.environmentId(), candidate.flag().key(), hypothesis.variationId(),
+            hypothesis.metricKey(), baselineRate, variantRate, hypothesis.zScore(), summary,
+            AnomalyStatus.OPEN, null, null, kind, statistics);
+    }
+
+    /**
+     * Anchored to the epoch, not to the hour.
+     *
+     * <p>The predecessor ended this key in {@code floor(windowStart / 1 hour)} where windowStart
+     * was {@code now - 48h}, so the key changed every hour and one incident could file up to 48
+     * findings. Keyed on the epoch, one hypothesis yields one finding for as long as the
+     * allocation stands, however often the scan runs.
+     */
+    private static String dedupeKey(RolloutEvidence.Hypothesis hypothesis) {
+        RolloutCandidate candidate = hypothesis.evidence().candidate();
+        return String.join(":",
+            candidate.environmentId().toString(), candidate.flag().key(),
+            String.valueOf(hypothesis.variationId()), hypothesis.metricKey(),
+            String.valueOf(epochSeconds(candidate)));
+    }
+
+    private static long epochSeconds(RolloutCandidate candidate) {
+        return candidate.epochStartedAt() == null ? 0L : candidate.epochStartedAt().getEpochSecond();
+    }
 
     /**
      * Background jobs borrow an org owner's identity; the audit actor stays the
@@ -345,5 +719,9 @@ public class RolloutMonitorService {
         return variation.name() == null || variation.name().isBlank()
             ? variation.value()
             : variation.name() + " (" + variation.value() + ")";
+    }
+
+    /** The multiplicity correction actually applied to one hypothesis. */
+    private record Correction(double alpha, int familySize, int familyRank) {
     }
 }

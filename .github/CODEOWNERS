@@ -1,0 +1,27 @@
+# Code owners for Switchboard.
+#
+# GitHub requests a review from the owner of every file a pull request touches. The catch-all
+# below means that is always @bryjshed, which is the intent: nothing lands here without the
+# maintainer's approval.
+#
+# IMPORTANT: this file only REQUESTS review. Making it a requirement needs a branch protection
+# rule on `main` with "Require review from Code Owners" enabled — CODEOWNERS on its own is a
+# routing hint, not a gate. See .github/CONTRIBUTING.md.
+#
+# Last matching pattern wins, so the specific entries below sit after the catch-all.
+
+* @bryjshed
+
+# The two enforced contracts. A change to either is a change to what every SDK — including ones
+# not in this repository — must agree with, so they are called out to make that visible in the
+# review request rather than buried in a file list.
+/spec/                                          @bryjshed
+/backend/src/main/resources/openapi/            @bryjshed
+
+# CI, containers, licensing and the CLA. Changing how the project is verified, deployed or
+# licensed is not an ordinary code change.
+/.github/                                       @bryjshed
+/LICENSE                                        @bryjshed
+/docker-compose.prod.yml                        @bryjshed
+/backend/Dockerfile                             @bryjshed
+/dashboard/Dockerfile                           @bryjshed

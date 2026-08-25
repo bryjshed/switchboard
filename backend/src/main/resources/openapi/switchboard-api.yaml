@@ -39,6 +39,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserResponse'
 
+  /api/users/me/tokens:
+    get:
+      tags: [Tokens]
+      operationId: listMyTokens
+      description: >-
+        The caller's own personal access tokens, newest first. Revoked ones are included: a
+        revocation should be visible rather than look like a disappearance.
+      responses:
+        '200':
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersonalAccessTokenResponse'
+    post:
+      tags: [Tokens]
+      operationId: createMyToken
+      description: >-
+        Mints a personal access token. The full value is returned ONCE and never stored - only its
+        SHA-256 is kept. A token authenticates as its owner and inherits their permissions
+        unchanged; there is no separate scope model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalAccessTokenCreateRequest'
+      responses:
+        '201':
+          description: Created; the full token is present exactly here and nowhere else.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAccessTokenCreatedResponse'
+
+  /api/users/me/tokens/{tokenId}:
+    delete:
+      tags: [Tokens]
+      operationId: revokeMyToken
+      description: >-
+        Revokes one of the caller's own tokens. Somebody else's token reads as 404 rather than 403 -
+        whether it exists is not the caller's business either.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Revoked
+
   /api/orgs:
     post:
       tags: [Orgs]
@@ -757,13 +812,13 @@ paths:
     get:
       tags: [Evaluation]
       operationId: getBootstrap
+      description: >-
+        SERVER keys only. Returns the full rule set for local evaluation; ETag is the environment
+        stateVersion. A CLIENT key gets 403 here rather than a reduced payload - a silently smaller
+        response is how an SDK ends up serving defaults forever with nothing surfaced. Use
+        POST /api/eval/bootstrap instead.
       security:
         - sdkKeyAuth: []
-      parameters:
-        - name: contextKey
-          in: query
-          schema:
-            type: string
       responses:
         '200':
           description: Full environment flag payload; ETag is the environment stateVersion.
@@ -777,6 +832,56 @@ paths:
                 $ref: '#/components/schemas/BootstrapResponse'
         '304':
           description: Not modified (If-None-Match matched current stateVersion)
+        '403':
+          description: The key is client-side; use POST /api/eval/bootstrap.
+    post:
+      tags: [Evaluation]
+      operationId: getClientBootstrap
+      description: >-
+        Evaluated bootstrap for a client-side key: values, not rules. Carries no targeting
+        configuration and no segment membership, and includes only flags marked
+        clientSideAvailable.
+
+
+        POST rather than GET because the context has to travel in a body - attributes in a query
+        string would put them in access logs, proxies, browser history and Referer headers. It
+        honours If-None-Match and returns a bodiless 304 exactly as
+        POST /ofrep/v1/evaluate/flags does.
+
+
+        The ETag is a digest of the response body, NOT the environment stateVersion. A
+        stateVersion ETag would be wrong in two directions here: two different contexts at the same
+        version produce different bodies with identical ETags, so a shared cache could serve one
+        user's flags to another; and a user whose attributes change gets a 304 and keeps stale
+        answers, because the version did not move.
+      security:
+        - sdkKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientBootstrapRequest'
+      responses:
+        '200':
+          description: Evaluated flag values for this context.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+              description: private, no-store - the body is per-user.
+            Vary:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientBootstrapResponse'
+        '304':
+          description: Not modified (If-None-Match matched the body digest)
 
   /api/stream:
     get:
@@ -1550,13 +1655,17 @@ components:
     sdkKeyAuth:
       type: http
       scheme: bearer
-      description: Environment SDK key (sb_srv_...).
+      description: >-
+        Environment SDK key. sb_srv_ (server, full rule set) or sb_cli_ (client, evaluated payloads
+        and only client-side-available flags).
     ofrepApiKeyAuth:
       type: apiKey
       in: header
       name: X-API-Key
       description: >
-        OFREP's apiKey scheme, carrying the same environment SDK key (sb_srv_...) as sdkKeyAuth.
+        OFREP's apiKey scheme, carrying the same environment SDK key as sdkKeyAuth. A client key is
+        restricted to flags marked clientSideAvailable here too - filtering only the bootstrap would
+        leave flag existence enumerable one key at a time.
         Both headers resolve to the same SdkKeyPrincipal; Authorization wins when both are sent.
 
   parameters:
@@ -1821,16 +1930,96 @@ components:
         approvals:
           $ref: '#/components/schemas/ApprovalSettingsResponse'
 
+    PersonalAccessTokenCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: What the token is for. Required, so it can be recognised before revoking it.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Omit for no expiry. Allowed, but an unattended forever-token is a liability.
+
+    PersonalAccessTokenResponse:
+      type: object
+      required: [id, name, tokenPrefix, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        tokenPrefix:
+          type: string
+          description: Display only, ellipsis included. Never enough to authenticate with.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Advisory, updated off the request path. Useful for spotting dead weight.
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PersonalAccessTokenCreatedResponse:
+      type: object
+      required: [id, name, tokenPrefix, token, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        tokenPrefix:
+          type: string
+        token:
+          type: string
+          description: The full token. Returned only here, never again, and stored only as a hash.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SdkKeyKind:
+      type: string
+      description: >-
+        SERVER keys are secret and receive the full rule set, so they evaluate locally and see every
+        flag. CLIENT keys ship inside a browser bundle and are therefore public: they receive
+        EVALUATED payloads only, and only for flags marked clientSideAvailable. MOBILE is reserved
+        and not yet mintable - it exists as its own kind because revoking a key baked into a shipped
+        binary locks out installed versions until users update, which is a revocation-UX difference
+        rather than a capability one.
+      enum: [SERVER, CLIENT, MOBILE]
+      default: SERVER
+
     SdkKeyCreateRequest:
       type: object
       properties:
         label:
           type: string
           maxLength: 100
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     SdkKeyCreatedResponse:
       type: object
-      required: [id, environmentId, key, keyPrefix, createdAt]
+      required: [id, environmentId, key, keyPrefix, createdAt, kind]
       properties:
         id:
           type: string
@@ -1848,10 +2037,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     SdkKeyResponse:
       type: object
-      required: [id, environmentId, keyPrefix, createdAt]
+      required: [id, environmentId, keyPrefix, createdAt, kind]
       properties:
         id:
           type: string
@@ -1869,6 +2060,8 @@ components:
         revokedAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     FlagKind:
       type: string
@@ -1920,6 +2113,12 @@ components:
           type: array
           items:
             type: string
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
 
     FlagUpdateRequest:
       type: object
@@ -1937,10 +2136,50 @@ components:
           description: STRING flags only; variations are add-only.
           items:
             $ref: '#/components/schemas/VariationCreate'
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
 
     ClauseOp:
       type: string
-      enum: [EQUALS, IN, CONTAINS, STARTS_WITH, SEGMENT_MATCH, NOT_SEGMENT_MATCH]
+      description: >-
+        How a clause compares an attribute against its values. Every operator is existential: it
+        matches when the attribute relates to ANY listed value, and when ANY element of an
+        array-valued attribute does.
+
+
+        The operator decides how both sides are read. Clause values are always text on the wire;
+        GREATER_THAN parses them as numbers, SEMVER_* as versions, BEFORE/AFTER as instants.
+        A value that cannot be read that way makes the clause false rather than erroring.
+
+
+        MATCHES is restricted to a portable regex subset - no lookaround, no backreferences, and a
+        length cap - so the Java server and a JavaScript SDK cannot disagree about a pattern.
+
+
+        NOT_SEGMENT_MATCH is deprecated in favour of SEGMENT_MATCH with negate=true. It is still
+        accepted and still evaluates identically; nothing produces it any more.
+      enum:
+        - EQUALS
+        - IN
+        - CONTAINS
+        - STARTS_WITH
+        - ENDS_WITH
+        - MATCHES
+        - GREATER_THAN
+        - GREATER_THAN_OR_EQUAL
+        - LESS_THAN
+        - LESS_THAN_OR_EQUAL
+        - BEFORE
+        - AFTER
+        - SEMVER_EQUAL
+        - SEMVER_GREATER_THAN
+        - SEMVER_LESS_THAN
+        - SEGMENT_MATCH
+        - NOT_SEGMENT_MATCH
 
     Clause:
       type: object
@@ -1951,6 +2190,17 @@ components:
           description: Context attribute name; 'key' targets the context key. For SEGMENT_MATCH ops, values carry segment keys.
         op:
           $ref: '#/components/schemas/ClauseOp'
+        negate:
+          type: boolean
+          description: >-
+            Absent means false, which is every clause written before per-clause negation existed.
+
+
+            Inverts the clause's result, INCLUDING the missing-attribute case. A missing attribute
+            makes a clause false, so a negated clause on a missing attribute is TRUE - "plan is not
+            free" holds for somebody with no plan attribute at all. This matches LaunchDarkly and is
+            what the phrase means in English, but it surprises people, so it is pinned by
+            conformance vectors.
         values:
           type: array
           items:
@@ -2117,6 +2367,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FlagEnvConfigResponse'
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
         createdAt:
           type: string
           format: date-time
@@ -2330,8 +2586,13 @@ components:
           description: Stable context key (e.g. user id). Bucketing input.
         attributes:
           type: object
-          additionalProperties:
-            type: string
+          description: >-
+            Typed attribute values. Strings, numbers, booleans and arrays of those are all
+            comparable; the OPERATOR decides how each side is read (see spec/evaluation.md 3.2), so
+            a version string works with SEMVER_* and a number works with GREATER_THAN.
+            null is treated as absent. Nested objects are dropped and nested arrays are flattened -
+            no operator can act on either, and inventing a coercion would invent matches.
+          additionalProperties: true
 
     BulkEvalRequest:
       type: object
@@ -2622,9 +2883,28 @@ components:
       type: string
       enum: [OPEN, ACKED, AUTO_ROLLED_BACK]
 
+    AnomalyKind:
+      type: string
+      description: >-
+        What a finding claims. SRM means traffic did not arrive in the proportions the rollout
+        configured, so the arms are not comparable populations and every rate comparison for that
+        flag is suppressed. An SRM finding carries no proposal and no zScore.
+      enum: [DEGRADATION, IMPROVEMENT, SRM]
+
+    AnomalyTestKind:
+      type: string
+      description: >-
+        Which statistic produced the evidence. TWO_PROPORTION_Z appears only on rows written before
+        the anytime-valid rewrite; nothing produces it now.
+      enum: [TWO_PROPORTION_Z, MSPRT_GAUSSIAN_MIXTURE, DIRICHLET_MULTINOMIAL]
+
     AnomalyFindingResponse:
       type: object
-      required: [id, environmentId, flagKey, metricKey, baselineRate, variantRate, zScore, status, createdAt]
+      description: >-
+        NOTE zScore is no longer required. It is descriptive rather than the decision input, and an
+        SRM finding has none - a 0.00 there would read as "measured, no effect". The decision is
+        pValue against alpha, where alpha depends on how many hypotheses were screened together.
+      required: [id, environmentId, flagKey, metricKey, baselineRate, variantRate, status, createdAt, kind, testKind]
       properties:
         id:
           type: string
@@ -2645,6 +2925,8 @@ components:
           type: number
         zScore:
           type: number
+          nullable: true
+          description: Descriptive effect size only. Absent on SRM findings.
         summary:
           type: string
         status:
@@ -2655,6 +2937,128 @@ components:
         createdAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/AnomalyKind'
+        testKind:
+          $ref: '#/components/schemas/AnomalyTestKind'
+        pValue:
+          type: number
+          nullable: true
+          description: >-
+            Always-valid: min(1, 1/sup E) over every look since the allocation epoch opened. Unlike
+            a fixed-horizon p-value this stays valid however often the monitor runs.
+        logEValue:
+          type: number
+          nullable: true
+          description: Natural log of the e-value. A real effect overflows a double unlogged.
+        alpha:
+          type: number
+          nullable: true
+          description: The e-BH threshold actually applied, given familySize.
+        familySize:
+          type: integer
+          nullable: true
+          description: Hypotheses screened together in the scan that produced this finding.
+        familyRank:
+          type: integer
+          nullable: true
+        srmPValue:
+          type: number
+          nullable: true
+          description: The allocation gate's reading. A finding is only written when this passed.
+        tau:
+          type: number
+          nullable: true
+          description: Mixture scale in force, as an absolute proportion difference.
+        epochStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evidence window opened - the last change to traffic allocation.
+        windowTruncated:
+          type: boolean
+          description: >-
+            True when max-lookback clipped the epoch, weakening the guarantee from "at most alpha
+            forever" to "at most alpha per lookback window".
+        variantSubjects:
+          type: integer
+          format: int64
+          nullable: true
+          description: Distinct subjects, not evaluation events.
+        variantHits:
+          type: integer
+          format: int64
+          nullable: true
+        baselineSubjects:
+          type: integer
+          format: int64
+          nullable: true
+        baselineHits:
+          type: integer
+          format: int64
+          nullable: true
+        baselineVariationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Pinned from configuration, not chosen as the arm with the most traffic.
+
+    ClientBootstrapRequest:
+      type: object
+      required: [context]
+      properties:
+        context:
+          $ref: '#/components/schemas/EvalContext'
+
+    ClientBootstrapFlag:
+      type: object
+      required: [key, kind, value, reason]
+      description: >-
+        One evaluated flag. Deliberately carries the SERVED variation only - shipping the full
+        variation list would leak the values of every arm, including the name of an unreleased
+        feature, which is one of the main things client-side availability exists to protect.
+      properties:
+        key:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        value:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+          nullable: true
+        variationName:
+          type: string
+          nullable: true
+        reason:
+          $ref: '#/components/schemas/EvalReason'
+        ruleId:
+          type: string
+          format: uuid
+          nullable: true
+        version:
+          type: integer
+
+    ClientBootstrapResponse:
+      type: object
+      required: [envKey, stateVersion, contextHash, flags]
+      properties:
+        envKey:
+          type: string
+        stateVersion:
+          type: integer
+          format: int64
+        contextHash:
+          type: string
+          description: >-
+            Hex SHA-256 of the canonicalised context this payload was evaluated against. A client
+            MUST discard a response whose contextHash does not match the context it sent - it is
+            the guard against a 304 being applied across a setContext().
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientBootstrapFlag'
 
     VariantStats:
       type: object

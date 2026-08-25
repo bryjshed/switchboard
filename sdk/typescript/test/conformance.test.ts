@@ -164,8 +164,23 @@ describe('ramp monotonicity across files', () => {
 });
 
 describe('vector coverage', () => {
-  it('reports how many vectors ran', () => {
-    // Runs last (vitest executes files top to bottom); 201 vectors per spec/README.md.
-    expect(executed).toBe(201);
+  it('runs every vector in spec/conformance', () => {
+    // This used to be `toBe(201)` — a literal that had to be hand-edited in two languages every
+    // time a vector was added, which is exactly the friction that kept anyone from adding any.
+    // Counting the files instead means a vector that exists but is never executed — a whole file
+    // silently skipped by a parsing bug, say — still fails here, without pinning a number.
+    let expected = 0;
+    for (const name of files) {
+      const vectors = load(name);
+      if (vectors['kind'] === 'bucket') {
+        expected += (vectors['bucketVectors'] as unknown[]).length;
+      } else if (vectors['kind'] === 'evaluation') {
+        expected += (vectors['cases'] as unknown[]).length;
+      } else if (vectors['kind'] === 'rollout-validation') {
+        expected += (vectors['rolloutValidation'] as unknown[]).length;
+      }
+    }
+    expect(expected).toBeGreaterThan(500);
+    expect(executed).toBe(expected);
   });
 });

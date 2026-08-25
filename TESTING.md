@@ -11,8 +11,8 @@ make seed                         # demo data; prints SDK keys — copy them som
 make dashboard                    # web UI on :5273  <- sign in here
 ```
 
-The web dashboard is the primary UI. The Expo app is an optional companion; where a step
-below says "in the dashboard", the mobile app does the same thing if you have it running.
+The web dashboard is the primary and only UI. (There was an Expo companion; it was deleted on
+2026-08-24 — see docs/DECISIONS.md.)
 
 Logins, all password `password123`:
 
@@ -53,7 +53,7 @@ Reset everything: `docker compose down -v && make deps-up`, restart the backend,
    Re-run the curl: the reason changes (`ROLLOUT` or `FLAG_OFF`).
 
 **Expected:** under 30 seconds from opening the dashboard to traffic changing. On the
-mobile app the same drill is a long-press on the flag card.
+flag detail page the same drill is the kill-switch control in the header.
 
 ## Watching a change propagate
 

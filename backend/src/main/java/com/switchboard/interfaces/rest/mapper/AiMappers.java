@@ -10,7 +10,10 @@ import com.switchboard.domain.ai.VariationDraft;
 import com.switchboard.domain.flag.FlagDetail;
 import com.switchboard.domain.flag.NamedEnvConfig;
 import com.switchboard.domain.flag.TargetingConfig;
+import com.switchboard.domain.ai.AnomalyStatistics;
 import com.switchboard.interfaces.rest.model.AnomalyFindingResponse;
+import com.switchboard.interfaces.rest.model.AnomalyKind;
+import com.switchboard.interfaces.rest.model.AnomalyTestKind;
 import com.switchboard.interfaces.rest.model.AnomalyStatus;
 import com.switchboard.interfaces.rest.model.FlagChangeDiff;
 import com.switchboard.interfaces.rest.model.FlagKind;
@@ -125,6 +128,9 @@ public final class AiMappers {
     // ---------------------------------------------------------------- anomalies
 
     public static AnomalyFindingResponse toAnomalyResponse(AnomalyFinding finding) {
+        AnomalyStatistics statistics = finding.statistics() == null
+            ? AnomalyStatistics.none()
+            : finding.statistics();
         return new AnomalyFindingResponse(
             finding.id(),
             finding.environmentId(),
@@ -132,12 +138,35 @@ public final class AiMappers {
             finding.metricKey(),
             rate(finding.baselineRate()),
             rate(finding.variantRate()),
-            BigDecimal.valueOf(finding.zScore()).setScale(4, RoundingMode.HALF_UP),
             AnomalyStatus.valueOf(finding.status().name()),
-            finding.createdAt())
+            finding.createdAt(),
+            AnomalyKind.valueOf(finding.kind().name()),
+            AnomalyTestKind.valueOf(statistics.testKind().name()))
             .variationId(finding.variationId())
             .summary(finding.summary())
-            .suggestedProposalId(finding.suggestedProposalId());
+            .suggestedProposalId(finding.suggestedProposalId())
+            // Descriptive only, and absent on SRM findings - a 0.00 there would read as
+            // "measured, no effect" rather than "not applicable".
+            .zScore(scaled(statistics.zScore()))
+            .pValue(scaled(statistics.pValue()))
+            .logEValue(scaled(statistics.logEValue()))
+            .alpha(scaled(statistics.alpha()))
+            .familySize(statistics.familySize())
+            .familyRank(statistics.familyRank())
+            .srmPValue(scaled(statistics.srmPValue()))
+            .tau(scaled(statistics.tau()))
+            .epochStartedAt(statistics.epochStartedAt())
+            .windowTruncated(statistics.windowTruncated())
+            .variantSubjects(statistics.variantSubjects())
+            .variantHits(statistics.variantHits())
+            .baselineSubjects(statistics.baselineSubjects())
+            .baselineHits(statistics.baselineHits())
+            .baselineVariationId(statistics.baselineVariationId());
+    }
+
+    /** Six places, so a p-value near zero survives the round trip instead of rendering as 0.0000. */
+    private static BigDecimal scaled(Double value) {
+        return value == null ? null : BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_UP);
     }
 
     // ---------------------------------------------------------------- rollout stats

@@ -140,31 +140,29 @@ public final class FlagEvaluator {
         return true;
     }
 
-    private static boolean clauseMatches(Clause clause, EvalContext context, Map<String, Segment> segmentsByKey) {
-        switch (clause.op()) {
-            case SEGMENT_MATCH:
-                return anySegmentMatches(clause.values(), context, segmentsByKey);
-            case NOT_SEGMENT_MATCH:
-                return !anySegmentMatches(clause.values(), context, segmentsByKey);
-            default:
-                return attributeClauseMatches(clause, context);
-        }
+    /**
+     * One clause, negation applied last.
+     *
+     * <p><b>Negation inverts the missing-attribute case too.</b> A missing attribute makes a clause
+     * false, so a negated clause on a missing attribute is TRUE - "plan is not free" holds for
+     * somebody with no plan at all. It matches LaunchDarkly and it is what the phrase means in
+     * English, but it surprises people, so it is spelled out in spec 3.3 and pinned by vectors.
+     */
+    private static boolean clauseMatches(Clause raw, EvalContext context, Map<String, Segment> segmentsByKey) {
+        // NOT_SEGMENT_MATCH is folded into SEGMENT_MATCH + negate here, so one code path serves
+        // both it and the per-clause negation that replaced it.
+        Clause clause = raw.normalised();
+        boolean matched = clause.op().isSegmentOp()
+            ? anySegmentMatches(clause.values(), context, segmentsByKey)
+            : ClauseMatcher.matches(clause.op(), readAttribute(clause.attribute(), context), clause.values());
+        return clause.negate() != matched;
     }
 
     /** The reserved attribute "key" reads the context key; anything else reads the attributes map. */
-    private static boolean attributeClauseMatches(Clause clause, EvalContext context) {
-        String attribute = "key".equals(clause.attribute())
-            ? context.key()
-            : context.attributes().get(clause.attribute());
-        if (attribute == null) {
-            return false;
-        }
-        return switch (clause.op()) {
-            case EQUALS, IN -> clause.values().stream().anyMatch(attribute::equals);
-            case CONTAINS -> clause.values().stream().anyMatch(attribute::contains);
-            case STARTS_WITH -> clause.values().stream().anyMatch(attribute::startsWith);
-            default -> false;
-        };
+    private static AttributeValue readAttribute(String attribute, EvalContext context) {
+        return "key".equals(attribute)
+            ? AttributeValue.of(context.key())
+            : context.attribute(attribute);
     }
 
     /** True when ANY of the named segments matches. Unknown segment keys never match (no error). */
@@ -195,14 +193,22 @@ public final class FlagEvaluator {
         return false;
     }
 
-    /** Segment rules support attribute clauses only; nested segment ops fail the clause. */
+    /**
+     * Segment rules support attribute clauses only; a nested segment op fails the clause.
+     *
+     * <p>Note the nested-segment case fails the clause OUTRIGHT rather than being negated back to
+     * true: a segment that references another segment is a configuration this evaluator refuses to
+     * follow, and negation must not turn a refusal into a match.
+     */
     private static boolean allSegmentRuleClausesMatch(List<Clause> clauses, EvalContext context) {
-        for (Clause clause : clauses) {
-            boolean isSegmentOp = switch (clause.op()) {
-                case SEGMENT_MATCH, NOT_SEGMENT_MATCH -> true;
-                default -> false;
-            };
-            if (isSegmentOp || !attributeClauseMatches(clause, context)) {
+        for (Clause raw : clauses) {
+            Clause clause = raw.normalised();
+            if (clause.op().isSegmentOp()) {
+                return false;
+            }
+            boolean matched = ClauseMatcher.matches(
+                clause.op(), readAttribute(clause.attribute(), context), clause.values());
+            if (clause.negate() == matched) {
                 return false;
             }
         }

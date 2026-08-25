@@ -39,10 +39,13 @@ class AiProposalAutomationBypassIT extends IntegrationTestBase {
 
     private static final String ENV_KEY = "production";
     private static final String MONITOR = "switchboard-monitor";
-    private static final int CONTROL_EVALS = 220;
-    private static final int CONTROL_ERRORS = 4;
-    private static final int TREATMENT_EVALS = 200;
-    private static final int TREATMENT_ERRORS = 50;
+    /** Above the monitor's 200-subject floor; one eval event per context, so these are subjects. */
+    private static final int CONTROL_EVALS = 400;
+    private static final int CONTROL_ERRORS = 8;
+    private static final int TREATMENT_EVALS = 400;
+    private static final int TREATMENT_ERRORS = 100;
+    /** The evidence window runs from the allocation epoch, so it has to open before the events. */
+    private static final Duration EPOCH_AGE = Duration.ofHours(6);
 
     @Autowired
     private RolloutMonitorService monitor;
@@ -164,6 +167,15 @@ class AiProposalAutomationBypassIT extends IntegrationTestBase {
                 .comment("ramp to 50%"))
             .exchange()
             .expectStatus().isOk();
+
+        // Backdate the version row that opened this allocation: the monitor measures from the
+        // epoch, and seeded events at now-2h would otherwise all fall before it.
+        execute("""
+            UPDATE flag_env_config_versions SET created_at = now() - :age::interval
+            WHERE flag_id = :flagId AND environment_id = :envId AND version_number = 2
+            """, Map.of(
+            "flagId", flag.getId(), "envId", environmentId,
+            "age", EPOCH_AGE.toHours() + " hours"));
 
         String controlPrefix = flagKey + "-ctl-";
         String treatmentPrefix = flagKey + "-trt-";

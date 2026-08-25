@@ -1,5 +1,6 @@
 import type {
   BootstrapResponse,
+  ClientBootstrapResponse,
   EvalContext,
   EvalReason,
   Flag,
@@ -15,13 +16,15 @@ import { Emitter } from './emitter.js';
 import {
   authHeaders,
   fetchBootstrap,
+  fetchClientBootstrap,
   serverEvaluate,
   serverEvaluateAll,
   SwitchboardHttpError,
 } from './http.js';
 import type { Logger } from './logger.js';
 import { SseClient, type SseMessage, unref } from './sse.js';
-import { ConfigStore, type Snapshot } from './store.js';
+import { SwitchboardConfigError } from './config.js';
+import { ClientStore, ConfigStore, type Snapshot } from './store.js';
 
 /** Readiness of the in-memory config. */
 export type ClientStatus = 'NOT_READY' | 'READY' | 'STALE' | 'ERROR';
@@ -90,6 +93,8 @@ export class SwitchboardClient {
   private readonly logger: Logger;
 
   private sse: SseClient | null = null;
+  /** Client mode only: evaluated values for {@link config.context}. Empty in server mode. */
+  private readonly clientStore = new ClientStore();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private staleTimer: ReturnType<typeof setInterval> | null = null;
   private resyncing: Promise<void> | null = null;
@@ -150,13 +155,13 @@ export class SwitchboardClient {
    * `put` shortly after. Never rejects.
    */
   waitForInitialization(timeoutMs = this.config.bootstrapTimeoutMs): Promise<boolean> {
-    if (this.store.isInitialised) {
+    if (this.isInitialised) {
       return Promise.resolve(true);
     }
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.readyResolvers = this.readyResolvers.filter((entry) => entry !== onReady);
-        resolve(this.store.isInitialised);
+        resolve(this.isInitialised);
       }, timeoutMs);
       unref(timer);
       const onReady = (): void => {
@@ -198,14 +203,29 @@ export class SwitchboardClient {
   // ---------------------------------------------------------------------------------------------
 
   get status(): ClientStatus {
-    if (!this.store.isInitialised) {
+    if (!this.isInitialised) {
       return this.lastError === null ? 'NOT_READY' : 'ERROR';
     }
     return this.isStale() ? 'STALE' : 'READY';
   }
 
   get stateVersion(): number {
-    return this.store.stateVersion;
+    return this.config.keyKind === 'client'
+      ? this.clientStore.stateVersion
+      : this.store.stateVersion;
+  }
+
+  /**
+   * Whichever store this key kind actually loads into.
+   *
+   * Client mode fills {@link clientStore} and leaves {@link store} empty forever, so reading
+   * `store.isInitialised` reports NOT_READY on a client that is working perfectly - which is
+   * exactly what it did before this existed.
+   */
+  private get isInitialised(): boolean {
+    return this.config.keyKind === 'client'
+      ? this.clientStore.isInitialised
+      : this.store.isInitialised;
   }
 
   /** The current in-memory config. Useful for persisting a snapshot to seed the next process. */
@@ -235,21 +255,31 @@ export class SwitchboardClient {
   // Evaluation
   // ---------------------------------------------------------------------------------------------
 
-  /** Evaluates a flag locally and returns its raw string value. */
-  stringValue(flagKey: string, context: EvalContext, defaultValue: string): string {
+  /**
+   * Evaluates a flag and returns its raw string value.
+   *
+   * <p>In SERVER mode this is a local evaluation and `context` is required. In CLIENT mode the
+   * server has already evaluated for the context given at construction, so `context` is ignored -
+   * pass `undefined`, or use {@link setContext} to change who is being evaluated for.
+   */
+  stringValue(
+flagKey: string,
+context: EvalContext | undefined, defaultValue: string): string {
     return this.stringDetail(flagKey, context, defaultValue).value;
   }
 
   /** Evaluates a flag locally, returning the value plus why it was served. */
   stringDetail(
-    flagKey: string,
-    context: EvalContext,
+flagKey: string,
+context: EvalContext | undefined,
     defaultValue: string,
   ): EvaluationDetail<string> {
     return this.evaluateLocal(flagKey, context, defaultValue);
   }
 
-  booleanValue(flagKey: string, context: EvalContext, defaultValue: boolean): boolean {
+  booleanValue(
+flagKey: string,
+context: EvalContext | undefined, defaultValue: boolean): boolean {
     return this.booleanDetail(flagKey, context, defaultValue).value;
   }
 
@@ -258,8 +288,8 @@ export class SwitchboardClient {
    * (spec/evaluation.md 1.2). Anything else is a type mismatch and serves the caller's default.
    */
   booleanDetail(
-    flagKey: string,
-    context: EvalContext,
+flagKey: string,
+context: EvalContext | undefined,
     defaultValue: boolean,
   ): EvaluationDetail<boolean> {
     const raw = this.evaluateLocal(flagKey, context, defaultValue ? BOOLEAN_TRUE : BOOLEAN_FALSE);
@@ -272,7 +302,9 @@ export class SwitchboardClient {
     return this.parseFailure(raw, defaultValue, `"${raw.value}" is not "true" or "false"`);
   }
 
-  numberValue(flagKey: string, context: EvalContext, defaultValue: number): number {
+  numberValue(
+flagKey: string,
+context: EvalContext | undefined, defaultValue: number): number {
     return this.numberDetail(flagKey, context, defaultValue).value;
   }
 
@@ -282,8 +314,8 @@ export class SwitchboardClient {
    * `errorKind: 'PARSE_ERROR'` rather than `NaN`.
    */
   numberDetail(
-    flagKey: string,
-    context: EvalContext,
+flagKey: string,
+context: EvalContext | undefined,
     defaultValue: number,
   ): EvaluationDetail<number> {
     const raw = this.evaluateLocal(flagKey, context, String(defaultValue));
@@ -332,9 +364,12 @@ export class SwitchboardClient {
    */
   private evaluateLocal(
     flagKey: string,
-    context: EvalContext,
+    context: EvalContext | undefined,
     defaultValue: string,
   ): EvaluationDetail<string> {
+    if (this.config.keyKind === 'client') {
+      return this.resolveFromClientStore(flagKey, defaultValue);
+    }
     try {
       if (!isValidContextKey(context?.key)) {
         // Spec 1.1: an SDK must reject an empty or whitespace-only key rather than substitute one.
@@ -366,8 +401,9 @@ export class SwitchboardClient {
       }
 
       const snapshot = this.store.current;
-      const outcome = evaluateFlag(flag, context, snapshot.segments, defaultValue);
-      this.telemetry.recordEvaluation(flagKey, context.key, outcome.variationId, outcome.reason);
+      const outcome = evaluateFlag(flag, context as EvalContext, snapshot.segments, defaultValue);
+      this.telemetry.recordEvaluation(
+        flagKey, (context as EvalContext).key, outcome.variationId, outcome.reason);
 
       if (outcome.value === null) {
         // The config points at a variation the flag no longer defines (spec 1.3).
@@ -493,6 +529,66 @@ export class SwitchboardClient {
     return serverEvaluateAll(this.config, context);
   }
 
+  /**
+   * Client mode: read the answer the server already computed.
+   *
+   * There is no evaluation here and there cannot be - the payload carries values, not rules. A flag
+   * absent from it is either genuinely unknown or not marked available to client-side SDKs, and
+   * those two are deliberately indistinguishable; both serve the caller's default.
+   */
+  private resolveFromClientStore(flagKey: string, defaultValue: string): EvaluationDetail<string> {
+    if (!this.clientStore.isInitialised) {
+      return this.failure(
+        flagKey,
+        defaultValue,
+        'CLIENT_NOT_READY',
+        'no config loaded yet; serving the caller default',
+      );
+    }
+    const flag = this.clientStore.getFlag(flagKey);
+    if (flag === undefined) {
+      return this.failure(
+        flagKey,
+        defaultValue,
+        'FLAG_NOT_FOUND',
+        `flag "${flagKey}" is not available to this client-side key`,
+      );
+    }
+    const contextKey = this.config.context?.key ?? '';
+    this.telemetry.recordEvaluation(flagKey, contextKey, flag.variationId ?? null, flag.reason);
+    return {
+      flagKey,
+      value: flag.value,
+      variationId: flag.variationId ?? null,
+      variationName: flag.variationName ?? null,
+      reason: flag.reason,
+      ruleId: flag.ruleId ?? null,
+      stateVersion: this.clientStore.stateVersion,
+      stale: this.isStale(),
+    };
+  }
+
+  /**
+   * Client mode only: evaluate for a different context from now on.
+   *
+   * Re-fetches immediately and emits `change` for every flag, because in static-context mode any
+   * flag's value may have moved. Awaiting it means the next evaluation sees the new context; not
+   * awaiting it means evaluations keep returning the previous context's answers until it lands,
+   * which is the safe behaviour either way.
+   */
+  async setContext(context: EvalContext): Promise<void> {
+    if (this.config.keyKind !== 'client') {
+      throw new SwitchboardConfigError(
+        'setContext() is client-mode only. A server key takes a context per evaluation.',
+      );
+    }
+    this.config.context = context;
+    // The old ETag digests a payload for the OLD context, so keeping it would earn a 304 and
+    // silently strand the client on the previous context's answers.
+    this.etag = null;
+    await this.loadBootstrap(false);
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Transport
   // ---------------------------------------------------------------------------------------------
@@ -500,6 +596,19 @@ export class SwitchboardClient {
   /** Fetches bootstrap. Returns true when config was loaded or confirmed current. */
   private async loadBootstrap(initial: boolean): Promise<boolean> {
     try {
+      if (this.config.keyKind === 'client') {
+        const context = this.config.context as EvalContext;
+        const clientResult = await fetchClientBootstrap(this.config, this.etag, context);
+        this.lastContactAt = Date.now();
+        this.lastError = null;
+        if (clientResult.status === 304) {
+          this.logger.debug('client bootstrap unchanged (304)');
+          return true;
+        }
+        this.etag = clientResult.etag;
+        this.applyClientBootstrap(clientResult.payload, context);
+        return true;
+      }
       const result = await fetchBootstrap(this.config, this.etag);
       this.lastContactAt = Date.now();
       this.lastError = null;
@@ -524,6 +633,36 @@ export class SwitchboardClient {
       this.emit('error', { error, willRetry: !unauthorized });
       return false;
     }
+  }
+
+  private applyClientBootstrap(payload: ClientBootstrapResponse, requested: EvalContext): void {
+    const wasInitialised = this.clientStore.isInitialised;
+    const changed = this.clientStore.apply(payload);
+
+    if (payload.flags.length === 0) {
+      // The single most likely first-run confusion, and it is not a failure: client_side_available
+      // is off by default, so a brand-new client key sees nothing until a flag is published to it.
+      this.logger.warn(
+        'client bootstrap returned no flags. Flags are hidden from client-side keys until they ' +
+          'are marked "available to client-side SDKs" on the flag\'s settings tab.',
+      );
+    }
+
+    if (!wasInitialised) {
+      this.emit('ready', { stateVersion: payload.stateVersion });
+      const resolvers = this.readyResolvers;
+      this.readyResolvers = [];
+      for (const resolve of resolvers) {
+        resolve();
+      }
+    }
+    if (changed) {
+      this.emit('change', {
+        stateVersion: payload.stateVersion,
+        flagKeys: this.clientStore.flagKeys,
+      });
+    }
+    void requested;
   }
 
   private applyBootstrap(payload: BootstrapResponse): void {
@@ -592,6 +731,14 @@ export class SwitchboardClient {
           }
           break;
         }
+        case 'refetch': {
+          // Client mode's only change signal. It deliberately names no flag - that would leak
+          // which flag moved, including flags this key may not see at all - so the response is
+          // always a full refetch.
+          this.lastError = null;
+          void this.resync();
+          break;
+        }
         case 'ping':
           // Liveness only: lastContactAt above is the whole point of the event.
           break;
@@ -630,7 +777,7 @@ export class SwitchboardClient {
   }
 
   private isStale(): boolean {
-    if (!this.store.isInitialised) {
+    if (!this.isInitialised) {
       return true;
     }
     if (this.config.staleAfterMs === 0) {
@@ -646,7 +793,7 @@ export class SwitchboardClient {
     const interval = Math.max(1_000, Math.floor(this.config.staleAfterMs / 2));
     this.staleTimer = setInterval(() => {
       const stale = this.isStale();
-      if (stale && !this.wasStale && this.store.isInitialised) {
+      if (stale && !this.wasStale && this.isInitialised) {
         this.wasStale = true;
         this.logger.warn(
           `config has not been refreshed for ${Date.now() - this.lastContactAt}ms; serving the last known state`,

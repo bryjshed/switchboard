@@ -7,13 +7,6 @@ build/
 # Dependencies
 node_modules/
 
-# Native build output (regenerate with `expo prebuild`)
-app/ios/
-app/android/
-app/.expo/
-*.xcuserstate
-Pods/
-
 # Local environment
 .env
 .env.local
@@ -27,3 +20,6 @@ Pods/
 
 # Local emulator + database state
 emulator-data/
+
+# MCP server build output
+mcp/dist/

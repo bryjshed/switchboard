@@ -1,0 +1,138 @@
+# The whole stack, for a self-hoster.
+#
+#     docker compose -f docker-compose.prod.yml up --build -d --wait
+#
+# This is a SINGLE-NODE deployment and says so rather than pretending otherwise: one backend
+# instance, an in-process Caffeine cache, and a per-instance rate limiter. docs/DEPLOYMENT.md
+# has the honest account of what changes when you want a second instance.
+#
+# `docker-compose.yml` (unsuffixed) is the local development stack -- postgres plus the Firebase
+# auth emulator, with the backend and dashboard run from source. The two files share nothing on
+# purpose: no `extends`, no override chain. A production compose file that inherits from a
+# development one is how an emulator ends up in production.
+#
+# Ports differ from the dev stack too, deliberately, so both can run at once.
+#
+# The project NAME differs for the same reason, and it is not cosmetic. Compose derives the
+# project name from the directory when a file does not set one, so both files would otherwise be
+# `switchboard` -- and `up` on this one would recreate the DEVELOPMENT postgres container in
+# place, against the development volume, with production's credentials. It does exactly that if
+# you remove this line.
+
+name: switchboard-prod
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-switchboard}
+      POSTGRES_USER: ${POSTGRES_USER:-switchboard}
+      # No default. A production database with a default password is not a deployment, and
+      # compose refusing to start is a better outcome than one that works.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      # PG18 images mount data at /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    # Not published. Nothing outside this network has any business reaching the database, and
+    # an exposed 5432 is the single most-scanned port on the internet. Use
+    # `docker compose exec postgres psql` for a shell.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-switchboard} -d ${POSTGRES_DB:-switchboard}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    image: switchboard-backend:${SWITCHBOARD_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-switchboard}
+      DB_USER: ${POSTGRES_USER:-switchboard}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+
+      # Flyway runs on boot and is the only thing that creates or migrates the schema. Leaving
+      # it on is the right default for a single-instance deployment; docs/DEPLOYMENT.md covers
+      # when to turn it off and run migrations as a separate step instead.
+      FLYWAY_ENABLED: "true"
+
+      SERVER_PORT: "28080"
+      MANAGEMENT_PORT: "28081"
+
+      # Identity. The default profile ships one Firebase provider pointed at this project id;
+      # point it at your own, or replace the whole block with an OIDC provider using
+      # SPRING_APPLICATION_JSON (see docs/DEPLOYMENT.md).
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-switchboard}
+      # NOTE the absence of FIREBASE_AUTH_EMULATOR_HOST. It is mandatory locally and must never
+      # be set here: the Admin SDK would verify production users' tokens against an emulator.
+
+      # Shared secret for POST /api/jobs/*. Unset means the scheduled jobs still run in-process
+      # but the HTTP triggers are closed, which is a reasonable default; set it if you drive
+      # the partition roll or the rollout scan from an external scheduler.
+      JOB_TOKEN: ${JOB_TOKEN:-}
+      JOBS_SCHEDULED_ENABLED: ${JOBS_SCHEDULED_ENABLED:-true}
+
+      # Natural-language flag authoring. Everything else in the AI layer -- healing, optimizing,
+      # the stale sweep -- works without this.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Per-instance token bucket. With one instance these ARE the effective limits; with two
+      # they are the effective limits doubled. See docs/DEPLOYMENT.md.
+      RATELIMIT_ENABLED: ${RATELIMIT_ENABLED:-true}
+      RATELIMIT_RPM: ${RATELIMIT_RPM:-6000}
+      RATELIMIT_BURST: ${RATELIMIT_BURST:-600}
+
+      # Event retention. eval_events and metric_events are monthly-partitioned and the roll job
+      # drops partitions past this window. Raising it costs disk; lowering it discards rollout
+      # evidence that the healing loop may still be accumulating over.
+      EVENT_RETENTION_MONTHS: ${EVENT_RETENTION_MONTHS:-3}
+      EVENT_PARTITION_MONTHS_AHEAD: ${EVENT_PARTITION_MONTHS_AHEAD:-2}
+    ports:
+      - "${BACKEND_PORT:-28080}:28080"
+      # 28081 is NOT published. Health, info and prometheus live there and the port -- not the
+      # filter chain -- is the boundary. Scrape it from inside this network; expose it to a
+      # monitoring host only by adding that host to the network, never by publishing it.
+
+  dashboard:
+    build:
+      context: ./dashboard
+      args:
+        # A build argument rather than an environment variable, because it decides which auth
+        # implementation is COMPILED IN. Changing it means rebuilding the image; the app says
+        # so rather than ignoring a runtime override.
+        VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-firebase}
+    image: switchboard-dashboard:${SWITCHBOARD_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # The browser resolves this, not the container -- so it is the URL a USER's browser can
+      # reach, never `http://backend:28080`. Getting this wrong is the single most common
+      # first-deploy failure and it looks like "the dashboard loads but nothing works".
+      VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:28080}
+
+      VITE_FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-demo-switchboard}
+      VITE_FIREBASE_API_KEY: ${FIREBASE_API_KEY:-demo-api-key}
+      VITE_FIREBASE_AUTH_DOMAIN: ${FIREBASE_AUTH_DOMAIN:-demo-switchboard.firebaseapp.com}
+      VITE_FIREBASE_APP_ID: ${FIREBASE_APP_ID:-demo-app-id}
+      # Blank means real Firebase. The dev default points at the local emulator, so it must be
+      # explicitly emptied here.
+      VITE_FIREBASE_AUTH_EMULATOR_HOST: ""
+
+      # Used only when the image was BUILT with VITE_AUTH_PROVIDER=oidc.
+      VITE_OIDC_AUTHORITY: ${OIDC_AUTHORITY:-}
+      VITE_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      VITE_OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+    ports:
+      - "${DASHBOARD_PORT:-8080}:8080"
+
+volumes:
+  pgdata:

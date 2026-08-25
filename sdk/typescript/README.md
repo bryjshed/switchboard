@@ -71,7 +71,8 @@ Everything but `sdkKey` is optional.
 
 | Option | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `sdkKey` | `string` | required | Server-side key, `sb_srv_...`. Scopes the client to one environment. |
+| `sdkKey` | `string` | required | `sb_srv_...` (server) or `sb_cli_...` (client-side). Scopes the client to one environment, and **selects the mode** — see below. |
+| `context` | `EvalContext` | required for a client key, rejected for a server key | The context to evaluate for. Change it with `setContext()`. |
 | `baseUrl` | `string` | `http://localhost:28080` | Switchboard API origin. |
 | `mode` | `'streaming' \| 'polling'` | `'streaming'` | `streaming` holds an SSE connection; `polling` re-fetches bootstrap on an interval with `If-None-Match`. |
 | `pollIntervalMs` | `number` | `30000` | Poll interval in `polling` mode. |
@@ -246,3 +247,41 @@ node scripts/live-check.mjs   # against a running backend: local evaluation vs P
 every seeded flag across ten contexts asserts that the answer computed locally matches the answer
 the server returns for the same context (value, variation, reason and rule), then flips a flag
 through the management API and times how long the SSE stream takes to deliver it.
+
+
+## Client-side keys
+
+The mode is **derived from the key**, not configured. There is deliberately no `mode: 'client'`
+option: a config claiming one thing while holding the other kind of key is a real mistake, and
+deriving it makes that unrepresentable.
+
+| | Server key (`sb_srv_`) | Client key (`sb_cli_`) |
+|---|---|---|
+| What it holds | The rule set | Evaluated values for one context |
+| Where evaluation happens | In your process | On the server |
+| Context | Per evaluation | Fixed at construction, changed with `setContext()` |
+| Flags visible | All of them | Only those marked available to client-side SDKs |
+| Safe to ship in a browser | **No** | Yes |
+
+```ts
+const client = new SwitchboardClient({
+  sdkKey: 'sb_cli_production_…',
+  context: { key: userId, attributes: { plan: 'pro' } },
+});
+await client.start();
+
+// The context argument is ignored in client mode - the server already evaluated for the context
+// above. Pass undefined.
+client.booleanValue('new-checkout', undefined, false);
+
+await client.setContext({ key: otherUserId });   // refetches, then emits `change`
+```
+
+Two things that will otherwise surprise you:
+
+- **A brand-new client key sees no flags.** Availability to client-side SDKs is off by default, so
+  nothing is exposed until you turn it on per flag. The SDK logs a warning saying so rather than
+  leaving you to guess.
+- **Metric events are refused from a client key.** They drive the automated rollback loop, so
+  accepting them from a key anyone can read out of a bundle would be accepting unauthenticated flag
+  changes. Report them from your server.

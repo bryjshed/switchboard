@@ -1,0 +1,343 @@
+# Switchboard CI.
+#
+# Every check in CLAUDE.md, run by a machine instead of by hand. The jobs are split so a
+# failure names the tree that broke rather than "CI failed": backend, dashboard, sdk and mcp
+# are independent and run in parallel.
+#
+# Two of the jobs are not like the others and are worth understanding before editing:
+#
+#   conformance  the contract between the Java server and the TypeScript SDK. It is its own
+#                job -- not a step inside `backend` or `sdk` -- because it belongs to neither
+#                and failing it means they have DRIFTED, which is a different diagnosis from
+#                either one being broken.
+#
+#   live         the seven check scripts, against a real stack. CLAUDE.md calls these "the
+#                real regression net -- they catch contract drift that unit tests cannot",
+#                and that is exactly the class of bug a PR should not be able to merge.
+#
+# `app/` is absent by decision (docs/DECISIONS.md, "the mobile companion is not maintained").
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first; only the tip matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '25'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: backend (unit + integration)
+    runs-on: ubuntu-latest
+    # Testcontainers pulls postgres:18 and the suite is ~750 tests.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      # Checkstyle first and on its own line: a style failure inside `verify` is reported
+      # after the whole test suite has run, which is twenty-odd wasted minutes for a
+      # misplaced brace.
+      - name: Checkstyle
+        working-directory: backend
+        run: ./mvnw -B -q compile checkstyle:check
+
+      # Testcontainers works on GitHub runners without configuration -- the Docker socket is
+      # present and Ryuk can bind it.
+      - name: Verify
+        working-directory: backend
+        run: ./mvnw -B verify
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-surefire-reports
+          path: |
+            backend/target/surefire-reports/
+            backend/target/failsafe-reports/
+          if-no-files-found: ignore
+
+  dashboard:
+    name: dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+        working-directory: dashboard
+      - name: Typecheck, lint, test
+        working-directory: dashboard
+        run: npm run check
+      - name: Build
+        working-directory: dashboard
+        run: npm run build
+
+      # The generated API types are checked in, and a stale copy is a contract lie that
+      # compiles. Regenerating and diffing is the cheapest possible guard.
+      - name: API types are current
+        working-directory: dashboard
+        run: |
+          npm run generate:api-types
+          git diff --exit-code -- src/types/generated/switchboard-api.d.ts \
+            || { echo "::error::Generated API types are stale. Run: cd dashboard && npm run generate:api-types"; exit 1; }
+
+  sdk:
+    name: sdk (typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+      - run: npm ci
+        working-directory: sdk/typescript
+      # typecheck + lint + test + build, including the dual ESM/CJS build.
+      - run: npm run check
+        working-directory: sdk/typescript
+
+  mcp:
+    name: mcp server
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+      - run: npm ci
+        working-directory: mcp
+      - run: npm run check
+        working-directory: mcp
+
+  conformance:
+    name: conformance (spec ↔ server ↔ sdk)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      # The generated vectors must match what the generator produces from the current spec.
+      # A hand-edited operators.json would otherwise let the server and the spec disagree
+      # while every runner stayed green.
+      - name: Generated vectors are current
+        run: node spec/tools/generate-vectors.mjs --check
+
+      - name: Reference bucket implementation
+        run: node spec/tools/verify-bucket.mjs
+
+      - name: Java runner
+        working-directory: backend
+        run: ./mvnw -B test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
+
+      - run: npm ci
+        working-directory: sdk/typescript
+      - name: TypeScript runner
+        working-directory: sdk/typescript
+        run: npm run conformance
+
+  live:
+    name: live checks (real stack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Dependencies (postgres + firebase auth emulator)
+        run: docker compose up -d --wait
+
+      # Compiles ahead of the start step so the wait below is startup time, not build time.
+      - name: Build the backend
+        working-directory: backend
+        run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip package
+
+      # Started exactly the way `make backend` starts it, and `spring-boot:run` rather than
+      # `java -jar` is NOT interchangeable here.
+      #
+      # firebase-admin is an OPTIONAL dependency (see backend/pom.xml -- a deployment on Okta or
+      # Entra ID has no use for it), and Spring Boot's repackaged jar leaves optional
+      # dependencies out. The Firebase Auth EMULATOR issues unsigned tokens that only the Admin
+      # SDK will accept, so the fat jar cannot talk to the emulator at all and refuses to start
+      # with FIREBASE_AUTH_EMULATOR_HOST set. `spring-boot:run` uses the full compile classpath,
+      # which has it. That is by design in both directions: the emulator is a development
+      # dependency, and the production image should not carry an SDK it will never call.
+      #
+      # BOTH identity providers are configured here. The second is what makes auth-check's OIDC
+      # leg actually run: without it the leg fails and prints the command to add it, and a
+      # permanently-skipped check is worse than no check. The issuer is deterministic --
+      # dashboard/scripts/lib/oidc-issuer.mjs binds 127.0.0.1:29199 -- so it can be named before
+      # the issuer exists. The JWK set is fetched lazily at the first token, by which time it does.
+      - name: Start the backend
+        env:
+          FIREBASE_AUTH_EMULATOR_HOST: localhost:29099
+          SPRING_APPLICATION_JSON: >-
+            {"switchboard":{"auth":{"providers":[
+              {"id":"firebase-local","type":"firebase","project-id":"demo-switchboard"},
+              {"id":"local-oidc","type":"oidc","issuer":"http://127.0.0.1:29199",
+               "audience":"switchboard-dashboard",
+               "jwk-set-uri":"http://127.0.0.1:29199/jwks.json"}]}}}
+        run: |
+          cd backend
+          nohup ./mvnw -B spring-boot:run \
+            -Dspring-boot.run.profiles=local -Dcheckstyle.skip > /tmp/sb-boot.log 2>&1 &
+          echo $! > /tmp/sb.pid
+          cd -
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:28081/actuator/health > /dev/null 2>&1; then
+              echo "backend up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::backend did not become healthy"; tail -100 /tmp/sb-boot.log; exit 1
+
+      - name: Seed
+        run: node scripts/seed-local.mjs
+
+      # The sdk and mcp check scripts import from `dist/`, not from source -- deliberately, since
+      # the point of a live check is to exercise what actually ships. So they need a build, not
+      # just an install. On a developer's machine one is usually lying around from earlier work,
+      # which is exactly why a clean runner is where this surfaces.
+      #
+      # The dashboard's auth-check needs no prebuild: it compiles src/auth for node itself, with
+      # VITE_AUTH_PROVIDER baked in the way a browser build would.
+      - name: Install and build what the check scripts import
+        run: |
+          npm ci --prefix dashboard
+          npm ci --prefix sdk/typescript && npm run build --prefix sdk/typescript
+          npm ci --prefix mcp && npm run build --prefix mcp
+
+      # Every one of the seven, each on its own line so the failing one is named in the UI.
+      - name: smoke-test (34)
+        run: node scripts/smoke-test.mjs
+      - name: sdk live-check (32)
+        run: node sdk/typescript/scripts/live-check.mjs
+      - name: service-check (67)
+        run: node dashboard/scripts/service-check.mjs
+      - name: ai-check (54)
+        run: node dashboard/scripts/ai-check.mjs
+      - name: governance-check (38)
+        run: node dashboard/scripts/governance-check.mjs
+      - name: auth-check (19, both legs)
+        run: node dashboard/scripts/auth-check.mjs
+      - name: mcp live-check (19)
+        run: node mcp/scripts/live-check.mjs
+
+      # The backend log is the only place a 500 explains itself; without this a live failure
+      # in CI is a status code and nothing else.
+      - name: Backend log
+        if: always()
+        run: tail -300 /tmp/sb-boot.log
+      # Best-effort: the pid is Maven's, and spring-boot:run forks the application into a child.
+      # The runner is discarded either way, so this is tidiness rather than a requirement.
+      - name: Stop the backend
+        if: always()
+        run: kill "$(cat /tmp/sb.pid)" 2>/dev/null || true
+
+  containers:
+    name: containers (prod images)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # Job-level, not step-level. POSTGRES_PASSWORD has no default in the compose file on
+    # purpose, so EVERY `docker compose -f docker-compose.prod.yml ...` invocation needs it --
+    # including `logs` and `down` in the cleanup steps, which otherwise fail interpolation and
+    # turn a passing job into a red one after the fact.
+    env:
+      SWITCHBOARD_IMAGE_TAG: ci
+      POSTGRES_PASSWORD: ci-not-a-secret
+      JOB_TOKEN: ci-job-token
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build images
+        run: |
+          docker build -t switchboard-backend:ci backend
+          docker build -t switchboard-dashboard:ci dashboard
+
+      # The production compose file, brought up for real. This is what catches the class of
+      # bug a Dockerfile lint cannot: a missing migration on a fresh volume, a health probe
+      # pointed at the wrong port, a runtime config that never reaches the browser.
+      #
+      # Note there is no Firebase emulator here and no FIREBASE_AUTH_EMULATOR_HOST, which is
+      # exactly the production shape: the image does not carry firebase-admin, and a real
+      # Firebase project is an ordinary OIDC issuer that needs no such dependency.
+      - name: Bring up the production stack
+        run: docker compose -f docker-compose.prod.yml up -d --wait
+
+      - name: Smoke the deployed stack
+        run: |
+          set -x
+          # Readiness on the management port, which is deliberately NOT published to the host --
+          # so this asks the container, the same way an orchestrator's probe does.
+          docker compose -f docker-compose.prod.yml exec -T backend \
+            curl -fsS http://localhost:28081/actuator/health/readiness | grep -q '"status":"UP"'
+
+          # Actuator must NOT be on the public listener. A 404 here is the assertion.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:28080/actuator/health)" = 404
+
+          # Dev tokens must not work. If this ever returns 200 the deployment is open to the
+          # internet as every user at once.
+          test "$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer dev:alice@switchboard.dev' \
+            http://localhost:28080/api/users/me)" = 401
+
+          # Flyway ran on a fresh volume and reached the current head.
+          docker compose -f docker-compose.prod.yml exec -T postgres \
+            psql -U switchboard -d switchboard -tAc \
+            'select success from flyway_schema_history order by installed_rank desc limit 1' | grep -q t
+
+          # The dashboard is served, its runtime config reached the page, and a client-side
+          # route survives a hard refresh rather than 404ing.
+          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
+          curl -fsS http://localhost:8080/config.js | grep -q '__SWITCHBOARD_CONFIG__'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/flags/checkout)" = 200
+
+      - name: Stack logs
+        if: always()
+        run: docker compose -f docker-compose.prod.yml logs --tail=200
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.prod.yml down -v

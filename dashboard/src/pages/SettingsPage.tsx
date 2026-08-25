@@ -5,12 +5,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { OrganizationTab } from './settings/OrganizationTab'
 import { SdkKeysTab } from './settings/SdkKeysTab'
 import { AiTab } from './settings/AiTab'
+import { TokensTab } from './settings/TokensTab'
 import { AccessTab } from './settings/AccessTab'
 import { ApprovalsTab } from './settings/ApprovalsTab'
 import { useWorkspace } from '@/hooks/useWorkspace'
 import { usePermissions } from '@/hooks/usePermissions'
 
-const TABS = ['organization', 'access', 'approvals', 'sdk-keys', 'ai'] as const
+const TABS = ['organization', 'access', 'approvals', 'sdk-keys', 'tokens', 'ai'] as const
 type TabValue = (typeof TABS)[number]
 
 function isTab(value: string | null): value is TabValue {
@@ -62,6 +63,9 @@ export function SettingsPage() {
           <TabsTrigger value="sdk-keys" data-testid="tab-sdk-keys">
             SDK keys
           </TabsTrigger>
+          <TabsTrigger value="tokens" data-testid="tab-tokens">
+            Tokens
+          </TabsTrigger>
           <TabsTrigger value="ai" data-testid="tab-ai">
             AI
           </TabsTrigger>
@@ -98,6 +102,11 @@ export function SettingsPage() {
 
         <TabsContent value="sdk-keys" className="mt-4">
           <SdkKeysTab environments={environments} />
+        </TabsContent>
+
+        {/* Tokens are personal, not org-scoped: no org needed, and no gate beyond being signed in. */}
+        <TabsContent value="tokens" className="mt-4">
+          <TokensTab />
         </TabsContent>
 
         <TabsContent value="ai" className="mt-4">

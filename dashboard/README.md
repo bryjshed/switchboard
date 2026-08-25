@@ -1,7 +1,8 @@
 # Switchboard dashboard
 
 The web management surface for Switchboard. Flags, targeting, version history, segments, SDK
-keys. The mobile app keeps the kill switch in your pocket; this is where the work gets done.
+keys. The primary UI, and the only one — see [DECISIONS.md](../docs/DECISIONS.md) on the mobile
+companion.
 
 ```bash
 npm install

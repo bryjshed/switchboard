@@ -1,19 +1,57 @@
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { Skeleton } from '@/components/ui/skeleton'
 import { LoginPage } from '@/pages/LoginPage'
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
 import { AuthSilentCallbackPage } from '@/pages/AuthSilentCallbackPage'
-import { FlagsPage } from '@/pages/FlagsPage'
-import { FlagDetailPage } from '@/pages/FlagDetailPage'
-import { SegmentsPage } from '@/pages/SegmentsPage'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { MonitorPage } from '@/pages/MonitorPage'
-import { ActivityPage } from '@/pages/ActivityPage'
-import { ProposalsPage } from '@/pages/ai/ProposalsPage'
-import { ProposalDetailPage } from '@/pages/ai/ProposalDetailPage'
-import { ChangeRequestsPage } from '@/pages/changeRequests/ChangeRequestsPage'
-import { ChangeRequestDetailPage } from '@/pages/changeRequests/ChangeRequestDetailPage'
+
+/*
+ * Routes are lazy; the login and auth-callback pages are not.
+ *
+ * Everything below the ProtectedRoute is only reachable after a successful sign-in, so splitting it
+ * out costs nothing on first paint and keeps the initial bundle to the shell plus auth. The three
+ * eager imports above are the opposite case: they ARE the first paint for a signed-out visitor, and
+ * a chunk request in front of the login form would be latency for no benefit.
+ */
+const FlagsPage = lazy(() => import('@/pages/FlagsPage').then((m) => ({ default: m.FlagsPage })))
+const FlagDetailPage = lazy(() =>
+  import('@/pages/FlagDetailPage').then((m) => ({ default: m.FlagDetailPage })),
+)
+const SegmentsPage = lazy(() =>
+  import('@/pages/SegmentsPage').then((m) => ({ default: m.SegmentsPage })),
+)
+const SettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+)
+const MonitorPage = lazy(() =>
+  import('@/pages/MonitorPage').then((m) => ({ default: m.MonitorPage })),
+)
+const ActivityPage = lazy(() =>
+  import('@/pages/ActivityPage').then((m) => ({ default: m.ActivityPage })),
+)
+const ProposalsPage = lazy(() =>
+  import('@/pages/ai/ProposalsPage').then((m) => ({ default: m.ProposalsPage })),
+)
+const ProposalDetailPage = lazy(() =>
+  import('@/pages/ai/ProposalDetailPage').then((m) => ({ default: m.ProposalDetailPage })),
+)
+const ChangeRequestsPage = lazy(() =>
+  import('@/pages/changeRequests/ChangeRequestsPage').then((m) => ({
+    default: m.ChangeRequestsPage,
+  })),
+)
+const ChangeRequestDetailPage = lazy(() =>
+  import('@/pages/changeRequests/ChangeRequestDetailPage').then((m) => ({
+    default: m.ChangeRequestDetailPage,
+  })),
+)
+
+/** A page-shaped placeholder, so a route change does not collapse the layout while a chunk loads. */
+function RouteFallback() {
+  return <Skeleton className="h-64 w-full" />
+}
 
 export default function App() {
   return (
@@ -27,7 +65,11 @@ export default function App() {
         path="/"
         element={
           <ProtectedRoute>
-            <AppLayout />
+            {/* One boundary around the whole authenticated area rather than one per route: the
+                fallback is identical everywhere and nesting them would only add flicker. */}
+            <Suspense fallback={<RouteFallback />}>
+              <AppLayout />
+            </Suspense>
           </ProtectedRoute>
         }
       >

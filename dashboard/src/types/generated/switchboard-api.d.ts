@@ -21,6 +21,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users/me/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The caller's own personal access tokens, newest first. Revoked ones are included: a revocation should be visible rather than look like a disappearance. */
+        get: operations["listMyTokens"];
+        put?: never;
+        /** @description Mints a personal access token. The full value is returned ONCE and never stored - only its SHA-256 is kept. A token authenticates as its owner and inherits their permissions unchanged; there is no separate scope model. */
+        post: operations["createMyToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/me/tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Revokes one of the caller's own tokens. Somebody else's token reads as 404 rather than 403 - whether it exists is not the caller's business either. */
+        delete: operations["revokeMyToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs": {
         parameters: {
             query?: never;
@@ -401,9 +436,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description SERVER keys only. Returns the full rule set for local evaluation; ETag is the environment stateVersion. A CLIENT key gets 403 here rather than a reduced payload - a silently smaller response is how an SDK ends up serving defaults forever with nothing surfaced. Use POST /api/eval/bootstrap instead. */
         get: operations["getBootstrap"];
         put?: never;
-        post?: never;
+        /**
+         * @description Evaluated bootstrap for a client-side key: values, not rules. Carries no targeting configuration and no segment membership, and includes only flags marked clientSideAvailable.
+         *
+         *     POST rather than GET because the context has to travel in a body - attributes in a query string would put them in access logs, proxies, browser history and Referer headers. It honours If-None-Match and returns a bodiless 304 exactly as POST /ofrep/v1/evaluate/flags does.
+         *
+         *     The ETag is a digest of the response body, NOT the environment stateVersion. A stateVersion ETag would be wrong in two directions here: two different contexts at the same version produce different bodies with identical ETags, so a shared cache could serve one user's flags to another; and a user whose attributes change gets a 304 and keeps stale answers, because the version did not move.
+         */
+        post: operations["getClientBootstrap"];
         delete?: never;
         options?: never;
         head?: never;
@@ -559,6 +602,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Apply a DRAFT proposal, subject to the environment's approval policy.
+         * @description The write an AI proposal makes is a flag write, so it answers to the same per-environment approval policy a hand edit does. In an environment with requireApproval on, applying a proposal WRITES NOTHING and opens a PENDING change request per environment instead, stamped with this proposal's id; the proposal stays DRAFT and becomes APPLIED when the last of those requests is approved and applied. A declined or stale request leaves the proposal DRAFT, so it can simply be applied again.
+         *     THE ONE EXCEPTION IS AUTOMATION. The rollout monitor's auto-rollback and auto-optimize applies bypass this gate while the environment keeps allowAutomationBypass on, which is the default - a healing rollback that waits for a reviewer during an error spike is not healing. Those writes are audited as usual and additionally recorded as APPROVAL_BYPASS. This endpoint is a human path, so it never takes the bypass.
+         */
         post: operations["applyProposal"];
         delete?: never;
         options?: never;
@@ -977,8 +1025,54 @@ export interface components {
             stateVersion: number;
             approvals?: components["schemas"]["ApprovalSettingsResponse"];
         };
+        PersonalAccessTokenCreateRequest: {
+            /** @description What the token is for. Required, so it can be recognised before revoking it. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description Omit for no expiry. Allowed, but an unattended forever-token is a liability.
+             */
+            expiresAt?: string | null;
+        };
+        PersonalAccessTokenResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Display only, ellipsis included. Never enough to authenticate with. */
+            tokenPrefix: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Advisory, updated off the request path. Useful for spotting dead weight.
+             */
+            lastUsedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            revokedAt?: string | null;
+        };
+        PersonalAccessTokenCreatedResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            tokenPrefix: string;
+            /** @description The full token. Returned only here, never again, and stored only as a hash. */
+            token: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        /**
+         * @description SERVER keys are secret and receive the full rule set, so they evaluate locally and see every flag. CLIENT keys ship inside a browser bundle and are therefore public: they receive EVALUATED payloads only, and only for flags marked clientSideAvailable. MOBILE is reserved and not yet mintable - it exists as its own kind because revoking a key baked into a shipped binary locks out installed versions until users update, which is a revocation-UX difference rather than a capability one.
+         * @default SERVER
+         * @enum {string}
+         */
+        SdkKeyKind: "SERVER" | "CLIENT" | "MOBILE";
         SdkKeyCreateRequest: {
             label?: string;
+            kind?: components["schemas"]["SdkKeyKind"];
         };
         SdkKeyCreatedResponse: {
             /** Format: uuid */
@@ -991,6 +1085,7 @@ export interface components {
             label?: string;
             /** Format: date-time */
             createdAt: string;
+            kind: components["schemas"]["SdkKeyKind"];
         };
         SdkKeyResponse: {
             /** Format: uuid */
@@ -1003,6 +1098,7 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             revokedAt?: string;
+            kind: components["schemas"]["SdkKeyKind"];
         };
         /** @enum {string} */
         FlagKind: "BOOLEAN" | "STRING";
@@ -1024,6 +1120,8 @@ export interface components {
             /** @description Required for STRING flags; ignored for BOOLEAN (always true/false). */
             variations?: components["schemas"]["VariationCreate"][];
             tags?: string[];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
         };
         FlagUpdateRequest: {
             name?: string;
@@ -1031,13 +1129,30 @@ export interface components {
             tags?: string[];
             /** @description STRING flags only; variations are add-only. */
             addVariations?: components["schemas"]["VariationCreate"][];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
         };
-        /** @enum {string} */
-        ClauseOp: "EQUALS" | "IN" | "CONTAINS" | "STARTS_WITH" | "SEGMENT_MATCH" | "NOT_SEGMENT_MATCH";
+        /**
+         * @description How a clause compares an attribute against its values. Every operator is existential: it matches when the attribute relates to ANY listed value, and when ANY element of an array-valued attribute does.
+         *
+         *     The operator decides how both sides are read. Clause values are always text on the wire; GREATER_THAN parses them as numbers, SEMVER_* as versions, BEFORE/AFTER as instants. A value that cannot be read that way makes the clause false rather than erroring.
+         *
+         *     MATCHES is restricted to a portable regex subset - no lookaround, no backreferences, and a length cap - so the Java server and a JavaScript SDK cannot disagree about a pattern.
+         *
+         *     NOT_SEGMENT_MATCH is deprecated in favour of SEGMENT_MATCH with negate=true. It is still accepted and still evaluates identically; nothing produces it any more.
+         * @enum {string}
+         */
+        ClauseOp: "EQUALS" | "IN" | "CONTAINS" | "STARTS_WITH" | "ENDS_WITH" | "MATCHES" | "GREATER_THAN" | "GREATER_THAN_OR_EQUAL" | "LESS_THAN" | "LESS_THAN_OR_EQUAL" | "BEFORE" | "AFTER" | "SEMVER_EQUAL" | "SEMVER_GREATER_THAN" | "SEMVER_LESS_THAN" | "SEGMENT_MATCH" | "NOT_SEGMENT_MATCH";
         Clause: {
             /** @description Context attribute name; 'key' targets the context key. For SEGMENT_MATCH ops, values carry segment keys. */
             attribute: string;
             op: components["schemas"]["ClauseOp"];
+            /**
+             * @description Absent means false, which is every clause written before per-clause negation existed.
+             *
+             *     Inverts the clause's result, INCLUDING the missing-attribute case. A missing attribute makes a clause false, so a negated clause on a missing attribute is TRUE - "plan is not free" holds for somebody with no plan attribute at all. This matches LaunchDarkly and is what the phrase means in English, but it surprises people, so it is pinned by conformance vectors.
+             */
+            negate?: boolean;
             values: string[];
         };
         WeightedVariation: {
@@ -1114,6 +1229,8 @@ export interface components {
             variations: components["schemas"]["Variation"][];
             tags: string[];
             envConfigs: components["schemas"]["FlagEnvConfigResponse"][];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -1208,8 +1325,9 @@ export interface components {
         EvalContext: {
             /** @description Stable context key (e.g. user id). Bucketing input. */
             key: string;
+            /** @description Typed attribute values. Strings, numbers, booleans and arrays of those are all comparable; the OPERATOR decides how each side is read (see spec/evaluation.md 3.2), so a version string works with SEMVER_* and a number works with GREATER_THAN. null is treated as absent. Nested objects are dropped and nested arrays are flattened - no operator can act on either, and inventing a coercion would invent matches. */
             attributes?: {
-                [key: string]: string;
+                [key: string]: unknown;
             };
         };
         BulkEvalRequest: {
@@ -1341,6 +1459,17 @@ export interface components {
         };
         /** @enum {string} */
         AnomalyStatus: "OPEN" | "ACKED" | "AUTO_ROLLED_BACK";
+        /**
+         * @description What a finding claims. SRM means traffic did not arrive in the proportions the rollout configured, so the arms are not comparable populations and every rate comparison for that flag is suppressed. An SRM finding carries no proposal and no zScore.
+         * @enum {string}
+         */
+        AnomalyKind: "DEGRADATION" | "IMPROVEMENT" | "SRM";
+        /**
+         * @description Which statistic produced the evidence. TWO_PROPORTION_Z appears only on rows written before the anytime-valid rewrite; nothing produces it now.
+         * @enum {string}
+         */
+        AnomalyTestKind: "TWO_PROPORTION_Z" | "MSPRT_GAUSSIAN_MIXTURE" | "DIRICHLET_MULTINOMIAL";
+        /** @description NOTE zScore is no longer required. It is descriptive rather than the decision input, and an SRM finding has none - a 0.00 there would read as "measured, no effect". The decision is pValue against alpha, where alpha depends on how many hypotheses were screened together. */
         AnomalyFindingResponse: {
             /** Format: uuid */
             id: string;
@@ -1352,13 +1481,76 @@ export interface components {
             metricKey: string;
             baselineRate: number;
             variantRate: number;
-            zScore: number;
+            /** @description Descriptive effect size only. Absent on SRM findings. */
+            zScore?: number | null;
             summary?: string;
             status: components["schemas"]["AnomalyStatus"];
             /** Format: uuid */
             suggestedProposalId?: string;
             /** Format: date-time */
             createdAt: string;
+            kind: components["schemas"]["AnomalyKind"];
+            testKind: components["schemas"]["AnomalyTestKind"];
+            /** @description Always-valid: min(1, 1/sup E) over every look since the allocation epoch opened. Unlike a fixed-horizon p-value this stays valid however often the monitor runs. */
+            pValue?: number | null;
+            /** @description Natural log of the e-value. A real effect overflows a double unlogged. */
+            logEValue?: number | null;
+            /** @description The e-BH threshold actually applied, given familySize. */
+            alpha?: number | null;
+            /** @description Hypotheses screened together in the scan that produced this finding. */
+            familySize?: number | null;
+            familyRank?: number | null;
+            /** @description The allocation gate's reading. A finding is only written when this passed. */
+            srmPValue?: number | null;
+            /** @description Mixture scale in force, as an absolute proportion difference. */
+            tau?: number | null;
+            /**
+             * Format: date-time
+             * @description When the evidence window opened - the last change to traffic allocation.
+             */
+            epochStartedAt?: string | null;
+            /** @description True when max-lookback clipped the epoch, weakening the guarantee from "at most alpha forever" to "at most alpha per lookback window". */
+            windowTruncated?: boolean;
+            /**
+             * Format: int64
+             * @description Distinct subjects, not evaluation events.
+             */
+            variantSubjects?: number | null;
+            /** Format: int64 */
+            variantHits?: number | null;
+            /** Format: int64 */
+            baselineSubjects?: number | null;
+            /** Format: int64 */
+            baselineHits?: number | null;
+            /**
+             * Format: uuid
+             * @description Pinned from configuration, not chosen as the arm with the most traffic.
+             */
+            baselineVariationId?: string | null;
+        };
+        ClientBootstrapRequest: {
+            context: components["schemas"]["EvalContext"];
+        };
+        /** @description One evaluated flag. Deliberately carries the SERVED variation only - shipping the full variation list would leak the values of every arm, including the name of an unreleased feature, which is one of the main things client-side availability exists to protect. */
+        ClientBootstrapFlag: {
+            key: string;
+            kind: components["schemas"]["FlagKind"];
+            value: string;
+            /** Format: uuid */
+            variationId?: string | null;
+            variationName?: string | null;
+            reason: components["schemas"]["EvalReason"];
+            /** Format: uuid */
+            ruleId?: string | null;
+            version?: number;
+        };
+        ClientBootstrapResponse: {
+            envKey: string;
+            /** Format: int64 */
+            stateVersion: number;
+            /** @description Hex SHA-256 of the canonicalised context this payload was evaluated against. A client MUST discard a response whose contextHash does not match the context it sent - it is the guard against a 304 being applied across a setContext(). */
+            contextHash: string;
+            flags: components["schemas"]["ClientBootstrapFlag"][];
         };
         VariantStats: {
             /** Format: uuid */
@@ -1528,6 +1720,8 @@ export interface components {
             allowSelfApproval: boolean;
             /** @description Opt the kill switch into review as well. Off by default: the emergency stop bypasses approval so an incident cannot be blocked on a reviewer. */
             requireApprovalForKill: boolean;
+            /** @description ON BY DEFAULT, AND THIS IS THE ONE SETTING THAT LEAVES AN UNREVIEWED WRITE PATH OPEN. It only means anything when requireApproval is on, and only automation can use it: the rollout monitor's auto-rollback and auto-optimize keep writing immediately instead of opening a change request. A HUMAN applying an AI proposal is never covered - they are gated exactly like a hand edit. The default mirrors the kill switch: an automated rollback fires during an error spike and puts traffic back on the baseline variation that was already live, so making it wait for a reviewer removes the reason to automate it. Set it to false and automated healing parks in the review queue like everything else. Either way the write is audited, and a bypassed write additionally records an APPROVAL_BYPASS entry naming the automation as the actor. */
+            allowAutomationBypass: boolean;
         };
         /** @description Omitted fields are left unchanged. */
         ApprovalSettingsUpdateRequest: {
@@ -1535,6 +1729,8 @@ export interface components {
             minApprovals?: number;
             allowSelfApproval?: boolean;
             requireApprovalForKill?: boolean;
+            /** @description See ApprovalSettingsResponse.allowAutomationBypass. Defaults to true on every environment; turning it off is what makes automated rollout healing wait for review in a gated environment. */
+            allowAutomationBypass?: boolean;
         };
         /** @enum {string} */
         ChangeRequestKind: "TARGETING_UPDATE" | "KILL_SWITCH" | "ROLLBACK";
@@ -1596,6 +1792,11 @@ export interface components {
             decidedAt?: string;
             /** @description The config version this request produced once applied. */
             appliedVersion?: number;
+            /**
+             * Format: uuid
+             * @description Set when this request exists because an AI proposal was applied into an environment that requires approval. The proposal stays DRAFT until the request applies, and becomes APPLIED when the last of its requests lands.
+             */
+            aiProposalId?: string;
             /** @description Approvals that count toward the threshold right now. */
             approvalsMet: number;
             reviews: components["schemas"]["ChangeRequestReviewResponse"][];
@@ -1643,6 +1844,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
                 };
+            };
+        };
+    };
+    listMyTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenResponse"][];
+                };
+            };
+        };
+    };
+    createMyToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonalAccessTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created; the full token is present exactly here and nowhere else. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenCreatedResponse"];
+                };
+            };
+        };
+    };
+    revokeMyToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2566,9 +2831,7 @@ export interface operations {
     };
     getBootstrap: {
         parameters: {
-            query?: {
-                contextKey?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -2586,6 +2849,48 @@ export interface operations {
                 };
             };
             /** @description Not modified (If-None-Match matched current stateVersion) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key is client-side; use POST /api/eval/bootstrap. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getClientBootstrap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientBootstrapRequest"];
+            };
+        };
+        responses: {
+            /** @description Evaluated flag values for this context. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    /** @description private, no-store - the body is per-user. */
+                    "Cache-Control"?: string;
+                    Vary?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientBootstrapResponse"];
+                };
+            };
+            /** @description Not modified (If-None-Match matched the body digest) */
             304: {
                 headers: {
                     [name: string]: unknown;
@@ -2938,7 +3243,18 @@ export interface operations {
                     "application/json": components["schemas"]["AiProposalResponse"];
                 };
             };
-            /** @description Proposal is not in DRAFT status */
+            /** @description The environment requires approval. NOTHING WAS WRITTEN: the flag is unchanged, the proposal is still DRAFT, and the body is the PENDING change request that now stands in for this apply. Clients must branch on the status code, not the body. The Location header points at the change request. When the proposal touched more than one environment, one request was opened per environment and this is the first of them. */
+            202: {
+                headers: {
+                    /** @description The change request this apply was parked as. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestResponse"];
+                };
+            };
+            /** @description Proposal is not in DRAFT status, or already has an open change request */
             409: {
                 headers: {
                     [name: string]: unknown;

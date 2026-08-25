@@ -74,11 +74,14 @@ public class FlagService {
     @SuppressWarnings("checkstyle:ParameterNumber")
     public Mono<FlagDetail> create(
         UUID projectId, UUID userId, String email, String key, String name,
-        String description, FlagKind kind, List<VariationInput> requestedVariations, List<String> tags) {
+        String description, FlagKind kind, List<VariationInput> requestedVariations, List<String> tags,
+        Boolean clientSideAvailable) {
 
         List<Variation> variations = buildVariations(kind, requestedVariations);
         TargetingConfig initialConfig = initialConfig(kind, variations);
-        Flag flag = new Flag(null, projectId, key, name, description, kind, variations, tags, false);
+        // Fails closed: a flag is invisible to public keys unless someone says otherwise.
+        Flag flag = new Flag(null, projectId, key, name, description, kind, variations, tags, false,
+            Boolean.TRUE.equals(clientSideAvailable));
 
         return access.requireProjectPermission(projectId, userId, Permission.FLAG_WRITE)
             .flatMap(projectAccess -> environments.findByProject(projectId).collectList()
@@ -129,7 +132,8 @@ public class FlagService {
     @SuppressWarnings("checkstyle:ParameterNumber")
     public Mono<FlagDetail> patch(
         UUID projectId, String key, UUID userId, String email,
-        String name, String description, List<String> tags, List<VariationInput> addVariations) {
+        String name, String description, List<String> tags, List<VariationInput> addVariations,
+        Boolean clientSideAvailable) {
 
         return access.requireProjectPermission(projectId, userId, Permission.FLAG_WRITE)
             .flatMap(projectAccess -> flags.findByProjectAndKey(projectId, key)
@@ -148,7 +152,10 @@ public class FlagService {
                         description != null ? description : flag.description(),
                         flag.kind(), variations,
                         tags.isEmpty() ? flag.tags() : tags,
-                        false);
+                        false,
+                        clientSideAvailable != null
+                            ? clientSideAvailable
+                            : flag.clientSideAvailable());
                     return flags.updateFlag(updated)
                         .flatMap(saved -> audit.insert(
                                 projectAccess.orgId(), projectId, null, key, "UPDATE", email,

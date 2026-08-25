@@ -61,7 +61,8 @@ public class FlagsController implements FlagsApi {
                     request.getKey(), request.getName(), request.getDescription(),
                     FlagKind.valueOf(request.getKind().name()),
                     toVariationInputs(request.getVariations()),
-                    request.getTags());
+                    request.getTags(),
+                    request.getClientSideAvailable());
             })
             .map(detail -> ResponseEntity.status(HttpStatus.CREATED)
                 .body(FlagMappers.toFlagDetailResponse(detail)));
@@ -93,7 +94,8 @@ public class FlagsController implements FlagsApi {
             .flatMap(t -> flagService.patch(
                 projectId, flagKey, t.getT1().userId(), t.getT1().email(),
                 t.getT2().getName(), t.getT2().getDescription(), t.getT2().getTags(),
-                toVariationInputs(t.getT2().getAddVariations())))
+                toVariationInputs(t.getT2().getAddVariations()),
+                t.getT2().getClientSideAvailable()))
             .map(detail -> ResponseEntity.ok(FlagMappers.toFlagDetailResponse(detail)));
     }
 

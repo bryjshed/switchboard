@@ -48,7 +48,7 @@ class FlagEvaluatorTest {
     }
 
     private static EvalContext user(String key) {
-        return new EvalContext(key, Map.of());
+        return EvalContext.ofStrings(key, Map.of());
     }
 
     private static Rule matchAllRule(UUID serveVariation) {
@@ -67,7 +67,7 @@ class FlagEvaluatorTest {
             RolloutOrVariation.ofVariation(TRUE_ID));
         EvalOutcome outcome = FlagEvaluator.evaluate(
             booleanFlag(), env(true, true, config),
-            new EvalContext("user-1", Map.of("plan", "pro")), Map.of());
+            EvalContext.ofStrings("user-1", Map.of("plan", "pro")), Map.of());
         assertEquals(EvalReason.KILL_SWITCH, outcome.reason());
         assertEquals("false", outcome.value());
         assertNull(outcome.ruleId());
@@ -81,7 +81,7 @@ class FlagEvaluatorTest {
             RolloutOrVariation.ofVariation(TRUE_ID));
         EvalOutcome outcome = FlagEvaluator.evaluate(
             booleanFlag(), env(false, false, config),
-            new EvalContext("user-1", Map.of("plan", "pro")), Map.of());
+            EvalContext.ofStrings("user-1", Map.of("plan", "pro")), Map.of());
         assertEquals(EvalReason.FLAG_OFF, outcome.reason());
         assertEquals("false", outcome.value());
     }
@@ -94,7 +94,7 @@ class FlagEvaluatorTest {
             RolloutOrVariation.ofVariation(TRUE_ID));
         EvalOutcome outcome = FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("user-1", Map.of("plan", "pro")), Map.of());
+            EvalContext.ofStrings("user-1", Map.of("plan", "pro")), Map.of());
         assertEquals(EvalReason.TARGET_MATCH, outcome.reason());
         assertEquals("false", outcome.value());
     }
@@ -107,7 +107,7 @@ class FlagEvaluatorTest {
             RolloutOrVariation.ofVariation(TRUE_ID));
         EvalOutcome outcome = FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("user-2", Map.of("plan", "pro")), Map.of());
+            EvalContext.ofStrings("user-2", Map.of("plan", "pro")), Map.of());
         assertEquals(EvalReason.RULE_MATCH, outcome.reason());
         assertEquals(RULE_ID, outcome.ruleId());
         assertEquals("false", outcome.value());
@@ -122,7 +122,7 @@ class FlagEvaluatorTest {
             List.of(), List.of(matchAllRule(FALSE_ID), second), RolloutOrVariation.ofVariation(TRUE_ID));
         EvalOutcome outcome = FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("user-2", Map.of("plan", "pro")), Map.of());
+            EvalContext.ofStrings("user-2", Map.of("plan", "pro")), Map.of());
         assertEquals(RULE_ID, outcome.ruleId());
     }
 
@@ -163,9 +163,9 @@ class FlagEvaluatorTest {
         FlagEnvConfig envConfig = new FlagEnvConfig(flag.id(), ENV_ID, true, false, config, 1, null, "t");
 
         assertEquals("expanded", FlagEvaluator.evaluate(
-            flag, envConfig, new EvalContext("user-1", Map.of("plan", "pro")), Map.of()).value());
+            flag, envConfig, EvalContext.ofStrings("user-1", Map.of("plan", "pro")), Map.of()).value());
         assertEquals("compact", FlagEvaluator.evaluate(
-            flag, envConfig, new EvalContext("user-2", Map.of("plan", "pro")), Map.of()).value());
+            flag, envConfig, EvalContext.ofStrings("user-2", Map.of("plan", "pro")), Map.of()).value());
         assertEquals("control", FlagEvaluator.evaluate(
             flag, envConfig, user("user-3"), Map.of()).value());
     }
@@ -254,7 +254,7 @@ class FlagEvaluatorTest {
         TargetingConfig config = config(List.of(), List.of(rule), RolloutOrVariation.ofVariation(TRUE_ID));
         assertEquals(EvalReason.RULE_MATCH, FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("u", Map.of("email", "bob@example.com")), Map.of()).reason());
+            EvalContext.ofStrings("u", Map.of("email", "bob@example.com")), Map.of()).reason());
     }
 
     @Test
@@ -266,10 +266,10 @@ class FlagEvaluatorTest {
         TargetingConfig config = config(List.of(), List.of(rule), RolloutOrVariation.ofVariation(TRUE_ID));
         assertEquals(EvalReason.DEFAULT, FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("u", Map.of("plan", "pro", "region", "apac")), Map.of()).reason());
+            EvalContext.ofStrings("u", Map.of("plan", "pro", "region", "apac")), Map.of()).reason());
         assertEquals(EvalReason.RULE_MATCH, FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("u", Map.of("plan", "pro", "region", "eu")), Map.of()).reason());
+            EvalContext.ofStrings("u", Map.of("plan", "pro", "region", "eu")), Map.of()).reason());
     }
 
     // ------------------------------------------------ segments
@@ -319,10 +319,10 @@ class FlagEvaluatorTest {
         TargetingConfig config = segmentMatchConfig(ClauseOp.SEGMENT_MATCH);
         assertEquals(EvalReason.RULE_MATCH, FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("user-9", Map.of("plan", "pro")), segments).reason());
+            EvalContext.ofStrings("user-9", Map.of("plan", "pro")), segments).reason());
         assertEquals(EvalReason.DEFAULT, FlagEvaluator.evaluate(
             booleanFlag(), env(true, false, config),
-            new EvalContext("user-9", Map.of("plan", "free")), segments).reason());
+            EvalContext.ofStrings("user-9", Map.of("plan", "free")), segments).reason());
     }
 
     @Test

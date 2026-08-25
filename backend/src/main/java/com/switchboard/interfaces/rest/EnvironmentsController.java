@@ -10,6 +10,7 @@ import com.switchboard.interfaces.rest.model.SdkKeyCreateRequest;
 import com.switchboard.interfaces.rest.model.SdkKeyCreatedResponse;
 import com.switchboard.interfaces.rest.model.SdkKeyResponse;
 import com.switchboard.interfaces.security.Principals;
+import com.switchboard.domain.project.SdkKeyKind;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -54,9 +55,16 @@ public class EnvironmentsController implements EnvironmentsApi {
         UUID envId, Mono<SdkKeyCreateRequest> sdkKeyCreateRequest, ServerWebExchange exchange) {
         return Principals.currentUser()
             .zipWith(sdkKeyCreateRequest)
-            .flatMap(t -> sdkKeyService.create(envId, t.getT1(), t.getT2().getLabel()))
+            .flatMap(t -> sdkKeyService.create(envId, t.getT1(), t.getT2().getLabel(),
+                toDomainKind(t.getT2().getKind())))
             .map(created -> ResponseEntity.status(HttpStatus.CREATED)
                 .body(TopologyMappers.toSdkKeyCreatedResponse(created)));
+    }
+
+    /** Absent means SERVER, which is what every caller written before client keys existed sends. */
+    private static SdkKeyKind toDomainKind(
+        com.switchboard.interfaces.rest.model.SdkKeyKind kind) {
+        return kind == null ? SdkKeyKind.SERVER : SdkKeyKind.valueOf(kind.getValue());
     }
 
     @Override

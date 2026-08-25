@@ -45,14 +45,29 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
      * bucket with no matching evaluations, so every rate would read as zero;
      * counting it against the exposure hour is both meaningful and what an
      * experiment readout means by "this hour converted at X%%".
+     *
+     * <p><b>Subjects and events are both counted, and they are not the same number.</b>
+     * {@code eval_count} and {@code error_count} count <em>events</em>; a server SDK
+     * evaluating a flag in a hot loop emits hundreds of them for one user. Dividing one
+     * by the other is a ratio of event counts, not a proportion, and feeding it to any
+     * test that assumes independent Bernoulli trials understates the variance by roughly
+     * the average evaluations-per-context - inflating a z-score by roughly its square
+     * root. {@code subject_count} and {@code *_subjects} count DISTINCT context keys, which
+     * is the unit a rate comparison actually needs. The event counts stay because the
+     * dashboard's volume charts want them; the monitor must use the subject counts.
+     *
+     * <p>{@code rollout_subject_count} is narrowed to {@code reason = 'ROLLOUT'} for the
+     * sample-ratio-mismatch gate. Traffic served by an individual target or a matched rule
+     * never went through the fallthrough rollout, so counting it against the configured
+     * weights would report a mismatch the moment anyone adds a targeting rule.
      */
     private static final String AGGREGATE_SQL = """
         WITH ev AS (
-            SELECT %s AS bucket, variation_id, context_key, COUNT(*)::bigint AS n
+            SELECT %s AS bucket, variation_id, context_key, reason, COUNT(*)::bigint AS n
             FROM eval_events
             WHERE environment_id = :envId AND flag_key = :flagKey
               AND occurred_at >= :since AND variation_id IS NOT NULL
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4
         ),
         totals AS (
             SELECT variation_id, context_key, SUM(n)::bigint AS n FROM ev GROUP BY 1, 2
@@ -65,10 +80,17 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
             SELECT context_key, MIN(bucket) AS bucket FROM ev GROUP BY 1
         ),
         evc AS (
-            SELECT bucket, variation_id, SUM(n)::bigint AS eval_count FROM ev GROUP BY 1, 2
+            SELECT bucket, variation_id,
+                   SUM(n)::bigint AS eval_count,
+                   COUNT(DISTINCT context_key)::bigint AS subject_count,
+                   COUNT(DISTINCT context_key) FILTER (WHERE reason = 'ROLLOUT')::bigint
+                       AS rollout_subject_count
+            FROM ev GROUP BY 1, 2
         ),
         mt AS (
-            SELECT x.bucket, a.variation_id, m.metric_key, COUNT(*)::bigint AS n
+            SELECT x.bucket, a.variation_id, m.metric_key,
+                   COUNT(*)::bigint AS n,
+                   COUNT(DISTINCT m.context_key)::bigint AS subjects
             FROM metric_events m
             JOIN assign a ON a.context_key = m.context_key
             JOIN exposure x ON x.context_key = m.context_key
@@ -83,11 +105,23 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
         SELECT k.bucket, k.variation_id,
                COALESCE((SELECT eval_count FROM evc
                          WHERE evc.bucket = k.bucket AND evc.variation_id = k.variation_id), 0) AS eval_count,
+               COALESCE((SELECT subject_count FROM evc
+                         WHERE evc.bucket = k.bucket AND evc.variation_id = k.variation_id), 0)
+                   AS subject_count,
+               COALESCE((SELECT rollout_subject_count FROM evc
+                         WHERE evc.bucket = k.bucket AND evc.variation_id = k.variation_id), 0)
+                   AS rollout_subject_count,
                COALESCE((SELECT n FROM mt WHERE mt.bucket = k.bucket
                          AND mt.variation_id = k.variation_id AND mt.metric_key = 'error'), 0) AS error_count,
+               COALESCE((SELECT subjects FROM mt WHERE mt.bucket = k.bucket
+                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'error'), 0)
+                   AS error_subjects,
                COALESCE((SELECT n FROM mt WHERE mt.bucket = k.bucket
                          AND mt.variation_id = k.variation_id AND mt.metric_key = 'conversion'), 0)
-                   AS conversion_count
+                   AS conversion_count,
+               COALESCE((SELECT subjects FROM mt WHERE mt.bucket = k.bucket
+                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'conversion'), 0)
+                   AS conversion_subjects
         FROM keys k
         ORDER BY k.bucket, k.variation_id
         """;
@@ -138,17 +172,58 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
             });
     }
 
+    /**
+     * Every live head, each carrying the start of its current allocation epoch.
+     *
+     * <p>The epoch is found by a run-length scan over the append-only version history: fingerprint
+     * every version's allocation-bearing fields, mark where the fingerprint changes, and take the
+     * earliest {@code created_at} in the run the head belongs to. That is the last moment traffic
+     * was reallocated, which is the only origin from which an anytime-valid statistic means
+     * anything - see {@link RolloutCandidate#epochStartedAt()}.
+     *
+     * <p>A version whose note changed but whose weights did not stays inside the same run, so
+     * editing a description does not throw away accumulated evidence.
+     */
     @Override
     public Flux<RolloutCandidate> findRolloutCandidates() {
         return db.sql("""
+                WITH versioned AS (
+                    SELECT flag_id, environment_id, version_number, created_at,
+                           rollout_allocation_fingerprint(enabled, kill_switch_active, config)
+                               AS allocation
+                    FROM flag_env_config_versions
+                ),
+                marked AS (
+                    SELECT *,
+                           CASE WHEN allocation IS DISTINCT FROM LAG(allocation) OVER (
+                                    PARTITION BY flag_id, environment_id ORDER BY version_number)
+                                THEN 1 ELSE 0 END AS changed
+                    FROM versioned
+                ),
+                runs AS (
+                    SELECT *,
+                           SUM(changed) OVER (PARTITION BY flag_id, environment_id
+                                              ORDER BY version_number) AS run_id
+                    FROM marked
+                ),
+                epoch AS (
+                    SELECT DISTINCT ON (flag_id, environment_id)
+                           flag_id, environment_id,
+                           MIN(created_at) OVER (PARTITION BY flag_id, environment_id, run_id)
+                               AS epoch_started_at
+                    FROM runs
+                    ORDER BY flag_id, environment_id, version_number DESC
+                )
                 SELECT p.org_id, p.id AS project_id, e.id AS environment_id, e.key AS env_key,
                        f.id AS flag_id, f.key AS flag_key, f.name AS flag_name, f.description,
                        f.kind, f.variations, f.tags,
-                       c.enabled, c.kill_switch_active, c.config, c.version
+                       c.enabled, c.kill_switch_active, c.config, c.version,
+                       ep.epoch_started_at
                 FROM flag_env_configs c
                 JOIN flags f ON f.id = c.flag_id AND f.archived_at IS NULL
                 JOIN environments e ON e.id = c.environment_id
                 JOIN projects p ON p.id = f.project_id
+                LEFT JOIN epoch ep ON ep.flag_id = c.flag_id AND ep.environment_id = c.environment_id
                 """)
             .map(this::mapCandidate)
             .all();
@@ -179,7 +254,11 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
             row.get("variation_id", UUID.class),
             row.get("eval_count", Long.class),
             row.get("error_count", Long.class),
-            row.get("conversion_count", Long.class));
+            row.get("conversion_count", Long.class),
+            row.get("subject_count", Long.class),
+            row.get("rollout_subject_count", Long.class),
+            row.get("error_subjects", Long.class),
+            row.get("conversion_subjects", Long.class));
     }
 
     private RolloutCandidate mapCandidate(Readable row) {
@@ -202,7 +281,8 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
             readConfig(row.get("config", String.class)),
             Boolean.TRUE.equals(row.get("enabled", Boolean.class)),
             Boolean.TRUE.equals(row.get("kill_switch_active", Boolean.class)),
-            row.get("version", Integer.class));
+            row.get("version", Integer.class),
+            row.get("epoch_started_at", Instant.class));
     }
 
     private StaleFlagCandidate mapStale(Readable row) {
