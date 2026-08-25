@@ -1,7 +1,9 @@
+import { buildTimeConflict, configSource } from '../lib/runtimeConfig'
 import type { AuthProviderKind } from './types'
 
 /**
- * Auth configuration, read from Vite env at startup.
+ * Auth configuration, read at startup from the runtime source (`config.js` layered over the
+ * Vite env — see `lib/runtimeConfig.ts`).
  *
  * This is deliberately a *validating* reader rather than a bag of `import.meta.env` lookups
  * scattered through the providers: a deployment that points at Okta and forgets the client id
@@ -62,7 +64,8 @@ function required(source: EnvSource, key: string): string {
   const value = str(source, key)?.trim()
   if (!value) {
     throw new AuthConfigError(
-      `${key} is required when VITE_AUTH_PROVIDER=oidc. Set it in .env.local (see .env.example).`,
+      `${key} is required when VITE_AUTH_PROVIDER=oidc. Set it in .env.local (see .env.example), ` +
+        'or in the deployed container\'s environment (see docs/DEPLOYMENT.md).',
     )
   }
   return value
@@ -142,10 +145,17 @@ function readFirebase(source: EnvSource): FirebaseAuthConfig {
  * Reads and validates the active auth configuration. Throws `AuthConfigError` with a message
  * naming the offending variable — the browser equivalent of the backend refusing to boot on a
  * malformed `switchboard.auth.providers` entry.
+ *
+ * This is also where a runtime override of a build-time-only key surfaces. It is checked here
+ * rather than where it is read because this is the one configuration path with a full-screen
+ * error already wired to it (`AuthProvider`), and the only build-time-only key there is decides
+ * which auth provider was compiled in.
  */
 export function readAuthConfig(
-  source: EnvSource = import.meta.env,
+  source: EnvSource = configSource(),
   origin: string = typeof window === 'undefined' ? 'http://localhost:5273' : window.location.origin,
 ): AuthConfig {
+  const conflict = buildTimeConflict()
+  if (conflict) throw new AuthConfigError(conflict)
   return readKind(source) === 'oidc' ? readOidc(source, origin) : readFirebase(source)
 }

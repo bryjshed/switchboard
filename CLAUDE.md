@@ -84,6 +84,19 @@ loading/error/refreshing flags and toasts for writes. Semantic tokens only, no r
 the `warning` token rather than amber. Filter and tab state lives in query params. One API
 module per endpoint group over `src/lib/apiClient.ts`.
 
+**Two compose files, two project names.** `docker-compose.yml` is the dev stack;
+`docker-compose.prod.yml` is the deployable one and sets `name: switchboard-prod`. That line
+is load-bearing: without it Compose derives the project name from the directory, both files
+become `switchboard`, and `up` on the prod file **recreates the dev postgres container in
+place** against the dev volume with production's credentials. Done accidentally once; the
+volume survived, the running backend did not.
+
+**Dashboard configuration is runtime, not build-time** — the container writes `/config.js`
+from its environment and `src/lib/runtimeConfig.ts` layers it over `import.meta.env`, so one
+image serves any environment. The exception is `VITE_AUTH_PROVIDER`, which decides which auth
+implementation is *bundled*; a runtime override of it is reported as an error rather than
+silently ignored.
+
 **Caching goes through `CacheRegistry` / `SwitchboardCache`** — a reactive seam over Caffeine,
 provider chosen by `switchboard.cache.provider`. **Do not reach for `@Cacheable`**: on a method
 returning `Mono` it caches the cold publisher rather than the value, so it appears to work while
@@ -121,10 +134,17 @@ node dashboard/scripts/service-check.mjs       # 67
 node dashboard/scripts/ai-check.mjs            # 53
 node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
+node mcp/scripts/live-check.mjs                # 19
 ```
 
 Run all of them after any backend change. If one fails in a tree you do not own, say so
 rather than "fixing" it.
+
+All of it runs in `.github/workflows/ci.yml` on every PR, live checks included. The `live`
+job configures the second OIDC provider up front so auth-check's OIDC leg actually runs; the
+`containers` job builds both production images and brings `docker-compose.prod.yml` up for
+real. If you change a check script, a port, or a seed default, that workflow is the other
+place it has to be true.
 
 ### Tight loops
 
@@ -172,7 +192,8 @@ and a suggested order. `docs/DECISIONS.md` records the choices that look wrong u
 why — **read it before "fixing" something that seems obviously broken**, because several
 things are deliberate (the kill switch bypassing approval, MD5 bucketing, permissions
 unioning rather than narrowing, an unknown flag returning 200). `docs/competitive-gaps.md`
-is the market research the backlog derives from.
+is the market research the backlog derives from. `docs/DEPLOYMENT.md` covers containers,
+configuration, migrations, retention and when Redis actually becomes necessary.
 
 Two things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
 flag creation has never actually executed — everything else in the AI layer works without

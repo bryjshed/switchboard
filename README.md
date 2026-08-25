@@ -74,6 +74,7 @@ const { value, reason } = await res.json();   // e.g. { value: "true", reason: "
 | [Governance](docs/governance.md) | Scoped RBAC, approvals, and the two places review is deliberately skipped |
 | [The AI layer](docs/ai-layer.md) | Healing, optimizing, and the statistics underneath — including why the scan interval does not affect the error rate |
 | [Development](docs/development.md) | Layout, running each piece, and how to verify a change |
+| [Deployment](docs/DEPLOYMENT.md) | Containers, configuration, migrations, retention, and the honest answer about when Redis becomes necessary |
 
 Reference: [DECISIONS.md](docs/DECISIONS.md) records the choices that look wrong until you know why —
 read it before "fixing" something that seems obviously broken.
@@ -114,5 +115,22 @@ make smoke   # ~35 API cases end to end, negative paths included
 make check   # compile + checkstyle
 ```
 
-`make smoke` is the fastest honest answer to "is it working". Six live-check scripts against a
+`make smoke` is the fastest honest answer to "is it working". Seven live-check scripts against a
 running stack are the real regression net — see [Development](docs/development.md#the-live-checks).
+
+All of it runs in [CI](.github/workflows/ci.yml) on every pull request, the live checks included:
+they bring up a real stack, seed it, and run all seven. Contract drift is exactly what unit tests
+miss, so it is the one thing a merge should not be able to get past.
+
+## Deploying
+
+```bash
+cp .env.prod.example .env       # then set POSTGRES_PASSWORD; it has no default on purpose
+docker compose -f docker-compose.prod.yml up --build -d --wait
+```
+
+Postgres, the backend and the dashboard. The backend migrates the schema on boot, so the first
+`up` on an empty volume is a working install. One built dashboard image serves any environment —
+configuration is written into the page at container start rather than baked into the bundle.
+[DEPLOYMENT.md](docs/DEPLOYMENT.md) has the rest, including what must never carry over from a
+laptop.

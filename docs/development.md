@@ -67,7 +67,7 @@ cd sdk/typescript && npx vitest run
 
 ### The live checks
 
-Six scripts run against a **running** stack and are the real regression net — they catch contract
+Seven scripts run against a **running** stack and are the real regression net — they catch contract
 drift that unit tests cannot:
 
 ```bash
@@ -77,6 +77,7 @@ node dashboard/scripts/service-check.mjs       # 67
 node dashboard/scripts/ai-check.mjs            # 53
 node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider; it prints the command
+node mcp/scripts/live-check.mjs                # 19  · every MCP tool against a real stack
 ```
 
 Run all of them after any backend change. If one fails in a tree you do not own, say so rather than
@@ -84,6 +85,26 @@ Run all of them after any backend change. If one fails in a tree you do not own,
 
 `make smoke` alone is the fastest honest answer to "is it working". See [TESTING.md](../TESTING.md)
 for the manual passes, including the kill-switch drill and the SSE watch.
+
+### CI
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs all of the above on every pull
+request. Two jobs are worth knowing about before you edit it:
+
+**`conformance`** is its own job rather than a step inside `backend` or `sdk`, because it belongs
+to neither: it runs the Java vector runner, the TypeScript one, and `generate-vectors.mjs --check`.
+A failure there means the two implementations have DRIFTED, which is a different diagnosis from
+either one being broken.
+
+**`live`** brings up compose, starts the backend and seeds it, then runs all seven scripts. It
+configures a **second identity provider** so `auth-check`'s OIDC leg actually runs — the local
+issuer binds a fixed port, so the backend can be told about it before it exists, and the JWK set
+is fetched lazily at the first token. A permanently-skipped check is worse than no check.
+
+There is also a `containers` job that builds both production images and brings up
+`docker-compose.prod.yml` for real. It catches what a Dockerfile lint cannot: a missing migration
+on a fresh volume, a probe pointed at the wrong port, a runtime config that never reaches the
+browser. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Resetting local state
 

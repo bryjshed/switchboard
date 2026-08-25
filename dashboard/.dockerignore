@@ -1,0 +1,12 @@
+# `COPY . .` in the build stage would otherwise send a ~400 MB node_modules to the daemon and
+# then throw it away, because `npm ci` has already installed one.
+node_modules/
+dist/
+
+# Local overrides must never reach a build: they are a developer's laptop, and the whole point
+# of this image is that configuration arrives at runtime.
+.env
+.env.local
+
+*.log
+.DS_Store

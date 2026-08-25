@@ -430,18 +430,30 @@ implementation has an objective acceptance bar: **pass all 201 vectors**.
 
 ---
 
-## 6. Operations — never started
+## 6. Operations
 
-None of this exists. It is what stands between "runs on a laptop" and "runs for customers".
+Most of this landed on 2026-08-25. What is left is the part that needs traffic rather than code.
 
-- **No CI.** No workflows at all; every check is run by hand. **S**
-- **No Dockerfiles, no deployment story, no hosting.** **M**
-- **No load or performance testing.** Every latency claim in the docs is untested. Worth
-  knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
-- **No monitoring, alerting, or backup/restore.** **M**
-- **Event table growth is unbounded in practice** — `eval_events` and `metric_events` are
-  monthly-partitioned and a partition-roll job exists, but retention has never run against
-  real volume. **S**
+- ~~**No CI.**~~ **Done.** `.github/workflows/ci.yml`: backend, dashboard, sdk, mcp, conformance,
+  live and containers. The live job brings up a real stack, seeds it and runs all seven check
+  scripts — including `auth-check`'s OIDC leg, which needed a second identity provider configured
+  and had never actually run.
+- ~~**No Dockerfiles, no deployment story.**~~ **Done.** Multi-stage images for both, a production
+  compose file, and [DEPLOYMENT.md](DEPLOYMENT.md). The dashboard's configuration moved from
+  build-time to runtime so one image serves any environment; `VITE_AUTH_PROVIDER` stayed a build
+  argument because it decides which provider is *compiled in*, and a runtime override of it is now
+  reported rather than ignored.
+- ~~**Event table growth is unbounded in practice.**~~ **Configuration now**
+  (`switchboard.events.retention-months`, default 3) rather than a constant, documented as
+  destructive-on-lowering, and clamped at one month because the current month's partition is the
+  one being written to. It still has not run against real volume — that is the part below.
+- **No load or performance testing.** Every latency claim in the docs is untested, retention
+  included. Worth knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
+- **No monitoring or alerting.** `/actuator/prometheus` exposes the meters; nothing scrapes them
+  and no alert is defined on them. Backup/restore is documented but has never been rehearsed. **M**
+- **Hosting.** The compose file is a single node by construction. The order in which that stops
+  being enough is written down in [DEPLOYMENT.md](DEPLOYMENT.md#scaling-past-one-node); the first
+  rung is the per-instance rate limiter. **M**
 
 ---
 
@@ -467,6 +479,9 @@ Consciously not building, so nobody re-litigates them by accident:
    for authorization; this is the cheapest large win in the system.
 4. ~~**Personal access tokens → MCP server.**~~ **Done.**
 5. ~~**Targeting operators and typed attributes.**~~ **Done.**
-6. **CI and a deployment story.** The bridge from laptop to product — and the point at
-   which the shared-cache-tier question needs an answer.
+6. ~~**CI and a deployment story.**~~ **Done.** The shared-cache question it was meant to force
+   has an answer: not yet, and the reason is written down — the caches are read-through over
+   `NOTIFY`-invalidated data, so a shared store buys nothing there. The rate limiter is the one
+   thing that genuinely wants Redis, and only above one instance.
 7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+8. **Load and performance testing**, which is now the largest untested claim in the repo.

@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Switchboard</title>
+
+    <!--
+      Runtime configuration, written by the container from its environment at start-up so one
+      built image serves any environment. Classic (non-module) and therefore evaluated before
+      the deferred module below, which is what lets the bundle read it during initialisation.
+      Empty in development; see dashboard/public/config.js.
+    -->
+    <script src="/config.js"></script>
   </head>
   <body>
     <div id="root"></div>

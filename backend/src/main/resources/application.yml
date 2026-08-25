@@ -74,6 +74,16 @@ switchboard:
   jobs:
     token: ${JOB_TOKEN:}
     scheduled-enabled: ${JOBS_SCHEDULED_ENABLED:true}
+  # eval_events and metric_events are monthly-partitioned; the roll job creates months ahead and
+  # DROPS whole partitions past the retention window. Both numbers are deployment decisions, not
+  # code decisions - retention trades disk against how far back the healing loop can look, and
+  # three months comfortably covers the 30-day lookback cap on the rollout monitor.
+  #
+  # Lowering this is destructive and immediate: the next roll drops the partitions it excludes.
+  # There is no soft delete and no archive step.
+  events:
+    retention-months: ${EVENT_RETENTION_MONTHS:3}
+    partition-months-ahead: ${EVENT_PARTITION_MONTHS_AHEAD:2}
   # The healing / optimizing loop. Note what is NOT here: a scan interval that affects the
   # decision. The statistic is anytime-valid, so scanning more often costs nothing in error
   # rate -- which is exactly what was untrue of the fixed-horizon z-test this replaced.

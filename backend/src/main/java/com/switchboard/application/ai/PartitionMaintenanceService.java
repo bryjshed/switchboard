@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -31,6 +32,14 @@ import reactor.core.publisher.Mono;
  * <p>The DEFAULT catch-all partitions are never dropped - they are what keeps an
  * out-of-range event from being rejected outright, and dropping one would lose
  * every row that landed there.
+ *
+ * <h2>Retention is configuration</h2>
+ *
+ * <p>The window is {@code switchboard.events.retention-months} rather than a
+ * constant, because the right answer is a property of the deployment and not of
+ * the code: it trades disk against how far back the healing loop can look. The
+ * floor of one month is not a style choice - the current month's partition is
+ * being written to, so a shorter window would drop live data.
  */
 @Service
 public class PartitionMaintenanceService {
@@ -41,23 +50,35 @@ public class PartitionMaintenanceService {
     private static final DateTimeFormatter SUFFIX = DateTimeFormatter.ofPattern("yyyy_MM", Locale.ROOT);
     private static final DateTimeFormatter BOUND =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssXXX", Locale.ROOT);
-    private static final int MONTHS_AHEAD = 2;
-    private static final int MONTHS_RETAINED = 3;
     private static final int MAX_CREATES = 24;
-    /** Epoch evidence outlives its rollout by a wide margin, then stops being useful. */
-    private static final int EVIDENCE_MONTHS_RETAINED = 3;
 
     private final DatabaseClient db;
     private final EpochEvidenceRepository evidence;
+    private final int monthsAhead;
+    private final int monthsRetained;
 
-    public PartitionMaintenanceService(DatabaseClient db, EpochEvidenceRepository evidence) {
+    public PartitionMaintenanceService(
+        DatabaseClient db,
+        EpochEvidenceRepository evidence,
+        @Value("${switchboard.events.partition-months-ahead:2}") int monthsAhead,
+        @Value("${switchboard.events.retention-months:3}") int monthsRetained) {
         this.db = db;
         this.evidence = evidence;
+        // At least one month ahead, or the roll job stops being ahead of anything and rows land
+        // in the DEFAULT partition on the first of the month.
+        this.monthsAhead = Math.max(1, monthsAhead);
+        // At least one month retained: the current month's partition is the one being written
+        // to, and dropping it would delete live data rather than expire old data.
+        this.monthsRetained = Math.max(1, monthsRetained);
     }
 
     public Mono<JobResult> run() {
         LocalDate currentMonth = LocalDate.now(ZoneOffset.UTC).withDayOfMonth(1);
-        Instant evidenceCutoff = currentMonth.minusMonths(EVIDENCE_MONTHS_RETAINED)
+        // Epoch evidence outlives its rollout by a wide margin, then stops being useful. It is
+        // tied to the event window rather than configured separately: evidence about events
+        // that have been dropped cannot be recomputed or checked, so keeping it longer than the
+        // events would leave a finding whose basis no longer exists.
+        Instant evidenceCutoff = currentMonth.minusMonths(monthsRetained)
             .atStartOfDay(ZoneOffset.UTC).toInstant();
 
         return Flux.fromIterable(TABLES)
@@ -80,9 +101,9 @@ public class PartitionMaintenanceService {
 
     /** Returns {inspected, created, dropped} for one parent table. */
     private Mono<int[]> maintain(String table, LocalDate currentMonth) {
-        Instant coverThrough = currentMonth.plusMonths(MONTHS_AHEAD + 1L)
+        Instant coverThrough = currentMonth.plusMonths(monthsAhead + 1L)
             .atStartOfDay(ZoneOffset.UTC).toInstant();
-        LocalDate cutoff = currentMonth.minusMonths(MONTHS_RETAINED);
+        LocalDate cutoff = currentMonth.minusMonths(monthsRetained);
 
         return Mono.zip(existingPartitions(table), newestUpperBound(table))
             .flatMap(t -> {

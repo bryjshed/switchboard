@@ -285,6 +285,44 @@ and therefore one database, silently defeating fresh-database-per-class.
 
 ---
 
+## Deployment
+
+**Dashboard configuration is resolved at runtime, not at build time.** Vite folds every
+`VITE_*` into the bundle as a literal, which would pin an image to one API URL and one IdP —
+staging and production would be different images of the same commit, and "did we deploy the
+right build" becomes a question anyone can get wrong. The container writes `/config.js` from
+its environment at start-up and `src/lib/runtimeConfig.ts` layers it over `import.meta.env`.
+
+**`VITE_AUTH_PROVIDER` stays a build argument, and a runtime override of it is an error
+rather than a no-op.** It decides which provider is *compiled in*: `src/auth/index.ts` sits
+its two dynamic imports either side of a literal comparison, so a default build does not
+contain `oidc-client-ts` and an `oidc` build does not contain Firebase. Silently ignoring an
+override is the worse failure — the operator sets the variable, sees the login page render,
+and finds out at the first sign-in attempt.
+
+**The production compose file sets `name: switchboard-prod`, and that line is load-bearing.**
+Compose derives the project name from the directory when a file does not set one, so both
+compose files would be `switchboard` and `up` on the production one recreates the
+*development* postgres container in place, against the development volume, with production's
+credentials. Verified by doing it accidentally.
+
+**The management port is not published, and its endpoints are `permitAll`.** The port, not
+the filter chain, is the boundary. Anything that needs to scrape it joins the network.
+
+**Retention is configuration (`switchboard.events.retention-months`), clamped at one month.**
+Whole partitions are dropped, so lowering it is immediate and destructive with no archive
+step. The clamp is not a style choice: the current month's partition is the one being written
+to, and dropping it would delete live data rather than expire old data. Epoch evidence is
+pruned on the same window deliberately — evidence about events that no longer exist cannot be
+rechecked.
+
+**The live check scripts do not run against a deployment, and that is correct.** All of them
+authenticate with `Bearer dev:<email>`, which exists only under the `local` profile. Against
+a real environment they 401 on the first call. They belong in CI, where the stack is local by
+construction, and they run there on every pull request.
+
+---
+
 ## Known-good states that look like bugs
 
 - **`/actuator/health` 404s on port 28080.** Actuator moved to its own port; probes must
@@ -292,6 +330,8 @@ and therefore one database, silently defeating fresh-database-per-class.
 - **`dashboard/scripts/auth-check.mjs` fails its OIDC leg unless the backend has a second
   provider configured.** The script prints the exact command. The Firebase leg passing alone
   is expected on a default stack.
+- **The live check scripts 401 against anything but a local stack.** Dev tokens are
+  local-profile-only. See Deployment above.
 - **AI endpoints return `503 AI_UNAVAILABLE` without an `ANTHROPIC_API_KEY`.** Intended, and
   the UI renders it as an explanation rather than an error. Healing, optimizing and the stale
   sweep all work without a key.
