@@ -39,6 +39,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/UserResponse'
 
+  /api/users/me/tokens:
+    get:
+      tags: [Tokens]
+      operationId: listMyTokens
+      description: >-
+        The caller's own personal access tokens, newest first. Revoked ones are included: a
+        revocation should be visible rather than look like a disappearance.
+      responses:
+        '200':
+          description: Tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PersonalAccessTokenResponse'
+    post:
+      tags: [Tokens]
+      operationId: createMyToken
+      description: >-
+        Mints a personal access token. The full value is returned ONCE and never stored - only its
+        SHA-256 is kept. A token authenticates as its owner and inherits their permissions
+        unchanged; there is no separate scope model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PersonalAccessTokenCreateRequest'
+      responses:
+        '201':
+          description: Created; the full token is present exactly here and nowhere else.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAccessTokenCreatedResponse'
+
+  /api/users/me/tokens/{tokenId}:
+    delete:
+      tags: [Tokens]
+      operationId: revokeMyToken
+      description: >-
+        Revokes one of the caller's own tokens. Somebody else's token reads as 404 rather than 403 -
+        whether it exists is not the caller's business either.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Revoked
+
   /api/orgs:
     post:
       tags: [Orgs]
@@ -1874,6 +1929,72 @@ components:
           format: int64
         approvals:
           $ref: '#/components/schemas/ApprovalSettingsResponse'
+
+    PersonalAccessTokenCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: What the token is for. Required, so it can be recognised before revoking it.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Omit for no expiry. Allowed, but an unattended forever-token is a liability.
+
+    PersonalAccessTokenResponse:
+      type: object
+      required: [id, name, tokenPrefix, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        tokenPrefix:
+          type: string
+          description: Display only, ellipsis included. Never enough to authenticate with.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Advisory, updated off the request path. Useful for spotting dead weight.
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    PersonalAccessTokenCreatedResponse:
+      type: object
+      required: [id, name, tokenPrefix, token, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        tokenPrefix:
+          type: string
+        token:
+          type: string
+          description: The full token. Returned only here, never again, and stored only as a hash.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
 
     SdkKeyKind:
       type: string

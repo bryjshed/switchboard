@@ -62,6 +62,11 @@ public class UserService {
      * <p>When the rule refuses, the login still succeeds - as a separate, new user. Two rows may
      * then share an email, which is why {@code users.email} is indexed but not unique.
      */
+    /** The user behind an id, for credentials that already know who they belong to. */
+    public Mono<User> findById(java.util.UUID userId) {
+        return users.findById(userId);
+    }
+
     public Mono<User> resolveIdentity(VerifiedIdentity identity) {
         return identities.get(
             identity.issuer() + "\u0000" + identity.subject(),

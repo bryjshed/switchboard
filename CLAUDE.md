@@ -12,9 +12,10 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 101 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 108 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
+| `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
@@ -98,7 +99,7 @@ Note there is no vector *generator* — `spec/tools/` holds a checker only, vect
 hand-authored, and `sdk/typescript/test/conformance.test.ts` hardcodes the 201 total, so
 adding a vector means editing that literal too.
 
-**Flyway.** Migrations are `V1`–`V6` today; the next is **V7**. They run automatically
+**Flyway.** Migrations are `V1`–`V7` today; the next is **V8**. They run automatically
 locally.
 
 ## Verifying
@@ -108,6 +109,7 @@ cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
 cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
 cd dashboard  && npm run check && npm run build
 cd sdk/typescript && npx vitest run
+cd mcp        && npm run check
 ```
 
 Six live scripts run against a **running** stack and are the real regression net — they

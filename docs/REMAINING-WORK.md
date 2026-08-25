@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (336 unit + 101 integration), web dashboard (329),
+**Status of the product today.** Backend (336 unit + 108 integration), MCP server (7), web dashboard (329),
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
@@ -299,19 +299,25 @@ Needs typed attributes (not `Map<String,String>`), the full operator set, and pe
 negation. **Any change here must land as a spec change plus regenerated conformance vectors
 in the same commit** — that rule is what keeps the server and every SDK in agreement.
 
-### MCP server · effort **S** (after PATs) · table stakes, not a differentiator
-LaunchDarkly (~120 tools), Statsig, ConfigCat, DevCycle, Kameleoon, Flagsmith, PostHog,
-Unleash, Flipt, GrowthBook, Harness and Optimizely all ship one. Switchboard has none, and
-consequently no IDE or CLI surface at all. A thin server over the existing REST API.
+### ~~MCP server~~ · **Landed 2026-08-25**
+A new `mcp/` workspace: twelve tools over the existing REST API, no backend surface of its own,
+authenticated by a personal access token. `mcp/scripts/live-check.mjs` drives every tool against a
+running stack (19 assertions) and confirms revocation stops it working.
 
-**Blocked on personal access tokens** (below) — an MCP server cannot authenticate with
-expiring Firebase tokens.
+The detail that mattered most: **a gated write returns 202 and changes nothing**, so every write
+tool returns an explicit `applied` field and says "Do not report it as done" when queued. An agent
+that read 202 as success would tell its user a rollout happened when it had not — worse than an
+error. Writes also carry `expectedVersion`, so a conflict surfaces as a conflict.
 
-### Personal access tokens · effort **S** · unblocks MCP and the CLI
-There is no non-interactive authentication for the management API. Everything today is
-either a Firebase user token (expires) or an SDK key (evaluation surface only). Needs
-scoped, revocable, hashed tokens reusing the `sdk_keys` storage pattern and resolving to
-the RBAC permission model already in place.
+### ~~Personal access tokens~~ · **Landed 2026-08-25**
+`V7` adds `personal_access_tokens`, reusing the `sdk_keys` storage pattern (display prefix,
+SHA-256, `revoked_at`) plus `expires_at` and `last_used_at`. An `sb_pat_` token resolves to the
+**user** principal, so the existing RBAC applies unchanged.
+
+**No scope column, deliberately.** A second authorization vocabulary is a second place for a
+permission bug to live, and it would only ever be exercised by whoever used a token — where the
+RBAC that already exists is checked on every request. To narrow a token, create a user with a
+narrower role and mint it as them. Tokens are personal: somebody else's reads as 404, not 403.
 
 ### Signed webhooks · effort **S**
 No general flag-change webhook exists (the AI layer has a narrow notification hook). Needs
@@ -440,7 +446,7 @@ Consciously not building, so nobody re-litigates them by accident:
    from a browser.
 3. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
    for authorization; this is the cheapest large win in the system.
-4. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
+4. ~~**Personal access tokens → MCP server.**~~ **Done.**
 5. **Targeting operators and typed attributes.** The most visible gap in a live demo.
 6. **CI and a deployment story.** The bridge from laptop to product — and the point at
    which the shared-cache-tier question needs an answer.

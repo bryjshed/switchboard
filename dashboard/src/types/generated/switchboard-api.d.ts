@@ -21,6 +21,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/users/me/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The caller's own personal access tokens, newest first. Revoked ones are included: a revocation should be visible rather than look like a disappearance. */
+        get: operations["listMyTokens"];
+        put?: never;
+        /** @description Mints a personal access token. The full value is returned ONCE and never stored - only its SHA-256 is kept. A token authenticates as its owner and inherits their permissions unchanged; there is no separate scope model. */
+        post: operations["createMyToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/users/me/tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Revokes one of the caller's own tokens. Somebody else's token reads as 404 rather than 403 - whether it exists is not the caller's business either. */
+        delete: operations["revokeMyToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs": {
         parameters: {
             query?: never;
@@ -990,6 +1025,45 @@ export interface components {
             stateVersion: number;
             approvals?: components["schemas"]["ApprovalSettingsResponse"];
         };
+        PersonalAccessTokenCreateRequest: {
+            /** @description What the token is for. Required, so it can be recognised before revoking it. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description Omit for no expiry. Allowed, but an unattended forever-token is a liability.
+             */
+            expiresAt?: string | null;
+        };
+        PersonalAccessTokenResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Display only, ellipsis included. Never enough to authenticate with. */
+            tokenPrefix: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Advisory, updated off the request path. Useful for spotting dead weight.
+             */
+            lastUsedAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            revokedAt?: string | null;
+        };
+        PersonalAccessTokenCreatedResponse: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            tokenPrefix: string;
+            /** @description The full token. Returned only here, never again, and stored only as a hash. */
+            token: string;
+            /** Format: date-time */
+            expiresAt?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
         /**
          * @description SERVER keys are secret and receive the full rule set, so they evaluate locally and see every flag. CLIENT keys ship inside a browser bundle and are therefore public: they receive EVALUATED payloads only, and only for flags marked clientSideAvailable. MOBILE is reserved and not yet mintable - it exists as its own kind because revoking a key baked into a shipped binary locks out installed versions until users update, which is a revocation-UX difference rather than a capability one.
          * @default SERVER
@@ -1754,6 +1828,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
                 };
+            };
+        };
+    };
+    listMyTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenResponse"][];
+                };
+            };
+        };
+    };
+    createMyToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PersonalAccessTokenCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created; the full token is present exactly here and nowhere else. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PersonalAccessTokenCreatedResponse"];
+                };
+            };
+        };
+    };
+    revokeMyToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
