@@ -2622,9 +2622,28 @@ components:
       type: string
       enum: [OPEN, ACKED, AUTO_ROLLED_BACK]
 
+    AnomalyKind:
+      type: string
+      description: >-
+        What a finding claims. SRM means traffic did not arrive in the proportions the rollout
+        configured, so the arms are not comparable populations and every rate comparison for that
+        flag is suppressed. An SRM finding carries no proposal and no zScore.
+      enum: [DEGRADATION, IMPROVEMENT, SRM]
+
+    AnomalyTestKind:
+      type: string
+      description: >-
+        Which statistic produced the evidence. TWO_PROPORTION_Z appears only on rows written before
+        the anytime-valid rewrite; nothing produces it now.
+      enum: [TWO_PROPORTION_Z, MSPRT_GAUSSIAN_MIXTURE, DIRICHLET_MULTINOMIAL]
+
     AnomalyFindingResponse:
       type: object
-      required: [id, environmentId, flagKey, metricKey, baselineRate, variantRate, zScore, status, createdAt]
+      description: >-
+        NOTE zScore is no longer required. It is descriptive rather than the decision input, and an
+        SRM finding has none - a 0.00 there would read as "measured, no effect". The decision is
+        pValue against alpha, where alpha depends on how many hypotheses were screened together.
+      required: [id, environmentId, flagKey, metricKey, baselineRate, variantRate, status, createdAt, kind, testKind]
       properties:
         id:
           type: string
@@ -2645,6 +2664,8 @@ components:
           type: number
         zScore:
           type: number
+          nullable: true
+          description: Descriptive effect size only. Absent on SRM findings.
         summary:
           type: string
         status:
@@ -2655,6 +2676,71 @@ components:
         createdAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/AnomalyKind'
+        testKind:
+          $ref: '#/components/schemas/AnomalyTestKind'
+        pValue:
+          type: number
+          nullable: true
+          description: >-
+            Always-valid: min(1, 1/sup E) over every look since the allocation epoch opened. Unlike
+            a fixed-horizon p-value this stays valid however often the monitor runs.
+        logEValue:
+          type: number
+          nullable: true
+          description: Natural log of the e-value. A real effect overflows a double unlogged.
+        alpha:
+          type: number
+          nullable: true
+          description: The e-BH threshold actually applied, given familySize.
+        familySize:
+          type: integer
+          nullable: true
+          description: Hypotheses screened together in the scan that produced this finding.
+        familyRank:
+          type: integer
+          nullable: true
+        srmPValue:
+          type: number
+          nullable: true
+          description: The allocation gate's reading. A finding is only written when this passed.
+        tau:
+          type: number
+          nullable: true
+          description: Mixture scale in force, as an absolute proportion difference.
+        epochStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the evidence window opened - the last change to traffic allocation.
+        windowTruncated:
+          type: boolean
+          description: >-
+            True when max-lookback clipped the epoch, weakening the guarantee from "at most alpha
+            forever" to "at most alpha per lookback window".
+        variantSubjects:
+          type: integer
+          format: int64
+          nullable: true
+          description: Distinct subjects, not evaluation events.
+        variantHits:
+          type: integer
+          format: int64
+          nullable: true
+        baselineSubjects:
+          type: integer
+          format: int64
+          nullable: true
+        baselineHits:
+          type: integer
+          format: int64
+          nullable: true
+        baselineVariationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Pinned from configuration, not chosen as the arm with the most traffic.
 
     VariantStats:
       type: object

@@ -1,5 +1,6 @@
 package com.switchboard.application.ai;
 
+import com.switchboard.domain.ai.EpochEvidenceRepository;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -43,21 +44,38 @@ public class PartitionMaintenanceService {
     private static final int MONTHS_AHEAD = 2;
     private static final int MONTHS_RETAINED = 3;
     private static final int MAX_CREATES = 24;
+    /** Epoch evidence outlives its rollout by a wide margin, then stops being useful. */
+    private static final int EVIDENCE_MONTHS_RETAINED = 3;
 
     private final DatabaseClient db;
+    private final EpochEvidenceRepository evidence;
 
-    public PartitionMaintenanceService(DatabaseClient db) {
+    public PartitionMaintenanceService(DatabaseClient db, EpochEvidenceRepository evidence) {
         this.db = db;
+        this.evidence = evidence;
     }
 
     public Mono<JobResult> run() {
         LocalDate currentMonth = LocalDate.now(ZoneOffset.UTC).withDayOfMonth(1);
+        Instant evidenceCutoff = currentMonth.minusMonths(EVIDENCE_MONTHS_RETAINED)
+            .atStartOfDay(ZoneOffset.UTC).toInstant();
+
         return Flux.fromIterable(TABLES)
             .concatMap(table -> maintain(table, currentMonth))
             .reduce(new int[] {0, 0, 0},
                 (acc, counts) -> new int[] {acc[0] + counts[0], acc[1] + counts[1], acc[2] + counts[2]})
-            .map(acc -> new JobResult("partition-roll", acc[0], acc[1],
-                "inspected=" + acc[0] + " created=" + acc[1] + " dropped=" + acc[2]));
+            // rollout_epoch_evidence is not partitioned and accumulates one row per hypothesis per
+            // epoch forever otherwise. It rides along here because this is already the job whose
+            // whole purpose is keeping event-shaped data from growing without bound.
+            .flatMap(acc -> evidence.deleteObservedBefore(evidenceCutoff)
+                .doOnNext(pruned -> log.info("Pruned {} stale epoch-evidence rows", pruned))
+                .onErrorResume(e -> {
+                    log.warn("Epoch-evidence prune failed: {}", e.toString());
+                    return Mono.just(0L);
+                })
+                .map(pruned -> new JobResult("partition-roll", acc[0], acc[1],
+                    "inspected=" + acc[0] + " created=" + acc[1] + " dropped=" + acc[2]
+                        + " evidencePruned=" + pruned)));
     }
 
     /** Returns {inspected, created, dropped} for one parent table. */

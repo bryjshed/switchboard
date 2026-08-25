@@ -559,6 +559,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /**
+         * Apply a DRAFT proposal, subject to the environment's approval policy.
+         * @description The write an AI proposal makes is a flag write, so it answers to the same per-environment approval policy a hand edit does. In an environment with requireApproval on, applying a proposal WRITES NOTHING and opens a PENDING change request per environment instead, stamped with this proposal's id; the proposal stays DRAFT and becomes APPLIED when the last of those requests is approved and applied. A declined or stale request leaves the proposal DRAFT, so it can simply be applied again.
+         *     THE ONE EXCEPTION IS AUTOMATION. The rollout monitor's auto-rollback and auto-optimize applies bypass this gate while the environment keeps allowAutomationBypass on, which is the default - a healing rollback that waits for a reviewer during an error spike is not healing. Those writes are audited as usual and additionally recorded as APPROVAL_BYPASS. This endpoint is a human path, so it never takes the bypass.
+         */
         post: operations["applyProposal"];
         delete?: never;
         options?: never;
@@ -1341,6 +1346,17 @@ export interface components {
         };
         /** @enum {string} */
         AnomalyStatus: "OPEN" | "ACKED" | "AUTO_ROLLED_BACK";
+        /**
+         * @description What a finding claims. SRM means traffic did not arrive in the proportions the rollout configured, so the arms are not comparable populations and every rate comparison for that flag is suppressed. An SRM finding carries no proposal and no zScore.
+         * @enum {string}
+         */
+        AnomalyKind: "DEGRADATION" | "IMPROVEMENT" | "SRM";
+        /**
+         * @description Which statistic produced the evidence. TWO_PROPORTION_Z appears only on rows written before the anytime-valid rewrite; nothing produces it now.
+         * @enum {string}
+         */
+        AnomalyTestKind: "TWO_PROPORTION_Z" | "MSPRT_GAUSSIAN_MIXTURE" | "DIRICHLET_MULTINOMIAL";
+        /** @description NOTE zScore is no longer required. It is descriptive rather than the decision input, and an SRM finding has none - a 0.00 there would read as "measured, no effect". The decision is pValue against alpha, where alpha depends on how many hypotheses were screened together. */
         AnomalyFindingResponse: {
             /** Format: uuid */
             id: string;
@@ -1352,13 +1368,52 @@ export interface components {
             metricKey: string;
             baselineRate: number;
             variantRate: number;
-            zScore: number;
+            /** @description Descriptive effect size only. Absent on SRM findings. */
+            zScore?: number | null;
             summary?: string;
             status: components["schemas"]["AnomalyStatus"];
             /** Format: uuid */
             suggestedProposalId?: string;
             /** Format: date-time */
             createdAt: string;
+            kind: components["schemas"]["AnomalyKind"];
+            testKind: components["schemas"]["AnomalyTestKind"];
+            /** @description Always-valid: min(1, 1/sup E) over every look since the allocation epoch opened. Unlike a fixed-horizon p-value this stays valid however often the monitor runs. */
+            pValue?: number | null;
+            /** @description Natural log of the e-value. A real effect overflows a double unlogged. */
+            logEValue?: number | null;
+            /** @description The e-BH threshold actually applied, given familySize. */
+            alpha?: number | null;
+            /** @description Hypotheses screened together in the scan that produced this finding. */
+            familySize?: number | null;
+            familyRank?: number | null;
+            /** @description The allocation gate's reading. A finding is only written when this passed. */
+            srmPValue?: number | null;
+            /** @description Mixture scale in force, as an absolute proportion difference. */
+            tau?: number | null;
+            /**
+             * Format: date-time
+             * @description When the evidence window opened - the last change to traffic allocation.
+             */
+            epochStartedAt?: string | null;
+            /** @description True when max-lookback clipped the epoch, weakening the guarantee from "at most alpha forever" to "at most alpha per lookback window". */
+            windowTruncated?: boolean;
+            /**
+             * Format: int64
+             * @description Distinct subjects, not evaluation events.
+             */
+            variantSubjects?: number | null;
+            /** Format: int64 */
+            variantHits?: number | null;
+            /** Format: int64 */
+            baselineSubjects?: number | null;
+            /** Format: int64 */
+            baselineHits?: number | null;
+            /**
+             * Format: uuid
+             * @description Pinned from configuration, not chosen as the arm with the most traffic.
+             */
+            baselineVariationId?: string | null;
         };
         VariantStats: {
             /** Format: uuid */
@@ -1528,6 +1583,8 @@ export interface components {
             allowSelfApproval: boolean;
             /** @description Opt the kill switch into review as well. Off by default: the emergency stop bypasses approval so an incident cannot be blocked on a reviewer. */
             requireApprovalForKill: boolean;
+            /** @description ON BY DEFAULT, AND THIS IS THE ONE SETTING THAT LEAVES AN UNREVIEWED WRITE PATH OPEN. It only means anything when requireApproval is on, and only automation can use it: the rollout monitor's auto-rollback and auto-optimize keep writing immediately instead of opening a change request. A HUMAN applying an AI proposal is never covered - they are gated exactly like a hand edit. The default mirrors the kill switch: an automated rollback fires during an error spike and puts traffic back on the baseline variation that was already live, so making it wait for a reviewer removes the reason to automate it. Set it to false and automated healing parks in the review queue like everything else. Either way the write is audited, and a bypassed write additionally records an APPROVAL_BYPASS entry naming the automation as the actor. */
+            allowAutomationBypass: boolean;
         };
         /** @description Omitted fields are left unchanged. */
         ApprovalSettingsUpdateRequest: {
@@ -1535,6 +1592,8 @@ export interface components {
             minApprovals?: number;
             allowSelfApproval?: boolean;
             requireApprovalForKill?: boolean;
+            /** @description See ApprovalSettingsResponse.allowAutomationBypass. Defaults to true on every environment; turning it off is what makes automated rollout healing wait for review in a gated environment. */
+            allowAutomationBypass?: boolean;
         };
         /** @enum {string} */
         ChangeRequestKind: "TARGETING_UPDATE" | "KILL_SWITCH" | "ROLLBACK";
@@ -1596,6 +1655,11 @@ export interface components {
             decidedAt?: string;
             /** @description The config version this request produced once applied. */
             appliedVersion?: number;
+            /**
+             * Format: uuid
+             * @description Set when this request exists because an AI proposal was applied into an environment that requires approval. The proposal stays DRAFT until the request applies, and becomes APPLIED when the last of its requests lands.
+             */
+            aiProposalId?: string;
             /** @description Approvals that count toward the threshold right now. */
             approvalsMet: number;
             reviews: components["schemas"]["ChangeRequestReviewResponse"][];
@@ -2938,7 +3002,18 @@ export interface operations {
                     "application/json": components["schemas"]["AiProposalResponse"];
                 };
             };
-            /** @description Proposal is not in DRAFT status */
+            /** @description The environment requires approval. NOTHING WAS WRITTEN: the flag is unchanged, the proposal is still DRAFT, and the body is the PENDING change request that now stands in for this apply. Clients must branch on the status code, not the body. The Location header points at the change request. When the proposal touched more than one environment, one request was opened per environment and this is the first of them. */
+            202: {
+                headers: {
+                    /** @description The change request this apply was parked as. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestResponse"];
+                };
+            };
+            /** @description Proposal is not in DRAFT status, or already has an open change request */
             409: {
                 headers: {
                     [name: string]: unknown;

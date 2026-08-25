@@ -7,6 +7,28 @@ import { formatDateTime, formatRelative } from '@/lib/format'
 import { formatRate } from '@/lib/rolloutStats'
 import type { AnomalyFinding } from '@/types/api'
 
+const SRM_EXPLANATION =
+  'Traffic did not arrive in the proportions this rollout configured, so the variations are not ' +
+  'comparable populations. Rate comparisons for this flag are suppressed until it is fixed.'
+
+/** Small p-values matter here, so they do not collapse to 0.00. */
+function formatPValue(pValue: number): string {
+  if (pValue < 0.0001) {
+    return '<0.0001'
+  }
+  return pValue.toFixed(4)
+}
+
+function pExplanation(finding: AnomalyFinding): string {
+  const base =
+    'Always-valid p-value: it stays correct however many times the monitor has looked since ' +
+    'this rollout last changed its traffic allocation.'
+  return finding.familySize && finding.familySize > 1
+    ? `${base} Screened alongside ${finding.familySize} hypotheses, so the threshold was ` +
+        `tightened accordingly.`
+    : base
+}
+
 /**
  * Anomaly findings: what the monitor noticed, and what it did about it.
  *
@@ -63,6 +85,11 @@ export function AnomalyList({
               <Badge variant="outline" className="text-[10px]">
                 {finding.metricKey}
               </Badge>
+              {finding.kind === 'SRM' && (
+                <Badge variant="warning" className="text-[10px]" title={SRM_EXPLANATION}>
+                  allocation mismatch
+                </Badge>
+              )}
               {rolledBack ? (
                 <Badge variant="warning" data-testid={`anomaly-status-${finding.id}`}>
                   rolled back automatically
@@ -104,11 +131,46 @@ export function AnomalyList({
                   {formatRate(finding.variantRate)}
                 </dd>
               </div>
-              <div>
-                <dt className="inline text-muted-foreground">z-score </dt>
-                <dd className="inline font-mono">{finding.zScore.toFixed(2)}</dd>
-              </div>
+              {/*
+                The p-value leads, because it is what the decision was actually made on. It is
+                always-valid: it accounts for the monitor having looked repeatedly since the
+                rollout's allocation last changed, which a fixed-horizon p-value would not.
+              */}
+              {finding.pValue != null && (
+                <div>
+                  <dt className="inline text-muted-foreground">p </dt>
+                  <dd className="inline font-mono" title={pExplanation(finding)}>
+                    {formatPValue(finding.pValue)}
+                  </dd>
+                </div>
+              )}
+              {/* Descriptive only now, and absent on an allocation-mismatch finding. */}
+              {finding.zScore != null && (
+                <div>
+                  <dt className="inline text-muted-foreground">z-score </dt>
+                  <dd className="inline font-mono">{finding.zScore.toFixed(2)}</dd>
+                </div>
+              )}
+              {finding.variantSubjects != null && (
+                <div>
+                  <dt className="inline text-muted-foreground">subjects </dt>
+                  <dd className="inline font-mono" title="Distinct contexts, not evaluations">
+                    {finding.variantSubjects.toLocaleString()}
+                    {finding.baselineSubjects != null
+                      ? ` vs ${finding.baselineSubjects.toLocaleString()}`
+                      : ''}
+                  </dd>
+                </div>
+              )}
             </dl>
+
+            {finding.windowTruncated && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                This rollout has run longer than the monitor looks back, so the evidence window
+                was clipped and starts from a fixed point in time rather than from the last
+                allocation change.
+              </p>
+            )}
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {finding.status === 'OPEN' && (

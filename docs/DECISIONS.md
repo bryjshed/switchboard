@@ -59,6 +59,69 @@ another in a client.
 
 ---
 
+## Rollout monitoring
+
+**Rates are proportions of distinct subjects, never ratios of event counts.** A server SDK
+evaluating a flag in a hot loop emits hundreds of events for one user, so dividing metric
+events by evaluation events understates the variance by roughly the average
+evaluations-per-subject and inflates any test statistic by roughly its square root. The event
+counts are still aggregated and still shown — they are the right number for a volume chart and
+the wrong one for a decision. This was the larger of the two defects fixed in the
+anytime-valid rewrite, and no amount of statistical sophistication would have covered for it.
+
+**The decision statistic is a mixture SPRT reported as an e-value, not a z-test.** The monitor
+runs on a schedule, so whatever it computes is evaluated again and again; a fixed-horizon
+statistic is calibrated for one look, and re-running it hourly inflates the false-positive rate
+without bound. The e-value is a supermartingale under the null, so Ville's inequality bounds
+the probability it *ever* crosses 1/alpha by alpha. The observable consequence — and the
+acceptance test for the whole change — is that **the scan interval no longer appears in any
+decision**. `TwoProportionZ` survives as a descriptive effect size only; do not restore it as a
+decision rule.
+
+**The mixture scale tau is configuration, never fitted to the data.** Validity does not depend
+on it; only power does. Deriving tau from the observed effect makes the constant a function of
+the sample, destroys the supermartingale property, and leaves every number on the screen
+looking exactly as respectable as before.
+
+**Evidence accumulates from the allocation epoch, not over a rolling window.** A rolling window
+is not a filtration — observations leave it — so the argument that makes repeated looks safe
+does not apply to one. A weight change also changes which populations the arms contain, so
+evidence gathered across that boundary tests a null that stopped existing. Restarting on a
+weight change is therefore correct rather than unfortunate.
+
+**The baseline is picked from configuration, and on an even split from the off variation.**
+Choosing it by observed traffic makes the control a function of the same noise being tested.
+Breaking the even-split tie on variation id looks harmless and is not: ids are random UUIDs, so
+half the time the degraded arm becomes the baseline, the one-sided test asks whether the
+healthy arm is worse than the broken one, and a real regression goes unreported
+non-deterministically. Caught by a flaky test during the rewrite, which is the only reason it
+was caught.
+
+**A sample-ratio mismatch suppresses the flag's comparisons rather than annotating them.** If
+traffic did not arrive in the configured proportions the randomizer is broken, the arms are not
+comparable populations, and every rate difference between them is confounded. There is nothing
+safe to automate about that, so it raises a finding for a human and carries no proposal. Only
+rollout-served traffic counts toward the check — including rule-served or individually-targeted
+traffic would trip it the moment anyone adds a targeting rule.
+
+**The multiplicity family is the environment, per direction, and the correction is e-BH.**
+Per-flag families give no protection once there are many flags, and the operator's real
+question is "how many bogus rollbacks landed in production this hour". Org-wide would let one
+noisy team suppress another's true findings. e-BH rather than ordinary BH because these
+hypotheses are dependent in a way that cannot be argued away — across flags they share
+`metric_events` rows, since a metric event carries no flag key — and e-BH holds under arbitrary
+dependence with no penalty factor, where Benjamini-Yekutieli would cost a `ln K` factor.
+
+**The two alphas are asymmetric.** A false rollback reverts to a known-good baseline, is
+audited, and is cheap to undo; a false ramp pushes a worse variant onto more traffic and locks
+in the next rung. `alpha.heal = 0.05`, `alpha.optimize = 0.01`.
+
+**FDR control is per scan, not across all time.** Per-hypothesis type-I error is controlled
+over all time by Ville. There is no construction giving always-valid FDR across unboundedly
+many scans, and implying otherwise would be false.
+
+---
+
 ## Governance
 
 **The kill switch bypasses approval by default.** Putting an emergency stop behind a review

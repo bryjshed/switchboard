@@ -64,3 +64,34 @@ switchboard:
   jobs:
     token: ${JOB_TOKEN:}
     scheduled-enabled: ${JOBS_SCHEDULED_ENABLED:true}
+  # The healing / optimizing loop. Note what is NOT here: a scan interval that affects the
+  # decision. The statistic is anytime-valid, so scanning more often costs nothing in error
+  # rate -- which is exactly what was untrue of the fixed-horizon z-test this replaced.
+  rollout-monitor:
+    enabled: true
+    # Distinct SUBJECTS per arm, not evaluation events. A normal-approximation guard; the
+    # e-value is valid at any sample size.
+    min-subjects: 200
+    # Ceiling on the evidence window. Past this the martingale restarts at a clock time rather
+    # than at an allocation change, which is still valid but weakens the guarantee from
+    # "at most alpha forever" to "at most alpha per window". Findings record when it binds.
+    max-lookback: P30D
+    metrics:
+      error-key: error
+      conversion-key: conversion
+    # Asymmetric on purpose: a false rollback reverts to a known-good baseline and is cheap to
+    # undo, while a false ramp pushes a worse variant onto more traffic and locks in the next
+    # rung of the ladder.
+    alpha:
+      heal: 0.05
+      optimize: 0.01
+      srm: 0.001
+    # Absolute proportion differences worth reacting to. Set these from what you care about --
+    # never fit them to the observed effect, which would destroy the guarantee silently.
+    tau:
+      error: 0.01
+      conversion: 0.02
+    srm:
+      enabled: true
+      min-subjects: 500
+      concentration: 1.0

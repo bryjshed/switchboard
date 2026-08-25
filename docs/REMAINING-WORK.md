@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (280 unit + 74 integration), web dashboard (329),
+**Status of the product today.** Backend (328 unit + 82 integration), web dashboard (329),
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
@@ -25,6 +25,9 @@ the backend and the dashboard work with any OIDC provider — proven against a r
 non-Firebase issuer, not just unit-tested. See `backend/README.md` and `dashboard/README.md`.
 Also landed: **the repo is committed** — the tree is under version control on `main`
 (2026-08-24), so the former top item here (an entirely uncommitted working tree) is gone.
+
+**Ordering note.** Sections below are the original backlog; items that have landed are struck
+through in place rather than deleted, so the reasoning stays next to the work.
 
 **For anyone picking this up:** read `CLAUDE.md` first — it carries the environment traps
 (Java 25, the Firebase emulator host variable, the Metro port hijack) that have each cost
@@ -49,18 +52,37 @@ Nothing here is a technical problem. Each needs a human.
 These are not missing features. They are things Switchboard already claims to do, done
 wrong or incompletely — cheaper to fix now than to explain later.
 
-### The peeking problem — `RolloutMonitorService` · effort **S–M** · **fix first**
-The healing/optimizing loop runs a **fixed-horizon two-proportion z-test (z > 3, 48h window,
-min 50 samples) repeatedly on a schedule**. Repeatedly testing a fixed-horizon statistic
-inflates the false-positive rate without bound as the loop runs — the textbook peeking
-problem. There is also no sample-ratio-mismatch gate and no correction across the metrics
-screened simultaneously.
+### ~~The peeking problem~~ — `RolloutMonitorService` · **Landed 2026-08-24**
+The healing/optimizing loop ran a fixed-horizon two-proportion z-test repeatedly on a
+schedule, which inflates the false-positive rate without bound. Now a Gaussian-mixture SPRT
+reported as an e-value, so Ville's inequality bounds the error however often the monitor looks.
+**The acceptance property: the scan interval no longer appears in any decision.**
 
-This is the statistical core of the product's headline differentiator. It is not a
-theoretical objection: LaunchDarkly publicly replaced the core of Guarded Releases with
-frequentist sequential testing plus multiple-comparisons correction in January 2026 and
-said false positives were the reason. Fix: an anytime-valid/sequential statistic, an SRM
-gate, and a correction across screened metrics.
+Also landed with it, and mostly larger than the defect this item named:
+
+- **Rates are proportions of distinct subjects, not ratios of event counts.** The denominator
+  used to be evaluation events, so a server SDK evaluating in a hot loop made one unhappy user
+  look like a thousand — understating the variance by roughly the evaluations-per-subject and
+  inflating z by roughly its square root. **No sequential statistic fixes that**; an
+  anytime-valid test on those counts is rigorously testing the wrong null.
+- **Evidence accumulates from the allocation epoch** rather than a rolling 48h window. A
+  rolling window is not a filtration, so the argument that makes repeated looks safe does not
+  apply to one.
+- **The baseline comes from configuration**, not from whichever arm had the most traffic.
+- **An SRM gate** (Dirichlet-multinomial e-value) suppresses a flag's comparisons when traffic
+  did not arrive as configured, counting only rollout-served subjects so a targeting rule does
+  not trip it.
+- **e-BH across the environment, per direction**, replacing an uncorrected max-over-challengers
+  that was hiding inside a tie-break.
+- **The dedupe key is epoch-anchored.** It used to end in the current hour, so one incident
+  could file up to 48 findings — and the old rescan test only passed because it re-ran inside
+  the same wall-clock hour.
+- Constants are now `switchboard.rollout-monitor.*` rather than `private static final`.
+
+Reasoning in [DECISIONS.md](DECISIONS.md#rollout-monitoring), operator-facing summary in
+[ai-layer.md](ai-layer.md). `PeekingTest` asserts both that the new rule holds its error rate
+across 48 looks at A/A traffic (0.0025 against alpha 0.01) and that the old one does not
+(0.0090 against a nominal 0.00135) — the second is what gives the first meaning.
 
 ### Client-side exposure in the bootstrap payload · effort **M**
 `GET /api/eval/bootstrap` returns the full rule set **and every segment's `includedKeys`** —
