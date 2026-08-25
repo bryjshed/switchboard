@@ -93,6 +93,14 @@ module per endpoint group over `src/lib/apiClient.ts`.
 **App.** Semantic tokens only; `npm run lint:tokens` fails on raw hex outside
 `shared/theme`.
 
+**Caching goes through Spring's cache abstraction**, backed by Caffeine and swappable to
+Redis by configuration — not hand-rolled per call site. Note the reactive trap: `@Cacheable`
+on a method returning `Mono` caches the cold publisher rather than the value, so it appears
+to work while doing nothing. The Caffeine manager needs async cache mode, `@Cacheable`
+methods must live in their own loader bean (self-invocation bypasses the proxy), and cache
+keys must survive the `NOTIFY` invalidation channel intact. Design in
+`docs/REMAINING-WORK.md`.
+
 **Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
 bucketing must land as a `spec/evaluation.md` edit **plus regenerated conformance vectors in
 the same commit**. That rule is the only thing keeping the server and every SDK in

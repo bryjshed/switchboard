@@ -141,13 +141,65 @@ this is a denial-of-service vector as much as a performance one. **S**
 **Dashboard list queries** — flags, audit, change requests — are uncached. Lower stakes,
 since they are human-paced. **S**
 
-### Architectural gaps
+### The architecture to build toward
 
-**There is no shared cache tier.** Caffeine is per-instance, so every instance keeps its own
-copy and a cold start pays full price. Correctness is fine — `NOTIFY` invalidates every
-instance — but there is no Redis or equivalent, which means no warm cache for a new pod and
-N× the database load on rollout. Whether this matters depends entirely on the deployment
-shape, which does not exist yet, so it should be decided alongside it rather than now. **M**
+**Decision: go through Spring's cache abstraction, backed by Caffeine now and swappable to
+Redis by configuration.** Today's `EnvSnapshotCache` is a hand-rolled Caffeine `AsyncCache`
+wired directly into the service. It works, but every future cache written the same way is
+another call site to rewrite the day a shared tier is needed. Adopting
+`org.springframework.cache` means the provider is a config choice — `cache.provider:
+caffeine | redis` — and no service code changes when it flips.
+
+Shape it as:
+
+- **`@EnableCaching` with a `CacheManager` chosen by property.** `CaffeineCacheManager` by
+  default; `RedisCacheManager` (reactive) when configured. Declare cache names, TTLs and
+  maximum sizes in `application.yml` so adding a cache is one config entry rather than new
+  manager code, and freeze the name set so a typo fails loudly at startup instead of
+  silently creating an unbounded cache.
+- **A typed facade** over `Cache` rather than scattering `@Cacheable` string keys — a small
+  `SwitchboardCache<V>` with `get`/`getOrCompute`/`put`/`evict`, obtained from a registry
+  that validates the name against the configured set at bean construction.
+- **Two tiers, declared per cache.** `REPLICATED` entries live in the shared store under the
+  Redis provider; `LOCAL` entries stay per-instance under both providers and are invalidated
+  by notification. The distinction is not premature — anything holding decrypted secrets or
+  per-instance state must never leave the pod, and deciding that per cache up front is much
+  cheaper than retrofitting it.
+
+### The trap that will bite first
+
+**`@Cacheable` on a method returning `Mono` caches the cold publisher, not the value.** Every
+subsequent caller gets a publisher that re-executes on subscribe, so the cache appears to
+work while doing nothing — or worse, the cached `Mono` is consumed once and later
+subscribers see empty. The Caffeine manager must be configured with **async cache mode** for
+`@Cacheable` to behave on reactive return types, and the current explicit
+`AsyncCache` + `Mono.fromFuture` approach is correct precisely because it sidesteps this.
+Whatever is adopted, prove it with a test that asserts the loader ran **once** across two
+subscriptions.
+
+Two more that follow from it:
+
+- **Self-invocation bypasses the proxy.** `@Cacheable` methods must live in their own
+  `@Component` loader bean that the service calls, not on the service itself. A private or
+  same-class call goes straight past the caching advice and silently does nothing.
+- **Key types must survive the invalidation channel.** Invalidation today rides Postgres
+  `NOTIFY`, whose payload is text. If keys are stringified UUIDs on one side and `UUID`
+  objects on the other, eviction quietly misses and instances serve stale config
+  indefinitely. Pick one representation and pin it with a test.
+
+### When Redis actually earns its place
+
+Not yet. Caffeine is correct for a single instance, and `NOTIFY` already invalidates every
+instance, so correctness does not require a shared store. Redis earns its place when there
+are enough instances that cold starts hurt — a new pod today rebuilds every cache from the
+database — or when something genuinely needs shared state, such as rate limiting. Both are
+deployment-shaped questions, and there is no deployment yet. **Build the seam now, choose the
+provider later** — that is the whole point of routing through the abstraction.
+
+When it does happen, the serializer is where the time goes: Java records are final, so
+polymorphic type handling has to be configured deliberately; unknown-property failures must
+be tolerated or a rolling deploy breaks the moment two versions share a cache; and
+replicated entries need a real TTL rather than living forever. **M**
 
 **No cache observability.** Hit rate, eviction count and load latency are not measured
 anywhere, so none of the above can be prioritised with evidence rather than reasoning.
@@ -165,8 +217,17 @@ nothing is set up to serve it from an edge. Related to the multi-region non-goal
 **L**
 
 ### Suggested order within this area
-Metrics first (so the rest is evidence-driven), then the SDK-key cache (largest win, small
-change), then negative caching (closes the DoS vector), then permissions, then rollout stats.
+1. **Metrics**, so everything after is evidence-driven rather than reasoned. Caffeine exposes
+   hit rate, evictions and load latency directly.
+2. **Introduce the Spring cache abstraction** and migrate `EnvSnapshotCache` onto it — one
+   cache, already working, so the seam is proven against something known-good before
+   anything depends on it.
+3. **The SDK-key cache**, the largest single win, written through the new seam.
+4. **Negative caching**, which closes the denial-of-service vector.
+5. **Permissions**, then **rollout stats**.
+
+Redis is not on this list on purpose. The seam makes it a configuration change whenever the
+deployment shape justifies it.
 
 ---
 
