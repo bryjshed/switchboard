@@ -38,8 +38,12 @@ Three parts of that line are load-bearing:
   every Maven goal including `spring-boot:run`. Skipping it keeps restarts fast; `make check`
   is where it is enforced.
 
-Ports: backend **28080**, postgres **25432**, auth emulator **29099**. Health is at
-`GET /actuator/health` (`health`, `info` and `metrics` are the only exposed actuator endpoints).
+Ports: backend **28080**, management **28081**, postgres **25432**, auth emulator **29099**.
+
+Actuator lives on the **management port**, not the API port — `GET /actuator/health` on 28080 is a
+404. Exposed there: `health`, `info`, `metrics`, `prometheus`. That listener is unauthenticated by
+design (health/info/prometheus are `permitAll`), so bind it to the pod or host network and do not
+publish it; the port, not the filter chain, is the boundary.
 
 ### Profiles
 

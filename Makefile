@@ -1,9 +1,9 @@
 # Switchboard workspace Makefile.
-# Ports: backend 28080, postgres 25432, firebase auth emulator 29099.
+# Ports: backend 28080, management 28081, postgres 25432, firebase auth emulator 29099.
 
 JAVA_HOME := $(shell ./scripts/resolve-java.sh)
 
-.PHONY: deps-up deps-down backend run seed dashboard app smoke test check token
+.PHONY: deps-up deps-down backend run seed dashboard smoke test check token
 
 deps-up:
 	docker compose up -d --wait
@@ -28,13 +28,6 @@ smoke:
 # The primary UI.
 dashboard:
 	cd dashboard && npm run dev
-
-# Mobile companion. UNMAINTAINED since 2026-08-24 (see docs/DECISIONS.md) -- it still runs, but
-# it is excluded from CI and is not updated when an API contract changes, so expect drift.
-# Metro on 8092, not the default 8081: a Metro from another project (e.g. nexus-app) squatting
-# on 8081 silently serves the wrong bundle to the simulator.
-app:
-	cd app && npx expo start --port 8092 --ios
 
 test:
 	cd backend && JAVA_HOME=$(JAVA_HOME) ./mvnw verify

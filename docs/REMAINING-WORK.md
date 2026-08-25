@@ -11,8 +11,9 @@ against the architecture as it stands.
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
-**`app/` is unmaintained as of 2026-08-24** and is excluded from CI and from the definition of done —
-see [DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost.
+**The Expo mobile companion was deleted on 2026-08-24** — see
+[DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost, and
+it is in git history if it is ever wanted back.
 
 Working end to end: flags, targeting, percentage rollouts, versioning, audit, rollback, SSE
 delivery, the AI layer (natural language, healing, optimizing, stale sweep), OFREP,
@@ -30,8 +31,7 @@ Also landed: **the repo is committed** — the tree is under version control on 
 through in place rather than deleted, so the reasoning stays next to the work.
 
 **For anyone picking this up:** read `CLAUDE.md` first — it carries the environment traps
-(Java 25, the Firebase emulator host variable, the Metro port hijack) that have each cost
-real time. This document is what is left to build.
+(Java 25, the Firebase emulator host variable) that have each cost real time. This document is what is left to build.
 
 ---
 
@@ -42,8 +42,7 @@ Nothing here is a technical problem. Each needs a human.
 | Item | What is blocked | Why it matters |
 |---|---|---|
 | **No `ANTHROPIC_API_KEY`** | Natural-language flag creation | The Claude adapter, its forced-tool schema, and the calm `503 AI_UNAVAILABLE` degradation are all built and tested, but the real prompt-to-diff-to-apply loop **has never executed**. Everything else in the AI layer (healing, optimizing, stale sweep) works without a key. |
-| **`nexus-app`'s Metro holds port 8081** | Mobile e2e | Moot as of 2026-08-24 — the app is unmaintained. Kept because the trap is real for anyone who does run it: the dev client attaches to whichever bundler owns 8081 and loads *that* project's JavaScript into Switchboard's native shell, red-screening on native modules Switchboard does not ship. See `.maestro/README.md`. |
-| **Visual review in light and dark** | Design sign-off | Never done. Both UIs use semantic tokens only and are theme-aware by construction, but nobody has looked at the pixels. |
+| **Visual review in light and dark** | Design sign-off | Never done. The dashboard uses semantic tokens only and is theme-aware by construction, but nobody has looked at the pixels. |
 
 ---
 

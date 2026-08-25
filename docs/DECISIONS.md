@@ -11,20 +11,22 @@ happen is changing one without knowing it was a decision.
 
 ## Product scope
 
-**The mobile companion in `app/` is not maintained, as of 2026-08-24.** The web dashboard is the
-primary management surface and the app was always secondary. Three things decided it: no competitor
-ships a first-party mobile management app, so it was never load-bearing for a buyer; every feature
-added to the product cost a second implementation while it lived; and its e2e suite cannot run here
-anyway, because another project's Metro owns :8081.
+**The Expo mobile companion was deleted on 2026-08-24**, along with its Maestro e2e suite. The web
+dashboard is the primary management surface and the app was always secondary. Three things decided
+it: no competitor ships a first-party mobile management app, so it was never load-bearing for a
+buyer; every feature added to the product cost a second implementation while it lived; and its e2e
+suite could not run here anyway, because another project's Metro owned :8081.
 
-What this means concretely — the code stays in the tree and in history, it is **excluded from CI and
-from the definition of done**, and it is not updated when a contract changes. It will therefore drift,
-and that is expected rather than a bug to report. Reversing this is a catch-up pass against whatever
-contract changes have landed since, not a rebuild.
+It was briefly marked unmaintained-but-present. That is a worse state than either alternative — the
+code goes stale while still looking like part of the product, and every reader has to work out
+whether it counts. Deleting it is the honest version of the same decision.
 
-The item it closes out is "mobile app: keep or drop?" in
-[REMAINING-WORK.md](REMAINING-WORK.md) §1. It also moots "the mobile app still hardcodes Firebase" in
-§2 — true, and now irrelevant.
+**It is in git history** (`git log -- app/`), so restoring it is a checkout plus a catch-up pass
+against whatever contract changes have landed since. That is the intended recovery path; nothing
+about this is irreversible.
+
+Closes out "mobile app: keep or drop?" in [REMAINING-WORK.md](REMAINING-WORK.md) §1, and moots both
+"the mobile app still hardcodes Firebase" and the `nexus-app` Metro port conflict.
 
 ---
 
@@ -230,10 +232,8 @@ and therefore one database, silently defeating fresh-database-per-class.
 
 ## Known-good states that look like bugs
 
-- **Mobile e2e fails when another project's Metro owns :8081.** The red screen names files
-  that exist in both projects. Not a Switchboard bug. See `.maestro/README.md`.
-- **`npm run check` in `app/` can pass on a clean clone and fail locally.** `.expo/types` is
-  gitignored, so typed-route narrowing only applies after Metro has run once.
+- **`/actuator/health` 404s on port 28080.** Actuator moved to its own port; probes must
+  target `MANAGEMENT_PORT` (default 28081). Not a broken health check.
 - **`dashboard/scripts/auth-check.mjs` fails its OIDC leg unless the backend has a second
   provider configured.** The script prints the exact command. The Firebase leg passing alone
   is expected on a default stack.

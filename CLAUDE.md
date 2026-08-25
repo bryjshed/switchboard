@@ -12,10 +12,9 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 280 unit + 74 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 328 unit + 82 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
-| `app/` | Expo mobile companion. **Unmaintained** since 2026-08-24 — excluded from CI and from the definition of done. Do not update it when a contract changes; it is expected to drift. See `docs/DECISIONS.md`. | 95 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
@@ -31,7 +30,6 @@ make deps-up     # postgres 18 (:25432) + firebase auth emulator (:29099)
 make backend     # :28080, local profile
 make seed        # demo workspace via the public API; prints SDK keys once
 make dashboard   # :5273 -- the main UI
-make app         # expo, Metro pinned to :8092 -- unmaintained, still runs
 ```
 
 Seed logins, password `password123`: `alice@switchboard.dev` (owner),
@@ -57,20 +55,9 @@ process was depending on. Find the specific PID.
 
 **macOS has no `timeout` command.** Do not use it in scripts.
 
-**A competing Metro on :8081 hijacks the mobile app.** If another Expo project (e.g.
-`nexus-app`) is serving on the default port, this app's dev client attaches to *that*
-bundler and loads someone else's JavaScript into Switchboard's native shell, red-screening
-on native modules we do not ship. The stack trace names files that exist in both projects,
-so it reads like a bug here and is not. Metro is pinned to 8092 for this reason. See
-`.maestro/README.md`.
-
-**Metro logs never show JS runtime errors.** They report bundling only. A red-screened app
-looks perfectly healthy in Metro's output — check the actual screen or a Maestro
-screen-hierarchy dump.
-
-**`app/.expo/types` is gitignored**, so `npm run check` in `app/` can pass on a clean clone
-and fail after Metro has run once (typed routes narrow `Href`). CI on a fresh checkout will
-not catch that class of bug.
+**Actuator lives on its own port** (`MANAGEMENT_PORT`, default 28081), and that includes
+`/actuator/health` — it 404s on 28080. Health checks and probes must target the management
+port. That listener is unauthenticated by design: keep it off the public interface.
 
 ## Conventions
 
@@ -90,9 +77,6 @@ loading/error/refreshing flags and toasts for writes. Semantic tokens only, no r
 the `warning` token rather than amber. Filter and tab state lives in query params. One API
 module per endpoint group over `src/lib/apiClient.ts`.
 
-**App.** Semantic tokens only; `npm run lint:tokens` fails on raw hex outside
-`shared/theme`.
-
 **Caching goes through Spring's cache abstraction**, backed by Caffeine and swappable to
 Redis by configuration — not hand-rolled per call site. Note the reactive trap: `@Cacheable`
 on a method returning `Mono` caches the cold publisher rather than the value, so it appears
@@ -108,7 +92,7 @@ Note there is no vector *generator* — `spec/tools/` holds a checker only, vect
 hand-authored, and `sdk/typescript/test/conformance.test.ts` hardcodes the 201 total, so
 adding a vector means editing that literal too.
 
-**Flyway.** Migrations are `V1`–`V4` today; the next is **V5**. They run automatically
+**Flyway.** Migrations are `V1`–`V5` today; the next is **V6**. They run automatically
 locally.
 
 ## Verifying
@@ -119,9 +103,6 @@ cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile che
 cd dashboard  && npm run check && npm run build
 cd sdk/typescript && npx vitest run
 ```
-
-`app/` is deliberately absent from that list — it is unmaintained, and a failing check there is
-expected drift rather than a regression to fix.
 
 Six live scripts run against a **running** stack and are the real regression net — they
 catch contract drift that unit tests cannot:
@@ -165,7 +146,7 @@ docker compose down -v && docker compose up -d --wait   # then restart backend, 
 
 ## Working with multiple agents
 
-**One writer per tree.** `backend/`, `dashboard/`, `app/`, `sdk/` and `spec/` are separate
+**One writer per tree.** `backend/`, `dashboard/`, `sdk/` and `spec/` are separate
 trees; two agents writing the same one will collide. Reading any tree is always fine.
 
 Agents have stalled mid-task more than once. When resuming, **inventory what actually exists
@@ -174,8 +155,8 @@ and only the verification step is missing.
 
 **Verify agent reports rather than trusting them.** A stalled agent's unverified work is not
 working code. Re-running claimed results has repeatedly found real problems: a test querying
-a column that does not exist, a mobile red screen invisible in Metro's logs, a check script
-defaulting to a user that was never seeded.
+a column that does not exist, a baseline chosen by random UUID that only showed up as a
+flaky test, a check script defaulting to a user that was never seeded.
 
 ## Where things stand
 
@@ -188,8 +169,8 @@ is the market research the backlog derives from.
 
 Two things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
 flag creation has never actually executed — everything else in the AI layer works without
-one), and a visual pass in light and dark. The mobile app's keep-or-drop question was
-decided on 2026-08-24 — dropped; see `docs/DECISIONS.md`.
+one), and a visual pass in light and dark. The Expo mobile companion was **deleted** on
+2026-08-24; see `docs/DECISIONS.md`. It is in git history if it is ever wanted back.
 
 The local dev database accumulates throwaway data from verification runs. `docker compose
 down -v` then `make deps-up`, restart the backend, and re-seed for a clean demo state.

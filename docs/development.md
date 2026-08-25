@@ -19,8 +19,10 @@ sdk/        Client libraries — sdk/typescript is an OpenFeature provider with 
 spec/       Normative evaluation spec + conformance vectors (the cross-language contract)
 scripts/    seed-local.mjs · smoke-test.mjs · token.sh · resolve-java.sh
 docs/       Architecture, governance, the AI layer, the backlog, market research
-app/        Expo mobile companion — UNMAINTAINED since 2026-08-24, see DECISIONS.md
 ```
+
+There was an Expo mobile companion; it was deleted on 2026-08-24 and is in git history if it is
+ever wanted back. See [DECISIONS.md](DECISIONS.md#product-scope).
 
 Each component carries its own README: [backend](../backend/README.md),
 [dashboard](../dashboard/README.md), [SDK](../sdk/typescript/README.md), [spec](../spec/README.md).

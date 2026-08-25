@@ -5,6 +5,11 @@ answering two questions: **what still needs to be done**, and **is REST actually
 standard for feature-flag delivery?** Claims below were verified against the source tree,
 not just the documentation.
 
+> **Superseded in two places since it was written, on the same day.** The peeking fix has landed
+> (see [DECISIONS.md](DECISIONS.md#rollout-monitoring)), and the Expo app was deleted rather than
+> left undecided. Kept as written otherwise: it is a dated snapshot, and rewriting it would destroy
+> the record of what was true when the priorities below were set.
+
 Companions: [REMAINING-WORK.md](REMAINING-WORK.md) is the living backlog;
 [competitive-gaps.md](competitive-gaps.md) is the dated market snapshot this derives from;
 [DECISIONS.md](DECISIONS.md) records the choices.
