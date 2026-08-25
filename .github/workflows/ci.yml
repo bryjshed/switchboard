@@ -190,20 +190,30 @@ jobs:
       - name: Dependencies (postgres + firebase auth emulator)
         run: docker compose up -d --wait
 
+      # Compiles ahead of the start step so the wait below is startup time, not build time.
       - name: Build the backend
         working-directory: backend
         run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip package
 
-      # Started with the local profile (dev tokens on, which every check script uses) and with
-      # BOTH identity providers configured. The second one is what makes auth-check's OIDC leg
-      # actually run: without it the leg fails and prints the command to add it, and a
+      # Started exactly the way `make backend` starts it, and `spring-boot:run` rather than
+      # `java -jar` is NOT interchangeable here.
+      #
+      # firebase-admin is an OPTIONAL dependency (see backend/pom.xml -- a deployment on Okta or
+      # Entra ID has no use for it), and Spring Boot's repackaged jar leaves optional
+      # dependencies out. The Firebase Auth EMULATOR issues unsigned tokens that only the Admin
+      # SDK will accept, so the fat jar cannot talk to the emulator at all and refuses to start
+      # with FIREBASE_AUTH_EMULATOR_HOST set. `spring-boot:run` uses the full compile classpath,
+      # which has it. That is by design in both directions: the emulator is a development
+      # dependency, and the production image should not carry an SDK it will never call.
+      #
+      # BOTH identity providers are configured here. The second is what makes auth-check's OIDC
+      # leg actually run: without it the leg fails and prints the command to add it, and a
       # permanently-skipped check is worse than no check. The issuer is deterministic --
-      # scripts/lib/oidc-issuer.mjs binds 127.0.0.1:29199 -- so it can be named before the
-      # issuer exists. The JWK set is fetched lazily at first token, by which time it does.
+      # dashboard/scripts/lib/oidc-issuer.mjs binds 127.0.0.1:29199 -- so it can be named before
+      # the issuer exists. The JWK set is fetched lazily at the first token, by which time it does.
       - name: Start the backend
         env:
           FIREBASE_AUTH_EMULATOR_HOST: localhost:29099
-          SPRING_PROFILES_ACTIVE: local
           SPRING_APPLICATION_JSON: >-
             {"switchboard":{"auth":{"providers":[
               {"id":"firebase-local","type":"firebase","project-id":"demo-switchboard"},
@@ -211,8 +221,11 @@ jobs:
                "audience":"switchboard-dashboard",
                "jwk-set-uri":"http://127.0.0.1:29199/jwks.json"}]}}}
         run: |
-          nohup java -jar backend/target/*.jar > /tmp/sb-boot.log 2>&1 &
+          cd backend
+          nohup ./mvnw -B spring-boot:run \
+            -Dspring-boot.run.profiles=local -Dcheckstyle.skip > /tmp/sb-boot.log 2>&1 &
           echo $! > /tmp/sb.pid
+          cd -
           for i in $(seq 1 90); do
             if curl -fsS http://localhost:28081/actuator/health > /dev/null 2>&1; then
               echo "backend up after ${i}s"; exit 0
@@ -251,6 +264,8 @@ jobs:
       - name: Backend log
         if: always()
         run: tail -300 /tmp/sb-boot.log
+      # Best-effort: the pid is Maven's, and spring-boot:run forks the application into a child.
+      # The runner is discarded either way, so this is tidiness rather than a requirement.
       - name: Stop the backend
         if: always()
         run: kill "$(cat /tmp/sb.pid)" 2>/dev/null || true
@@ -259,6 +274,14 @@ jobs:
     name: containers (prod images)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Job-level, not step-level. POSTGRES_PASSWORD has no default in the compose file on
+    # purpose, so EVERY `docker compose -f docker-compose.prod.yml ...` invocation needs it --
+    # including `logs` and `down` in the cleanup steps, which otherwise fail interpolation and
+    # turn a passing job into a red one after the fact.
+    env:
+      SWITCHBOARD_IMAGE_TAG: ci
+      POSTGRES_PASSWORD: ci-not-a-secret
+      JOB_TOKEN: ci-job-token
     steps:
       - uses: actions/checkout@v4
 
@@ -270,22 +293,40 @@ jobs:
       # The production compose file, brought up for real. This is what catches the class of
       # bug a Dockerfile lint cannot: a missing migration on a fresh volume, a health probe
       # pointed at the wrong port, a runtime config that never reaches the browser.
+      #
+      # Note there is no Firebase emulator here and no FIREBASE_AUTH_EMULATOR_HOST, which is
+      # exactly the production shape: the image does not carry firebase-admin, and a real
+      # Firebase project is an ordinary OIDC issuer that needs no such dependency.
       - name: Bring up the production stack
-        env:
-          SWITCHBOARD_IMAGE_TAG: ci
-          POSTGRES_PASSWORD: ci-not-a-secret
-          JOB_TOKEN: ci-job-token
         run: docker compose -f docker-compose.prod.yml up -d --wait
 
       - name: Smoke the deployed stack
         run: |
-          # Health on the management port, which is deliberately NOT published to the host in
-          # the prod compose file -- so this asks the container, the same way a probe does.
+          set -x
+          # Readiness on the management port, which is deliberately NOT published to the host --
+          # so this asks the container, the same way an orchestrator's probe does.
           docker compose -f docker-compose.prod.yml exec -T backend \
-            curl -fsS http://localhost:28081/actuator/health | tee /dev/stderr | grep -q '"status":"UP"'
-          # The dashboard is served, and its runtime config reached the page.
+            curl -fsS http://localhost:28081/actuator/health/readiness | grep -q '"status":"UP"'
+
+          # Actuator must NOT be on the public listener. A 404 here is the assertion.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:28080/actuator/health)" = 404
+
+          # Dev tokens must not work. If this ever returns 200 the deployment is open to the
+          # internet as every user at once.
+          test "$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Authorization: Bearer dev:alice@switchboard.dev' \
+            http://localhost:28080/api/users/me)" = 401
+
+          # Flyway ran on a fresh volume and reached the current head.
+          docker compose -f docker-compose.prod.yml exec -T postgres \
+            psql -U switchboard -d switchboard -tAc \
+            'select success from flyway_schema_history order by installed_rank desc limit 1' | grep -q t
+
+          # The dashboard is served, its runtime config reached the page, and a client-side
+          # route survives a hard refresh rather than 404ing.
           curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
           curl -fsS http://localhost:8080/config.js | grep -q '__SWITCHBOARD_CONFIG__'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/flags/checkout)" = 200
 
       - name: Stack logs
         if: always()

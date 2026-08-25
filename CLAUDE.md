@@ -51,6 +51,12 @@ every real login with a 401 — *while dev tokens keep working*, which is exactl
 the omission invisible. `make backend` sets it. Reproduced deliberately; documented in
 `backend/README.md`.
 
+**The packaged jar cannot talk to the Firebase emulator.** `firebase-admin` is `<optional>`
+and Spring Boot's fat jar leaves optional dependencies out, so `java -jar target/*.jar` with
+`FIREBASE_AUTH_EMULATOR_HOST` set **refuses to start**. `./mvnw spring-boot:run` has it, which
+is why `make backend` works. Deliberate in both directions — a production deployment on Okta
+should not carry the SDK — and the reason CI's `live` job uses `spring-boot:run`.
+
 **Never run a broad `pkill -f spring-boot:run`.** It has twice killed a backend another
 process was depending on. Find the specific PID.
 

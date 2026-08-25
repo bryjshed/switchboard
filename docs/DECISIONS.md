@@ -316,6 +316,23 @@ to, and dropping it would delete live data rather than expire old data. Epoch ev
 pruned on the same window deliberately — evidence about events that no longer exist cannot be
 rechecked.
 
+**`firebase-admin` is an optional dependency, so the packaged jar cannot talk to the auth
+emulator — and refuses to start rather than failing later.** The emulator issues *unsigned*
+(`alg: none`) tokens that no JWKS verifier will accept; only the Admin SDK will. Production
+Firebase is an ordinary OIDC issuer and needs none of it, so a deployment on Okta, Auth0, Entra
+ID or Keycloak should not carry the SDK. Spring Boot's repackaged jar leaves optional
+dependencies out, which means:
+
+- `./mvnw spring-boot:run` (what `make backend` does) has it — the full compile classpath.
+- `java -jar target/*.jar` with `FIREBASE_AUTH_EMULATOR_HOST` set fails at startup with a
+  message naming both ways out.
+
+That startup failure is the design working. The alternative — starting fine and rejecting every
+login with a 401 — is the failure mode that variable already causes when it is *absent*, and it
+is documented as costly precisely because it is invisible. **CI's `live` job therefore uses
+`spring-boot:run`, not the jar**, and its `containers` job runs the jar with no emulator at all,
+which is the production shape.
+
 **The live check scripts do not run against a deployment, and that is correct.** All of them
 authenticate with `Bearer dev:<email>`, which exists only under the `local` profile. Against
 a real environment they 401 on the first call. They belong in CI, where the stack is local by
@@ -330,6 +347,8 @@ construction, and they run there on every pull request.
 - **`dashboard/scripts/auth-check.mjs` fails its OIDC leg unless the backend has a second
   provider configured.** The script prints the exact command. The Firebase leg passing alone
   is expected on a default stack.
+- **`java -jar` refuses to start with `FIREBASE_AUTH_EMULATOR_HOST` set.** The optional
+  `firebase-admin` dependency is not in the packaged jar. Use `make backend`. See Deployment.
 - **The live check scripts 401 against anything but a local stack.** Dev tokens are
   local-profile-only. See Deployment above.
 - **AI endpoints return `503 AI_UNAVAILABLE` without an `ANTHROPIC_API_KEY`.** Intended, and

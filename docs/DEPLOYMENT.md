@@ -38,6 +38,14 @@ internet as every user at once.
 **The seed data.** `make seed` creates alice/bob/carol with the password `password123`. It is a
 demo fixture driven through the public API, not an installer, and it has no place here.
 
+**`firebase-admin`.** It is an *optional* Maven dependency and Spring Boot's packaged jar leaves
+it out, so the production image does not contain it. That is deliberate: the emulator issues
+unsigned tokens that only the Admin SDK will accept, while production Firebase is an ordinary
+OIDC issuer that needs none of it — as are Okta, Auth0, Entra ID and Keycloak. The consequence
+worth knowing: `java -jar` with `FIREBASE_AUTH_EMULATOR_HOST` set refuses to start, with a
+message naming both ways out. Running the emulator locally means `make backend`
+(`mvnw spring-boot:run`), which uses the full compile classpath.
+
 ## Configuration
 
 ### Backend
