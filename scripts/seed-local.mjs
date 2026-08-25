@@ -272,7 +272,23 @@ async function main() {
   const pushMetric = (contextKey, metricKey, value, h) =>
     metricBatch.push({ contextKey, metricKey, value, occurredAt: hoursAgo(h) });
 
-  for (let i = 0; i < 300; i++) {
+  // 1600, and the number is derived rather than picked. Two thresholds bind:
+  //
+  //   min-subjects   200 DISTINCT SUBJECTS PER ARM before the monitor will judge at all.
+  //   the e-value    E >= 1/alpha to reject. For an optimize finding alpha is 0.01, so 100.
+  //
+  // The second is the demanding one, and it is why 300 (the original) and even 800 are not
+  // enough. The mixture prior is centred on tau = 0.02, so a 12-point effect sits far out in
+  // its tail and the e-value grows with n much faster than a z-score does: at ~25% treatment,
+  // new-checkout gives E = 9 at 800 and E = 360 at 1600. Just short of the threshold and
+  // comfortably past it are one doubling apart.
+  //
+  // This is a consequence of the Phase 2 fix, not a defect. The anytime-valid test is far more
+  // conservative than the `z > 3` rule these effect sizes were originally tuned for -- which is
+  // the entire point of replacing it -- and the seed simply had not moved with it. Before this,
+  // the scan reported itemsScanned=0, the Monitor page opened empty, and three ai-check
+  // assertions skipped in silence.
+  for (let i = 0; i < 1600; i++) {
     const user = `user-${i}`;
     const h = (i % 47) + Math.random();
     // new-checkout: ~25% treatment, treatment converts BETTER (optimization fodder)
@@ -290,7 +306,10 @@ async function main() {
   }
   // agent runs: run-ids as context keys, agent attribute traffic
   const av = prodDetail['agent-planner-prompt'].variations;
-  for (let i = 0; i < 200; i++) {
+  // 1600 for the same reason. A 50/50 split on a 12-point conversion difference gives E = 2.4
+  // at 200 subjects per arm, E = 8 at 400, and E = 258 at 800 -- so the loop has to be 1600 to
+  // put 800 in each arm and clear the threshold of 100.
+  for (let i = 0; i < 1600; i++) {
     const run = `agent-run-${i}`;
     const h = (i % 47) + Math.random();
     const v2 = i % 2 === 0;
@@ -305,6 +324,20 @@ async function main() {
     await api('POST', '/api/events/metrics', sdkKeys.production, { events: metricBatch.slice(i, i + 400) });
   }
   console.log(`${evalBatch.length} eval events + ${metricBatch.length} metric events ingested`);
+
+  // ---- Backdate the rollout flags' version history so the monitor has an epoch to measure ----
+  //
+  // The rollout monitor accumulates evidence from the ALLOCATION EPOCH: the most recent config
+  // write that changed traffic allocation. This script writes those configs via PUT and then
+  // ingests 48h of backdated traffic, so without this step every seeded event falls BEFORE the
+  // epoch, the scan reports itemsScanned=0, and the Monitor page opens empty. The events are the
+  // fiction here, not the epoch -- a rollout that has been live for three days is what the
+  // traffic is pretending to be, so the version history is moved to match.
+  //
+  // Same fix, same reason, as the one RolloutScanIT needs. It cannot go through the API: there
+  // is no endpoint for "pretend this was configured on Tuesday", and there should not be.
+  psql(`UPDATE flag_env_config_versions SET created_at = now() - interval '72 hours' WHERE flag_id IN (SELECT id FROM flags WHERE key IN ('new-checkout','payment-provider-v2','planner-v2','agent-planner-prompt'))`);
+  console.log('rollout flags backdated 72h (so 48h of traffic falls inside the allocation epoch)');
 
   // ---- Backdate the stale flags (deliberate psql step: staleness cannot be seeded via API) ----
   psql(`UPDATE flag_env_configs SET updated_at = now() - interval '6 weeks' WHERE flag_id IN (SELECT id FROM flags WHERE key IN ('dark-mode','legacy-search'))`);

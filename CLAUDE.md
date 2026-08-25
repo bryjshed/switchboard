@@ -137,7 +137,7 @@ catch contract drift that unit tests cannot:
 node scripts/smoke-test.mjs                    # 34  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
 node dashboard/scripts/service-check.mjs       # 67
-node dashboard/scripts/ai-check.mjs            # 53
+node dashboard/scripts/ai-check.mjs            # 54
 node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
 node mcp/scripts/live-check.mjs                # 19
