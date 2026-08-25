@@ -237,11 +237,18 @@ jobs:
       - name: Seed
         run: node scripts/seed-local.mjs
 
-      - name: Install script dependencies
+      # The sdk and mcp check scripts import from `dist/`, not from source -- deliberately, since
+      # the point of a live check is to exercise what actually ships. So they need a build, not
+      # just an install. On a developer's machine one is usually lying around from earlier work,
+      # which is exactly why a clean runner is where this surfaces.
+      #
+      # The dashboard's auth-check needs no prebuild: it compiles src/auth for node itself, with
+      # VITE_AUTH_PROVIDER baked in the way a browser build would.
+      - name: Install and build what the check scripts import
         run: |
           npm ci --prefix dashboard
-          npm ci --prefix sdk/typescript
-          npm ci --prefix mcp
+          npm ci --prefix sdk/typescript && npm run build --prefix sdk/typescript
+          npm ci --prefix mcp && npm run build --prefix mcp
 
       # Every one of the seven, each on its own line so the failing one is named in the UI.
       - name: smoke-test (34)

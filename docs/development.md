@@ -80,6 +80,11 @@ node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC prov
 node mcp/scripts/live-check.mjs                # 19  · every MCP tool against a real stack
 ```
 
+**Two of them import from `dist/` rather than from source** — the SDK's and the MCP server's —
+because the point of a live check is to exercise what actually ships. On a clean checkout, run
+`npm run build` in those two packages first; without it they fail with `ERR_MODULE_NOT_FOUND`,
+which says nothing about the stack they were meant to be checking.
+
 Run all of them after any backend change. If one fails in a tree you do not own, say so rather than
 "fixing" it.
 

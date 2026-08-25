@@ -143,6 +143,10 @@ node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC prov
 node mcp/scripts/live-check.mjs                # 19
 ```
 
+**Two of them import from `dist/`, not from source** — `sdk/typescript` and `mcp` — because a
+live check should exercise what ships. On a clean checkout they need `npm run build` in that
+package first, or they fail with `ERR_MODULE_NOT_FOUND` rather than anything about the stack.
+
 Run all of them after any backend change. If one fails in a tree you do not own, say so
 rather than "fixing" it.
 
