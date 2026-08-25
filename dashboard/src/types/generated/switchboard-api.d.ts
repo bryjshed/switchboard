@@ -401,9 +401,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /** @description SERVER keys only. Returns the full rule set for local evaluation; ETag is the environment stateVersion. A CLIENT key gets 403 here rather than a reduced payload - a silently smaller response is how an SDK ends up serving defaults forever with nothing surfaced. Use POST /api/eval/bootstrap instead. */
         get: operations["getBootstrap"];
         put?: never;
-        post?: never;
+        /**
+         * @description Evaluated bootstrap for a client-side key: values, not rules. Carries no targeting configuration and no segment membership, and includes only flags marked clientSideAvailable.
+         *
+         *     POST rather than GET because the context has to travel in a body - attributes in a query string would put them in access logs, proxies, browser history and Referer headers. It honours If-None-Match and returns a bodiless 304 exactly as POST /ofrep/v1/evaluate/flags does.
+         *
+         *     The ETag is a digest of the response body, NOT the environment stateVersion. A stateVersion ETag would be wrong in two directions here: two different contexts at the same version produce different bodies with identical ETags, so a shared cache could serve one user's flags to another; and a user whose attributes change gets a 304 and keeps stale answers, because the version did not move.
+         */
+        post: operations["getClientBootstrap"];
         delete?: never;
         options?: never;
         head?: never;
@@ -982,8 +990,15 @@ export interface components {
             stateVersion: number;
             approvals?: components["schemas"]["ApprovalSettingsResponse"];
         };
+        /**
+         * @description SERVER keys are secret and receive the full rule set, so they evaluate locally and see every flag. CLIENT keys ship inside a browser bundle and are therefore public: they receive EVALUATED payloads only, and only for flags marked clientSideAvailable. MOBILE is reserved and not yet mintable - it exists as its own kind because revoking a key baked into a shipped binary locks out installed versions until users update, which is a revocation-UX difference rather than a capability one.
+         * @default SERVER
+         * @enum {string}
+         */
+        SdkKeyKind: "SERVER" | "CLIENT" | "MOBILE";
         SdkKeyCreateRequest: {
             label?: string;
+            kind?: components["schemas"]["SdkKeyKind"];
         };
         SdkKeyCreatedResponse: {
             /** Format: uuid */
@@ -996,6 +1011,7 @@ export interface components {
             label?: string;
             /** Format: date-time */
             createdAt: string;
+            kind: components["schemas"]["SdkKeyKind"];
         };
         SdkKeyResponse: {
             /** Format: uuid */
@@ -1008,6 +1024,7 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             revokedAt?: string;
+            kind: components["schemas"]["SdkKeyKind"];
         };
         /** @enum {string} */
         FlagKind: "BOOLEAN" | "STRING";
@@ -1029,6 +1046,8 @@ export interface components {
             /** @description Required for STRING flags; ignored for BOOLEAN (always true/false). */
             variations?: components["schemas"]["VariationCreate"][];
             tags?: string[];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
         };
         FlagUpdateRequest: {
             name?: string;
@@ -1036,6 +1055,8 @@ export interface components {
             tags?: string[];
             /** @description STRING flags only; variations are add-only. */
             addVariations?: components["schemas"]["VariationCreate"][];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
         };
         /** @enum {string} */
         ClauseOp: "EQUALS" | "IN" | "CONTAINS" | "STARTS_WITH" | "SEGMENT_MATCH" | "NOT_SEGMENT_MATCH";
@@ -1119,6 +1140,8 @@ export interface components {
             variations: components["schemas"]["Variation"][];
             tags: string[];
             envConfigs: components["schemas"]["FlagEnvConfigResponse"][];
+            /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
+            clientSideAvailable?: boolean;
             /** Format: date-time */
             createdAt?: string;
         };
@@ -1414,6 +1437,30 @@ export interface components {
              * @description Pinned from configuration, not chosen as the arm with the most traffic.
              */
             baselineVariationId?: string | null;
+        };
+        ClientBootstrapRequest: {
+            context: components["schemas"]["EvalContext"];
+        };
+        /** @description One evaluated flag. Deliberately carries the SERVED variation only - shipping the full variation list would leak the values of every arm, including the name of an unreleased feature, which is one of the main things client-side availability exists to protect. */
+        ClientBootstrapFlag: {
+            key: string;
+            kind: components["schemas"]["FlagKind"];
+            value: string;
+            /** Format: uuid */
+            variationId?: string | null;
+            variationName?: string | null;
+            reason: components["schemas"]["EvalReason"];
+            /** Format: uuid */
+            ruleId?: string | null;
+            version?: number;
+        };
+        ClientBootstrapResponse: {
+            envKey: string;
+            /** Format: int64 */
+            stateVersion: number;
+            /** @description Hex SHA-256 of the canonicalised context this payload was evaluated against. A client MUST discard a response whose contextHash does not match the context it sent - it is the guard against a 304 being applied across a setContext(). */
+            contextHash: string;
+            flags: components["schemas"]["ClientBootstrapFlag"][];
         };
         VariantStats: {
             /** Format: uuid */
@@ -2630,9 +2677,7 @@ export interface operations {
     };
     getBootstrap: {
         parameters: {
-            query?: {
-                contextKey?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -2650,6 +2695,48 @@ export interface operations {
                 };
             };
             /** @description Not modified (If-None-Match matched current stateVersion) */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key is client-side; use POST /api/eval/bootstrap. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getClientBootstrap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientBootstrapRequest"];
+            };
+        };
+        responses: {
+            /** @description Evaluated flag values for this context. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    /** @description private, no-store - the body is per-user. */
+                    "Cache-Control"?: string;
+                    Vary?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientBootstrapResponse"];
+                };
+            };
+            /** @description Not modified (If-None-Match matched the body digest) */
             304: {
                 headers: {
                     [name: string]: unknown;

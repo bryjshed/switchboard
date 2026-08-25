@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/components/ui/use-toast'
 import { archiveFlag, updateFlag } from '@/lib/flagsApi'
+import { Switch } from '@/components/ui/switch'
 import { errorMessage } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/format'
 import type { FlagDetail, VariationCreate } from '@/types/api'
@@ -36,6 +37,7 @@ export function FlagSettingsTab({ projectId, flag, onUpdated, onArchived }: Flag
   const [description, setDescription] = useState(flag.description ?? '')
   const [tags, setTags] = useState<string[]>(flag.tags)
   const [tagDraft, setTagDraft] = useState('')
+  const [clientSideAvailable, setClientSideAvailable] = useState(flag.clientSideAvailable ?? false)
   const [saving, setSaving] = useState(false)
   const [newVariations, setNewVariations] = useState<VariationCreate[]>([])
   const [addingVariations, setAddingVariations] = useState(false)
@@ -46,12 +48,14 @@ export function FlagSettingsTab({ projectId, flag, onUpdated, onArchived }: Flag
     setName(flag.name)
     setDescription(flag.description ?? '')
     setTags(flag.tags)
+    setClientSideAvailable(flag.clientSideAvailable ?? false)
   }, [flag])
 
   const dirty =
     name !== flag.name ||
     description !== (flag.description ?? '') ||
-    JSON.stringify(tags) !== JSON.stringify(flag.tags)
+    JSON.stringify(tags) !== JSON.stringify(flag.tags) ||
+    clientSideAvailable !== (flag.clientSideAvailable ?? false)
 
   const addTag = (value: string) => {
     const trimmed = value.trim()
@@ -67,6 +71,7 @@ export function FlagSettingsTab({ projectId, flag, onUpdated, onArchived }: Flag
         name: name.trim(),
         description: description.trim(),
         tags,
+        clientSideAvailable,
       })
       onUpdated(updated)
       toast({ title: 'Flag details saved' })
@@ -180,6 +185,25 @@ export function FlagSettingsTab({ projectId, flag, onUpdated, onArchived }: Flag
               }
             }}
           />
+        </div>
+
+        <div className="flex items-start gap-3 rounded-md border p-3">
+          <Switch
+            id="settings-client-side"
+            data-testid="settings-client-side"
+            checked={clientSideAvailable}
+            onCheckedChange={setClientSideAvailable}
+            disabled={!writeGate.allowed}
+          />
+          <div className="space-y-1">
+            <Label htmlFor="settings-client-side">Available to client-side SDKs</Label>
+            <p className="text-xs text-muted-foreground">
+              Lets a browser or mobile SDK key read this flag&apos;s evaluated value. Those keys are
+              public — anyone who can read your JavaScript can read the key — so only turn this on
+              for flags whose existence is not confidential. Server-side keys are unaffected and
+              always see this flag.
+            </p>
+          </div>
         </div>
 
         <Button

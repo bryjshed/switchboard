@@ -124,6 +124,61 @@ many scans, and implying otherwise would be false.
 
 ---
 
+## Client-side keys
+
+**The key's kind comes from its database row, never from its prefix.** The prefix is
+attacker-supplied text; a token spelled `sb_srv_` whose row says CLIENT must be treated as CLIENT.
+The routing test was correspondingly *widened* to `sb_` rather than turned into a prefix-to-kind
+map — simpler than what it replaced, and it keeps the prefix from carrying any authority.
+
+**Per-flag exposure lives on `flags`, not on `flag_env_configs`.** The config row is the one every
+mutation locks `FOR UPDATE` and snapshots, so putting exposure there would mean toggling it creates
+a version, enters the approval queue, and — worst — **gets silently reverted by a targeting
+rollback**. Someone rolls back a bad rule from 3pm and unpublishes a flag from every browser as a
+side effect. Whether a flag's existence is a secret is a property of the flag, not of one
+environment's targeting.
+
+**`client_side_available` defaults to false, and a SERVER key ignores it entirely.** Defaulting true
+would publish every existing flag to the public internet the moment someone minted a client key.
+The cost is that a new client integration starts with an empty flag list, which reads like a broken
+integration — hence the callout in the mint dialog. The server-key exemption is what keeps the
+fail-closed default from silently emptying every existing integration; it has its own test.
+
+**The visibility filter applies to every evaluation endpoint, not just the bootstrap.** Filtering
+only the payload the defect was reported against would make the flag a fig leaf: a public key could
+enumerate hidden flags one `POST /api/eval/{key}` at a time. A hidden flag is *absent*, not
+forbidden — the caller's default at 200 with `SDK_DEFAULT`, indistinguishable from a flag that does
+not exist, which is both the fact worth protecting and the product's existing fail-safe rule.
+
+**A client key is refused the rule-set bootstrap with a 403, not given a reduced 200.** A silently
+smaller payload is how an SDK ends up with an empty store and serves defaults forever with nothing
+surfaced. Failing loudly puts the problem at integration time.
+
+**The evaluated bootstrap is a POST, and its ETag digests the body.** POST because attributes in a
+query string end up in access logs, proxies, browser history and `Referer` headers; the conditional-
+POST idiom already existed on the OFREP bulk endpoint. The body digest because a `stateVersion`
+ETag is wrong in two directions once the payload is per-context: two contexts at one version give
+different bodies under identical ETags, which a shared cache can cross-serve, and a user whose
+attributes change is told 304 and keeps stale answers. Rendering the body to answer a 304 costs CPU,
+not bandwidth. The response also carries `Cache-Control: private, no-store` and
+`Vary: Authorization`, and echoes a `contextHash` so a client can prove a payload matches the
+context it sent.
+
+**A public key cannot report metric events.** Those rows are the input to an automated write path —
+post enough `{"metricKey":"error"}` and a healthy rollout gets rolled back. Neither the SRM gate nor
+the sequential test catches it: the allocation is fine and the evidence is real, it is just forged.
+Eval events stay open, because rates are per distinct subject, so forging them inflates a
+denominator and makes the monitor *less* likely to act. If browser metrics are ever genuinely
+needed, the fix is a `key_kind` stamp on the rows plus excluding public-origin rows from the healing
+loop — a column, not a policy argument.
+
+**MOBILE is a reserved kind rather than an alias for CLIENT.** Not because its capabilities differ —
+they are identical — but because revoking a key baked into a shipped binary locks out every
+installed version until users update, where revoking a browser key costs a page refresh. That
+belongs in the revoke dialog's wording and the audit trail.
+
+---
+
 ## Governance
 
 **The kill switch bypasses approval by default.** Putting an emergency stop behind a review

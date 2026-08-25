@@ -4,6 +4,7 @@ import com.switchboard.application.user.UserService;
 import com.switchboard.domain.identity.IdentityProviderPort;
 import com.switchboard.domain.identity.IdentityVerificationException;
 import com.switchboard.domain.identity.VerifiedIdentity;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.domain.user.User;
 import com.switchboard.infrastructure.config.MetricsConfig;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -37,7 +38,14 @@ import reactor.core.publisher.Mono;
 @Component
 public class SwitchboardAuthenticationManager implements ReactiveAuthenticationManager {
 
-    static final String SDK_KEY_PREFIX = "sb_srv_";
+    /**
+     * Every SDK key kind starts with this. Deliberately a WIDENING of the old {@code "sb_srv_"}
+     * test rather than a prefix-to-kind map: it is a strict widening (no OIDC JWT starts
+     * {@code eyJ}, no dev token starts {@code dev:}, and neither begins {@code sb_}), it makes
+     * adding a kind a data-only change, and it keeps the prefix from carrying any authority.
+     * The kind itself is read from the row - see {@link #authenticateSdkKey}.
+     */
+    static final String SDK_KEY_PREFIX = SdkKeyKind.COMMON_PREFIX;
     private static final List<SimpleGrantedAuthority> USER_AUTHORITIES =
         List.of(new SimpleGrantedAuthority("ROLE_USER"));
     private static final List<SimpleGrantedAuthority> SDK_AUTHORITIES =
@@ -94,7 +102,8 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
         return Mono.defer(() -> {
             long startedAt = System.nanoTime();
             return db.sql("""
-                    SELECT k.id AS key_id, k.environment_id, e.project_id, p.org_id, e.key AS env_key
+                    SELECT k.id AS key_id, k.kind, k.environment_id, e.project_id, p.org_id,
+                           e.key AS env_key
                     FROM sdk_keys k
                     JOIN environments e ON e.id = k.environment_id
                     JOIN projects p ON p.id = e.project_id
@@ -113,6 +122,7 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
     private static SdkKeyPrincipal mapSdkKey(Readable row) {
         return new SdkKeyPrincipal(
             row.get("key_id", UUID.class),
+            SdkKeyKind.valueOf(row.get("kind", String.class)),
             row.get("environment_id", UUID.class),
             row.get("project_id", UUID.class),
             row.get("org_id", UUID.class),

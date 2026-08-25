@@ -6,6 +6,7 @@ import java.util.UUID;
 public record SdkKey(
     UUID id,
     UUID environmentId,
+    SdkKeyKind kind,
     String keyPrefix,
     String label,
     String createdBy,

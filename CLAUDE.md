@@ -12,7 +12,7 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 328 unit + 82 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 328 unit + 93 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
@@ -92,7 +92,7 @@ Note there is no vector *generator* — `spec/tools/` holds a checker only, vect
 hand-authored, and `sdk/typescript/test/conformance.test.ts` hardcodes the 201 total, so
 adding a vector means editing that literal too.
 
-**Flyway.** Migrations are `V1`–`V5` today; the next is **V6**. They run automatically
+**Flyway.** Migrations are `V1`–`V6` today; the next is **V7**. They run automatically
 locally.
 
 ## Verifying

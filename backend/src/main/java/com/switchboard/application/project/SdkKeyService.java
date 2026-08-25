@@ -4,7 +4,9 @@ import com.switchboard.application.audit.AuditWriter;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.NotFoundException;
+import com.switchboard.domain.common.ValidationException;
 import com.switchboard.domain.project.SdkKey;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.domain.project.SdkKeyRepository;
 import com.switchboard.interfaces.security.AuthenticatedUser;
 import com.switchboard.interfaces.security.SwitchboardAuthenticationManager;
@@ -38,14 +40,27 @@ public class SdkKeyService {
         this.tx = tx;
     }
 
-    /** Mints a key for the environment. The full key is returned once and never stored. */
-    public Mono<CreatedSdkKey> create(UUID environmentId, AuthenticatedUser caller, String label) {
+    /**
+     * Mints a key for the environment. The full key is returned once and never stored.
+     *
+     * <p>The hash is still SHA-256 for every kind, including the public ones. Hashing a value that
+     * is going to be published is not theatre: it means a database leak does not hand over live
+     * credentials, and it keeps one lookup path for all kinds. What changes for a public key is the
+     * threat model, not the storage - see {@link SdkKeyKind}.
+     */
+    public Mono<CreatedSdkKey> create(
+        UUID environmentId, AuthenticatedUser caller, String label, SdkKeyKind kind) {
+        SdkKeyKind minted = kind == null ? SdkKeyKind.SERVER : kind;
+        if (!minted.isMintable()) {
+            return Mono.error(new ValidationException(
+                minted + " keys cannot be minted yet: no SDK holds one."));
+        }
         return access.requireEnvironmentPermission(environmentId, caller.userId(), Permission.MANAGE_SDK_KEYS)
             .flatMap(env -> {
-                String fullKey = "sb_srv_" + env.environmentKey() + "_" + randomHex();
+                String fullKey = minted.prefix() + env.environmentKey() + "_" + randomHex();
                 String prefix = fullKey.substring(0, PREFIX_LENGTH) + "…";
                 String hash = SwitchboardAuthenticationManager.sha256(fullKey);
-                return keys.create(environmentId, prefix, hash, label, caller.email())
+                return keys.create(environmentId, minted, prefix, hash, label, caller.email())
                     .flatMap(stored -> audit
                         .insert(env.orgId(), env.projectId(), environmentId, null,
                             "SDK_KEY_CREATE", caller.email(), null, null, null, null)

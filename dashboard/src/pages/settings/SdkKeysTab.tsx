@@ -30,9 +30,23 @@ import { EnvChip } from '@/components/EnvChip'
 import { RequirePermission } from '@/components/RequirePermission'
 import { usePermissionGate } from '@/hooks/usePermissions'
 import { createSdkKey, listSdkKeys, revokeSdkKey } from '@/lib/projectsApi'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { errorMessage } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/format'
-import type { Environment, SdkKey, SdkKeyCreated } from '@/types/api'
+import type { Environment, SdkKey, SdkKeyCreated, SdkKeyKind } from '@/types/api'
+
+const SERVER_KEY_HINT =
+  'Secret. Receives the full rule set and evaluates locally, so it sees every flag. Keep it on a server.'
+
+const PUBLIC_KEY_HINT =
+  'Public — safe to ship in a browser bundle. Receives evaluated values only, never your targeting ' +
+  'rules or segment membership, and only flags marked available to client-side SDKs.'
 
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false)
@@ -63,6 +77,7 @@ function EnvironmentKeys({ environment }: { environment: Environment }) {
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [label, setLabel] = useState('')
+  const [kind, setKind] = useState<SdkKeyKind>('SERVER')
   const [creating, setCreating] = useState(false)
   // Held only until the reveal dialog closes — the backend stores a hash and will never
   // return the full key again.
@@ -89,10 +104,11 @@ function EnvironmentKeys({ environment }: { environment: Environment }) {
   const handleCreate = async () => {
     setCreating(true)
     try {
-      const created = await createSdkKey(environment.id, { label: label.trim() || undefined })
+      const created = await createSdkKey(environment.id, { label: label.trim() || undefined, kind })
       setRevealed(created)
       setCreateOpen(false)
       setLabel('')
+      setKind('SERVER')
       await load()
     } catch (err) {
       toast({ variant: 'destructive', title: 'Could not create key', description: errorMessage(err) })
@@ -155,6 +171,7 @@ function EnvironmentKeys({ environment }: { environment: Environment }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Key</TableHead>
+                <TableHead>Kind</TableHead>
                 <TableHead>Label</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="w-16" />
@@ -171,6 +188,15 @@ function EnvironmentKeys({ environment }: { environment: Environment }) {
                         revoked
                       </Badge>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={key.kind === 'SERVER' ? 'secondary' : 'warning'}
+                      className="text-[10px]"
+                      title={key.kind === 'SERVER' ? SERVER_KEY_HINT : PUBLIC_KEY_HINT}
+                    >
+                      {key.kind.toLowerCase()}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{key.label || '—'}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -201,9 +227,38 @@ function EnvironmentKeys({ environment }: { environment: Environment }) {
           <DialogHeader>
             <DialogTitle>New SDK key for {environment.key}</DialogTitle>
             <DialogDescription>
-              Server-side key. It evaluates flags in this environment only.
+              Scoped to {environment.key}. It can never read another environment.
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor={`key-kind-${environment.key}`}>Kind</Label>
+            <Select value={kind} onValueChange={(value) => setKind(value as SdkKeyKind)}>
+              <SelectTrigger id={`key-kind-${environment.key}`} data-testid="sdk-key-kind">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="SERVER">Server</SelectItem>
+                <SelectItem value="CLIENT">Client-side</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {kind === 'SERVER' ? SERVER_KEY_HINT : PUBLIC_KEY_HINT}
+            </p>
+          </div>
+          {kind === 'CLIENT' && (
+            <div
+              className="rounded-md border border-warning/50 bg-warning/5 p-3 text-xs"
+              data-testid="client-key-warning"
+            >
+              <p className="font-medium text-warning-foreground">This key will be public.</p>
+              <p className="mt-1 text-muted-foreground">
+                Anyone who can read your JavaScript can read the key. It sees evaluated values
+                rather than your targeting rules, and only flags you have marked available to
+                client-side SDKs — which is off by default, so a new client integration starts
+                with an empty flag list until you publish something to it.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor={`key-label-${environment.key}`}>Label</Label>
             <Input

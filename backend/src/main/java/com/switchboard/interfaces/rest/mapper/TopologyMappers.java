@@ -6,6 +6,7 @@ import com.switchboard.domain.org.OrgWithRole;
 import com.switchboard.domain.project.Environment;
 import com.switchboard.domain.project.ProjectWithEnvironments;
 import com.switchboard.domain.project.SdkKey;
+import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.interfaces.rest.model.EnvironmentResponse;
 import com.switchboard.interfaces.rest.model.OrgMemberResponse;
 import com.switchboard.interfaces.rest.model.OrgResponse;
@@ -44,7 +45,8 @@ public final class TopologyMappers {
     }
 
     public static SdkKeyResponse toSdkKeyResponse(SdkKey key) {
-        return new SdkKeyResponse(key.id(), key.environmentId(), key.keyPrefix(), key.createdAt())
+        return new SdkKeyResponse(
+            key.id(), key.environmentId(), key.keyPrefix(), key.createdAt(), toRestKind(key.kind()))
             .label(key.label())
             .revokedAt(key.revokedAt());
     }
@@ -52,7 +54,12 @@ public final class TopologyMappers {
     public static SdkKeyCreatedResponse toSdkKeyCreatedResponse(CreatedSdkKey created) {
         SdkKey stored = created.stored();
         return new SdkKeyCreatedResponse(
-            stored.id(), stored.environmentId(), created.fullKey(), stored.keyPrefix(), stored.createdAt())
+            stored.id(), stored.environmentId(), created.fullKey(), stored.keyPrefix(),
+            stored.createdAt(), toRestKind(stored.kind()))
             .label(stored.label());
+    }
+
+    private static com.switchboard.interfaces.rest.model.SdkKeyKind toRestKind(SdkKeyKind kind) {
+        return com.switchboard.interfaces.rest.model.SdkKeyKind.fromValue(kind.name());
     }
 }

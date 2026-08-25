@@ -54,6 +54,48 @@ Send `If-None-Match` on the bootstrap and you get a 304 when nothing changed. Ch
 through Postgres `NOTIFY`, so every backend instance sees them without instance-to-instance
 coupling.
 
+## Client-side keys
+
+A key that ships inside a browser bundle is public: anyone who can read your JavaScript can read
+the key. So a **client key** (`sb_cli_`) gets a deliberately smaller surface than a server key
+(`sb_srv_`).
+
+| | Server key | Client key |
+|---|---|---|
+| `GET /api/eval/bootstrap` | Full rule set | **403** — use the POST |
+| `POST /api/eval/bootstrap` | Evaluated values | Evaluated values |
+| `POST /api/eval`, `/api/eval/{key}`, OFREP | Every flag | Only client-available flags |
+| `GET /api/stream` | `put` / `patch` with config | `refetch` signals only |
+| `POST /api/events/eval` | Yes | Yes |
+| `POST /api/events/metrics` | Yes | **403** |
+
+Client payloads carry the **served variation only** — no targeting rules, no segment membership, and
+not even the values of the arms that were not served.
+
+A flag is invisible to client keys until you mark it **available to client-side SDKs** on its
+settings tab. That is off by default, so a brand-new client integration returns an empty flag list
+until you publish something to it — which looks like a broken integration and is not.
+
+```js
+const res = await fetch('http://localhost:28080/api/eval/bootstrap', {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${CLIENT_KEY}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ context: { key: userId, attributes: { plan: 'pro' } } }),
+});
+const { flags, contextHash } = await res.json();
+// flags: [{ key, kind, value, variationId, variationName, reason, ruleId, version }]
+```
+
+The response carries an `ETag` you can send back as `If-None-Match` for a bodiless 304. Note it
+digests the **body**, not the environment version — the payload depends on your context, so a
+version-based ETag would let a shared cache serve one user's flags to another. Discard any response
+whose `contextHash` does not match the context you sent; it is the guard against applying a 304
+across a context change.
+
+Metric events are refused from a client key on purpose: they feed the automated rollback loop, so
+accepting them from a public key would be accepting unauthenticated flag changes. Report them from
+your server.
+
 ## Reporting outcomes
 
 The AI layer can only judge what it can see. Report metric events so healing and optimizing have

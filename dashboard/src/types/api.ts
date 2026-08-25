@@ -25,6 +25,7 @@ export type Environment = Schemas['EnvironmentResponse']
 export type SdkKey = Schemas['SdkKeyResponse']
 export type SdkKeyCreated = Schemas['SdkKeyCreatedResponse']
 export type SdkKeyCreateRequest = Schemas['SdkKeyCreateRequest']
+export type SdkKeyKind = Schemas['SdkKeyKind']
 
 export type FlagKind = Schemas['FlagKind']
 export type Variation = Schemas['Variation']

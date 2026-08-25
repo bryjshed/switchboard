@@ -757,13 +757,13 @@ paths:
     get:
       tags: [Evaluation]
       operationId: getBootstrap
+      description: >-
+        SERVER keys only. Returns the full rule set for local evaluation; ETag is the environment
+        stateVersion. A CLIENT key gets 403 here rather than a reduced payload - a silently smaller
+        response is how an SDK ends up serving defaults forever with nothing surfaced. Use
+        POST /api/eval/bootstrap instead.
       security:
         - sdkKeyAuth: []
-      parameters:
-        - name: contextKey
-          in: query
-          schema:
-            type: string
       responses:
         '200':
           description: Full environment flag payload; ETag is the environment stateVersion.
@@ -777,6 +777,56 @@ paths:
                 $ref: '#/components/schemas/BootstrapResponse'
         '304':
           description: Not modified (If-None-Match matched current stateVersion)
+        '403':
+          description: The key is client-side; use POST /api/eval/bootstrap.
+    post:
+      tags: [Evaluation]
+      operationId: getClientBootstrap
+      description: >-
+        Evaluated bootstrap for a client-side key: values, not rules. Carries no targeting
+        configuration and no segment membership, and includes only flags marked
+        clientSideAvailable.
+
+
+        POST rather than GET because the context has to travel in a body - attributes in a query
+        string would put them in access logs, proxies, browser history and Referer headers. It
+        honours If-None-Match and returns a bodiless 304 exactly as
+        POST /ofrep/v1/evaluate/flags does.
+
+
+        The ETag is a digest of the response body, NOT the environment stateVersion. A
+        stateVersion ETag would be wrong in two directions here: two different contexts at the same
+        version produce different bodies with identical ETags, so a shared cache could serve one
+        user's flags to another; and a user whose attributes change gets a 304 and keeps stale
+        answers, because the version did not move.
+      security:
+        - sdkKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientBootstrapRequest'
+      responses:
+        '200':
+          description: Evaluated flag values for this context.
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+              description: private, no-store - the body is per-user.
+            Vary:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientBootstrapResponse'
+        '304':
+          description: Not modified (If-None-Match matched the body digest)
 
   /api/stream:
     get:
@@ -1550,13 +1600,17 @@ components:
     sdkKeyAuth:
       type: http
       scheme: bearer
-      description: Environment SDK key (sb_srv_...).
+      description: >-
+        Environment SDK key. sb_srv_ (server, full rule set) or sb_cli_ (client, evaluated payloads
+        and only client-side-available flags).
     ofrepApiKeyAuth:
       type: apiKey
       in: header
       name: X-API-Key
       description: >
-        OFREP's apiKey scheme, carrying the same environment SDK key (sb_srv_...) as sdkKeyAuth.
+        OFREP's apiKey scheme, carrying the same environment SDK key as sdkKeyAuth. A client key is
+        restricted to flags marked clientSideAvailable here too - filtering only the bootstrap would
+        leave flag existence enumerable one key at a time.
         Both headers resolve to the same SdkKeyPrincipal; Authorization wins when both are sent.
 
   parameters:
@@ -1821,16 +1875,30 @@ components:
         approvals:
           $ref: '#/components/schemas/ApprovalSettingsResponse'
 
+    SdkKeyKind:
+      type: string
+      description: >-
+        SERVER keys are secret and receive the full rule set, so they evaluate locally and see every
+        flag. CLIENT keys ship inside a browser bundle and are therefore public: they receive
+        EVALUATED payloads only, and only for flags marked clientSideAvailable. MOBILE is reserved
+        and not yet mintable - it exists as its own kind because revoking a key baked into a shipped
+        binary locks out installed versions until users update, which is a revocation-UX difference
+        rather than a capability one.
+      enum: [SERVER, CLIENT, MOBILE]
+      default: SERVER
+
     SdkKeyCreateRequest:
       type: object
       properties:
         label:
           type: string
           maxLength: 100
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     SdkKeyCreatedResponse:
       type: object
-      required: [id, environmentId, key, keyPrefix, createdAt]
+      required: [id, environmentId, key, keyPrefix, createdAt, kind]
       properties:
         id:
           type: string
@@ -1848,10 +1916,12 @@ components:
         createdAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     SdkKeyResponse:
       type: object
-      required: [id, environmentId, keyPrefix, createdAt]
+      required: [id, environmentId, keyPrefix, createdAt, kind]
       properties:
         id:
           type: string
@@ -1869,6 +1939,8 @@ components:
         revokedAt:
           type: string
           format: date-time
+        kind:
+          $ref: '#/components/schemas/SdkKeyKind'
 
     FlagKind:
       type: string
@@ -1920,6 +1992,12 @@ components:
           type: array
           items:
             type: string
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
 
     FlagUpdateRequest:
       type: object
@@ -1937,6 +2015,12 @@ components:
           description: STRING flags only; variations are add-only.
           items:
             $ref: '#/components/schemas/VariationCreate'
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
 
     ClauseOp:
       type: string
@@ -2117,6 +2201,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FlagEnvConfigResponse'
+        clientSideAvailable:
+          type: boolean
+          description: >-
+            Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so
+            no flag is exposed to a browser without someone deciding it should be. Has no effect on
+            a server key, which sees every flag regardless.
         createdAt:
           type: string
           format: date-time
@@ -2741,6 +2831,63 @@ components:
           format: uuid
           nullable: true
           description: Pinned from configuration, not chosen as the arm with the most traffic.
+
+    ClientBootstrapRequest:
+      type: object
+      required: [context]
+      properties:
+        context:
+          $ref: '#/components/schemas/EvalContext'
+
+    ClientBootstrapFlag:
+      type: object
+      required: [key, kind, value, reason]
+      description: >-
+        One evaluated flag. Deliberately carries the SERVED variation only - shipping the full
+        variation list would leak the values of every arm, including the name of an unreleased
+        feature, which is one of the main things client-side availability exists to protect.
+      properties:
+        key:
+          type: string
+        kind:
+          $ref: '#/components/schemas/FlagKind'
+        value:
+          type: string
+        variationId:
+          type: string
+          format: uuid
+          nullable: true
+        variationName:
+          type: string
+          nullable: true
+        reason:
+          $ref: '#/components/schemas/EvalReason'
+        ruleId:
+          type: string
+          format: uuid
+          nullable: true
+        version:
+          type: integer
+
+    ClientBootstrapResponse:
+      type: object
+      required: [envKey, stateVersion, contextHash, flags]
+      properties:
+        envKey:
+          type: string
+        stateVersion:
+          type: integer
+          format: int64
+        contextHash:
+          type: string
+          description: >-
+            Hex SHA-256 of the canonicalised context this payload was evaluated against. A client
+            MUST discard a response whose contextHash does not match the context it sent - it is
+            the guard against a 304 being applied across a setContext().
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientBootstrapFlag'
 
     VariantStats:
       type: object

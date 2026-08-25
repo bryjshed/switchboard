@@ -17,11 +17,14 @@ import com.switchboard.interfaces.rest.ofrep.OfrepFlagEvaluation;
 import com.switchboard.interfaces.rest.ofrep.OfrepGeneralError;
 import com.switchboard.interfaces.rest.ofrep.OfrepMappers;
 import com.switchboard.interfaces.security.Principals;
+import com.switchboard.interfaces.security.SwitchboardAuthenticationManager;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -75,9 +78,12 @@ public class OfrepController {
     private static final Logger log = LoggerFactory.getLogger(OfrepController.class);
 
     private final EnvSnapshotCache snapshots;
+    private final com.fasterxml.jackson.databind.ObjectMapper json;
 
-    public OfrepController(EnvSnapshotCache snapshots) {
+    public OfrepController(
+        EnvSnapshotCache snapshots, com.fasterxml.jackson.databind.ObjectMapper json) {
         this.snapshots = snapshots;
+        this.json = json;
     }
 
     /**
@@ -99,6 +105,11 @@ public class OfrepController {
             .flatMap(t -> {
                 EvalContext context = OfrepMappers.toEvalContext(t.getT2(), key);
                 return snapshots.get(t.getT1().environmentId())
+                    .map(full -> full.visibleTo(t.getT1().kind()))
+                    // A flag a public key may not see is FLAG_NOT_FOUND here, the same answer it
+                    // gets for a flag that genuinely does not exist. OFREP's spec mandates 404 for
+                    // an unknown flag, so this happens to be both the spec-correct answer and the
+                    // one that does not confirm the flag's existence.
                     .map(snapshot -> snapshot.flags().stream()
                         .filter(fc -> fc.flag().key().equals(key))
                         .findFirst()
@@ -127,23 +138,49 @@ public class OfrepController {
             .zipWith(request)
             .flatMap(t -> {
                 EvalContext context = OfrepMappers.toEvalContext(t.getT2(), null);
-                return snapshots.get(t.getT1().environmentId()).map(snapshot -> {
-                    String etag = etag(snapshot);
-                    if (exchange.getRequest().getHeaders().getIfNoneMatch().contains(etag)) {
-                        return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag).build();
-                    }
+                return snapshots.get(t.getT1().environmentId())
+                    .map(full -> full.visibleTo(t.getT1().kind()))
+                    .map(snapshot -> {
                     List<OfrepFlagEvaluation> flags = snapshot.flags().stream()
                         .map(fc -> (OfrepFlagEvaluation) evaluate(snapshot, fc, context))
                         .toList();
+                    OfrepBulkEvaluationResponse body =
+                        new OfrepBulkEvaluationResponse(flags, metadata(snapshot), EVENT_STREAMS);
+                    String etag = etag(snapshot, body);
+                    if (exchange.getRequest().getHeaders().getIfNoneMatch().contains(etag)) {
+                        return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag)
+                            .cacheControl(CacheControl.noStore().cachePrivate())
+                            .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+                            .build();
+                    }
                     return ResponseEntity.ok().eTag(etag)
-                        .body((Object) new OfrepBulkEvaluationResponse(flags, metadata(snapshot), EVENT_STREAMS));
+                        .cacheControl(CacheControl.noStore().cachePrivate())
+                        .header(HttpHeaders.VARY, HttpHeaders.AUTHORIZATION)
+                        .body((Object) body);
                 });
             });
     }
 
     /** The environment's monotonic change cursor, quoted as a strong ETag. */
-    private static String etag(EnvSnapshot snapshot) {
-        return "\"" + snapshot.stateVersion() + "\"";
+    /**
+     * A digest of the evaluated body, not the environment's stateVersion.
+     *
+     * <p>This endpoint is the static-context one for client-side providers, so its payload depends
+     * on the caller's context. A stateVersion ETag was therefore wrong in two directions: two
+     * different contexts at one version produced different bodies under identical ETags, which any
+     * shared cache could cross-serve; and a caller whose attributes changed was told 304 and kept
+     * stale answers, because the version had not moved.
+     *
+     * <p>Observable consequence: an OFREP provider holding a cached ETag gets one 200 instead of a
+     * 304 the first time after this change. Harmless, and worth the release note.
+     */
+    private String etag(EnvSnapshot snapshot, Object body) {
+        try {
+            return "\"" + snapshot.stateVersion() + "-"
+                + SwitchboardAuthenticationManager.sha256(json.writeValueAsString(body)) + "\"";
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Failed to serialize OFREP bulk payload", e);
+        }
     }
 
     private static OfrepEvaluationSuccess evaluate(

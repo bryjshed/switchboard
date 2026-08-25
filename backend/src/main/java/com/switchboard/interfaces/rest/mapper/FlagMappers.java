@@ -6,6 +6,7 @@ import com.switchboard.domain.common.ValidationException;
 import com.switchboard.domain.evaluation.EvalOutcome;
 import com.switchboard.domain.flag.Clause;
 import com.switchboard.domain.flag.ClauseOp;
+import com.switchboard.domain.flag.FlagAndConfig;
 import com.switchboard.domain.flag.FlagDetail;
 import com.switchboard.domain.flag.FlagEnvConfig;
 import com.switchboard.domain.flag.FlagEnvConfigVersion;
@@ -24,6 +25,7 @@ import com.switchboard.interfaces.rest.model.AuditAction;
 import com.switchboard.interfaces.rest.model.AuditEntryResponse;
 import com.switchboard.interfaces.rest.model.BootstrapFlag;
 import com.switchboard.interfaces.rest.model.BootstrapResponse;
+import com.switchboard.interfaces.rest.model.ClientBootstrapFlag;
 import com.switchboard.interfaces.rest.model.BootstrapSegment;
 import com.switchboard.interfaces.rest.model.EvalReason;
 import com.switchboard.interfaces.rest.model.EvalResult;
@@ -147,6 +149,27 @@ public final class FlagMappers {
             .name(variation.name());
     }
 
+    /**
+     * One evaluated flag for a client payload. Served variation only: no rules, no segment
+     * membership, and no sibling variations.
+     *
+     * <p>{@code ruleId} and {@code variationName} are included because both are already public
+     * API on the SDK's EvaluationDetail, and a bare UUID with no accompanying clauses reveals
+     * essentially nothing. Flag it in review if your variation names are themselves sensitive.
+     */
+    public static ClientBootstrapFlag toClientBootstrapFlag(FlagAndConfig fc, EvalOutcome outcome) {
+        Variation served = fc.flag().variationById(outcome.variationId());
+        return new ClientBootstrapFlag(
+            fc.flag().key(),
+            FlagKind.valueOf(fc.flag().kind().name()),
+            outcome.value() == null ? "" : outcome.value(),
+            EvalReason.valueOf(outcome.reason().name()))
+            .variationId(outcome.variationId())
+            .variationName(served == null ? null : served.name())
+            .ruleId(outcome.ruleId())
+            .version(fc.config().version());
+    }
+
     public static FlagDetailResponse toFlagDetailResponse(FlagDetail detail) {
         return new FlagDetailResponse(
             detail.flag().id(),
@@ -157,7 +180,8 @@ public final class FlagMappers {
             detail.flag().variations().stream().map(FlagMappers::toRestVariation).toList(),
             detail.flag().tags(),
             detail.envConfigs().stream().map(FlagMappers::toEnvConfigResponse).toList())
-            .description(detail.flag().description());
+            .description(detail.flag().description())
+            .clientSideAvailable(detail.flag().clientSideAvailable());
     }
 
     public static FlagEnvConfigResponse toEnvConfigResponse(NamedEnvConfig named) {

@@ -289,7 +289,7 @@ class OfrepApiIT extends IntegrationTestBase {
     }
 
     @Test
-    void bulkIsConditionalOnItsEtagAndAgreesWithBootstrap() {
+    void bulkIsConditionalOnAnEtagThatCoversTheContext() {
         createBooleanFlag(workspace, "bulk-conditional");
 
         String etag = bulk(context("user-1"), null)
@@ -298,16 +298,39 @@ class OfrepApiIT extends IntegrationTestBase {
 
         bulk(context("user-1"), etag).expectStatus().isNotModified().expectBody().isEmpty();
 
-        // The two conditional endpoints must quote the same environment cursor, or a client that
-        // uses both would thrash between them.
-        String bootstrapEtag = http.get().uri("/api/eval/bootstrap")
-            .header(HttpHeaders.AUTHORIZATION, "Bearer " + sdkKey)
-            .exchange()
+        // This ETag used to be the bare environment stateVersion, and this test used to assert it
+        // equalled the rule-set bootstrap's. That coupling was the bug: this is the STATIC-CONTEXT
+        // endpoint, so its body depends on the caller's context, and two contexts that evaluate
+        // DIFFERENTLY produced different bodies under identical ETags - which any shared cache
+        // could cross-serve. It now digests the body.
+        //
+        // Note two contexts that evaluate identically still share an ETag, and that is correct:
+        // identical bodies are safe to share. So the difference has to be made real, with a
+        // targeted flag that serves one of them something else.
+        FlagDetailResponse targeted = createBooleanFlag(workspace, "bulk-etag-targeted");
+        UUID on = variationId(targeted, "true");
+        UUID off = variationId(targeted, "false");
+        putConfig("bulk-etag-targeted", new FlagTargetingConfig(
+            new RolloutOrVariation().variationId(off), off, off)
+            .individualTargets(List.of(new IndividualTarget("user-1", on))), 1);
+
+        String targetedUser = bulk(context("user-1"), null)
             .expectStatus().isOk()
             .expectBody().returnResult().getResponseHeaders().getETag();
-        assertThat(etag).isEqualTo(bootstrapEtag);
+        String otherUser = bulk(context("user-2"), null)
+            .expectStatus().isOk()
+            .expectBody().returnResult().getResponseHeaders().getETag();
+        assertThat(targetedUser)
+            .as("contexts that evaluate differently must not share an ETag")
+            .isNotEqualTo(otherUser);
 
-        // A write moves it on.
+        // And the response says plainly that it must not be shared.
+        bulk(context("user-1"), null)
+            .expectStatus().isOk()
+            .expectHeader().cacheControl(org.springframework.http.CacheControl.noStore().cachePrivate());
+
+        // A write still moves it on.
+        etag = targetedUser;
         FlagDetailResponse flag = createBooleanFlag(workspace, "bulk-conditional-2");
         serveFallthrough(flag, "true");
         String next = bulk(context("user-1"), etag)

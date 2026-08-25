@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (328 unit + 82 integration), web dashboard (329),
+**Status of the product today.** Backend (328 unit + 93 integration), web dashboard (329),
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
@@ -83,19 +83,35 @@ Reasoning in [DECISIONS.md](DECISIONS.md#rollout-monitoring), operator-facing su
 across 48 looks at A/A traffic (0.0025 against alpha 0.01) and that the old one does not
 (0.0090 against a nominal 0.00135) — the second is what gives the first meaning.
 
-### Client-side exposure in the bootstrap payload · effort **M**
-`GET /api/eval/bootstrap` returns the full rule set **and every segment's `includedKeys`** —
-raw user identifiers. Any browser or mobile use of Switchboard today leaks the entire
-targeting configuration and cohort membership to the client. There is exactly one kind of
-SDK key.
+### ~~Client-side exposure in the bootstrap payload~~ · **Landed 2026-08-24 (server side)**
+`GET /api/eval/bootstrap` returned the full rule set and every segment's raw `includedKeys` to
+any SDK-key holder, and there was exactly one kind of key — so there was no way to hand a
+browser a key without handing it the entire targeting configuration and every cohort's
+membership list.
 
-Competitors all solve this and none the same way: LaunchDarkly separates SDK key / mobile
-key / client-side ID and gates each flag on per-platform availability; DevCycle separates
-server/client/mobile keys and adds feature obfuscation; Flagsmith makes client SDKs
-remote-evaluation-only by design; ConfigCat hashes comparison values with a per-config salt
-so emails never appear in the public payload. Needs: distinct key kinds, per-flag
-client-side availability, and an evaluated-payload (rather than rule-set) bootstrap for
-client contexts.
+Now: `sdk_keys.kind` is `SERVER` | `CLIENT` (`MOBILE` reserved), `flags.client_side_available`
+gates per-flag exposure and **defaults to false**, and `POST /api/eval/bootstrap` returns
+evaluated values — served variation only, no rules, no segments, no sibling variations.
+
+Details worth knowing before changing any of it:
+
+- **The filter applies to every evaluation endpoint**, not just the bootstrap. Filtering only
+  the bootstrap would make the flag a fig leaf, since `POST /api/eval/{key}` would still
+  confirm a hidden flag exists and say what it serves. A hidden flag reads as *absent*, not
+  forbidden — same default, same `SDK_DEFAULT`.
+- **The ETag is a body digest, not the `stateVersion`.** Once the payload depends on the
+  caller's context, a version ETag is a cross-user leak: two contexts at one version produce
+  different bodies under identical ETags. The same bug existed on `POST /ofrep/v1/evaluate/flags`
+  and is fixed there too — observable as one 200 instead of a 304 for a provider holding a
+  cached ETag.
+- **A client key is refused `POST /api/events/metrics`.** Those rows drive automated rollbacks,
+  so accepting them from a key anyone can read out of a JS bundle is accepting unauthenticated
+  flag changes. Neither the SRM gate nor the sequential test catches forged-but-real evidence.
+- **A server key is unaffected** and still sees every flag regardless of the new column — the
+  guarantee that makes the fail-closed default safe, asserted by `ClientSdkKeyIT`.
+
+Remaining: the TypeScript SDK has no client mode yet, so a client key is usable from `fetch`
+but not yet from the first-party SDK. **S–M**
 
 ### Smaller
 - **Flag list pagination is not wired in the dashboard** (`listFlags` returns `nextCursor`;

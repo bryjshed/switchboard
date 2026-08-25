@@ -6,7 +6,9 @@ import reactor.core.publisher.Mono;
 
 public interface SdkKeyRepository {
 
-    Mono<SdkKey> create(UUID environmentId, String keyPrefix, String keyHash, String label, String createdBy);
+    Mono<SdkKey> create(
+        UUID environmentId, SdkKeyKind kind, String keyPrefix, String keyHash,
+        String label, String createdBy);
 
     Flux<SdkKey> findByEnvironment(UUID environmentId);
 
