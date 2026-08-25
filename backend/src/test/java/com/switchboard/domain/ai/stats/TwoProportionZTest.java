@@ -1,4 +1,4 @@
-package com.switchboard.application.ai;
+package com.switchboard.domain.ai.stats;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

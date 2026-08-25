@@ -1,4 +1,4 @@
-package com.switchboard.application.ai;
+package com.switchboard.domain.ai.stats;
 
 /**
  * Two-proportion z-test, the screen that keeps the monitor from reacting to

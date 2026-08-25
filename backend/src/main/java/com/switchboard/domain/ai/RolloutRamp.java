@@ -1,4 +1,4 @@
-package com.switchboard.application.ai;
+package com.switchboard.domain.ai;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
