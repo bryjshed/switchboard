@@ -1,8 +1,9 @@
 # Switchboard backend
 
 The whole API: management, evaluation, streaming, governance, and the AI layer. Spring Boot
-(WebFlux, R2DBC, Flyway) on Java 25, backed by one Postgres and Firebase for identity. There is
-no broker and no cache tier — change propagation between instances rides Postgres `NOTIFY`.
+(WebFlux, R2DBC, Flyway) on Java 25, backed by one Postgres, with identity delegated to whatever
+OIDC provider you configure. There is no broker and no cache tier — change propagation between
+instances rides Postgres `NOTIFY`.
 
 Every UI is a consumer of this API, so anything a screen can do is reachable with curl. The
 [walkthrough](#the-walkthrough) below is that claim, executed.
@@ -29,8 +30,9 @@ Three parts of that line are load-bearing:
 - **`JAVA_HOME`** — the build targets Java 25 (`<java.version>25</java.version>`, Spring Boot
   4.1). The shell default is whatever jenv resolves and is not guaranteed to be 25, so every
   Maven invocation in the Makefile goes through `scripts/resolve-java.sh` instead of trusting it.
-- **`FIREBASE_AUTH_EMULATOR_HOST`** — without it the Firebase Admin SDK verifies emulator
-  tokens against real Google and rejects **every** real login with a 401, while dev tokens keep
+- **`FIREBASE_AUTH_EMULATOR_HOST`** — the local stack authenticates against the Firebase Auth
+  emulator, whose tokens are unsigned. Without this variable the Firebase provider treats the
+  project as real Firebase and rejects **every** emulator login with a 401, while dev tokens keep
   working. See [Gotchas](#gotchas).
 - **`-Dcheckstyle.skip`** — checkstyle is bound to the `validate` phase, so it runs ahead of
   every Maven goal including `spring-boot:run`. Skipping it keeps restarts fast; `make check`
@@ -52,8 +54,8 @@ comes from `application.yml` and its environment defaults.
 | `DB_USER` / `DB_PASSWORD` | `postgres` / `postgres` | |
 | `SERVER_PORT` | `28080` | |
 | `FLYWAY_ENABLED` | `true` | |
-| `FIREBASE_PROJECT_ID` | `demo-switchboard` | Must match the emulator's project |
-| `FIREBASE_AUTH_EMULATOR_HOST` | unset | `localhost:29099` locally. Read from the OS environment, not from config |
+| `FIREBASE_PROJECT_ID` | `demo-switchboard` | Feeds the default `firebase` provider and V4's issuer placeholder. Must match the emulator's project |
+| `FIREBASE_AUTH_EMULATOR_HOST` | unset | `localhost:29099` locally. Read from the OS environment, not from config. Only meaningful to a `type: firebase` provider |
 | `ANTHROPIC_API_KEY` | empty | Empty selects the keyless assistant; AI drafting then returns `503 AI_UNAVAILABLE` and everything else still works |
 | `JOB_TOKEN` | empty | Shared secret for `/api/jobs/**`. Empty refuses every call — these endpoints fail closed |
 | `JOBS_SCHEDULED_ENABLED` | `true` | The hourly in-process scan; a real scheduler should drive the endpoints instead |
@@ -61,12 +63,18 @@ comes from `application.yml` and its environment defaults.
 ### Migrations
 
 Flyway runs at startup against `classpath:db/migration` and there is no separate migrate step.
-The current head is **V3** (`V1__baseline.sql`, `V2__scoped_rbac_and_change_requests.sql`,
-`V3__ai_proposal_change_requests.sql`), and boot logs it:
+The current head is **V4** (`V1__baseline.sql`, `V2__scoped_rbac_and_change_requests.sql`,
+`V3__ai_proposal_change_requests.sql`, `V4__provider_agnostic_identities.sql`), and boot logs it:
 
 ```
-o.f.core.internal.command.DbMigrate : Current version of schema "public": 3
+o.f.core.internal.command.DbMigrate : Current version of schema "public": 4
 ```
+
+V4 is the only migration that takes a placeholder. It moves identity out of `users` and into
+`user_identities`, which means translating every existing `users.firebase_uid` into an
+`(issuer, subject)` pair — and Firebase's issuer is `https://securetoken.google.com/<projectId>`,
+which SQL cannot know. `spring.flyway.placeholders.firebase_issuer` in `application.yml` supplies
+it from `FIREBASE_PROJECT_ID`.
 
 Schema is plain SQL. There are no Spring Data entities anywhere in this codebase — no `@Table`,
 no `R2dbcRepository` — so a migration is the only place the shape of a table is written down.
@@ -78,7 +86,7 @@ Four layers, and the dependency rule points inward.
 ```
 domain/         pure Java. Records, enums, port interfaces, FlagEvaluator. Zero Spring imports.
 application/    services that compose ports inside a TransactionalOperator boundary.
-infrastructure/ adapters: DatabaseClient SQL, pg_notify, Firebase, the Claude assistant.
+infrastructure/ adapters: DatabaseClient SQL, pg_notify, identity providers, the Claude assistant.
 interfaces/     REST controllers implementing generated OpenAPI interfaces, plus security.
 ```
 
@@ -101,9 +109,9 @@ instead of the value.
 
 **`infrastructure/persistence/adapter/`** implements the ports with `DatabaseClient` and
 hand-written SQL. Thirteen adapters, one per aggregate, each mapping rows to domain records by
-hand. `infrastructure/notify` is the cross-instance propagation pair, `infrastructure/firebase`
-builds the Admin SDK bean, and `infrastructure/ai` chooses between the Claude adapter and a
-no-op from configuration alone.
+hand. `infrastructure/notify` is the cross-instance propagation pair, `infrastructure/identity`
+holds the identity-provider adapters and builds the registry from configuration, and
+`infrastructure/ai` chooses between the Claude adapter and a no-op from configuration alone.
 
 **`interfaces/rest/`** controllers are thin: resolve the principal, call one application
 service, map the result. They implement generated interfaces (`FlagsApi`, `EvaluationApi`,
@@ -210,7 +218,7 @@ connection.
 | --- | --- | --- |
 | `sb_srv_…` | `SdkKeyPrincipal` (key, env, project, org) | SDK surface only: `/api/eval/**`, `/api/stream`, `/api/events/**`, `/ofrep/**` |
 | `dev:<email>` | `AuthenticatedUser`, auto-provisioned | Management surface. Local profile only — any other profile answers 401 `Dev tokens are disabled` |
-| anything else | `AuthenticatedUser` from a verified Firebase ID token | Management surface |
+| anything else | `AuthenticatedUser` from a verified OIDC ID token | Management surface |
 
 The split is enforced in `SecurityConfig` by role (`ROLE_SDK` vs `ROLE_USER`), so a user token
 on `/api/eval` is a 403 and an SDK key on `/api/projects/...` is a 403 — both are proved in
@@ -225,6 +233,128 @@ a 401 rather than a misleading 403.
 
 `/api/jobs/**` is outside the bearer chain entirely (a scheduler has no user) and authenticates
 with a constant-time comparison against the `X-Job-Token` shared secret.
+
+### Identity providers are configuration
+
+Switchboard has no opinion about who authenticates your people. A user token is verified by
+whichever provider claims its `iss`, and providers come from `switchboard.auth.providers`:
+
+```yaml
+switchboard:
+  auth:
+    providers:
+      - id: firebase-local
+        type: firebase
+        project-id: ${FIREBASE_PROJECT_ID:demo-switchboard}
+      - id: corp-okta
+        type: oidc
+        issuer: https://example.okta.com/oauth2/default
+        audience: switchboard
+        email-claim: email
+        name-claim: name
+```
+
+**Several providers can be active at once**, which is the case that matters: an org moving from
+one IdP to another has both issuing tokens for weeks, and both have to work. Routing reads the
+`iss` claim off the *unverified* payload to pick a verifier and then throws that reading away —
+the chosen provider checks the signature against that issuer's keys and validates `iss` itself, so
+a forged issuer buys an attacker a different rejection and nothing else. Dev tokens are matched by
+prefix before any parsing, because `dev:<email>` is not a JWT.
+
+| Setting | Applies to | Notes |
+| --- | --- | --- |
+| `id` | both | Any unique label. Appears in the startup log and in misconfiguration messages |
+| `type` | both | `oidc` or `firebase` |
+| `issuer` | `oidc` | The `iss` value tokens carry. Routing key and validated claim |
+| `jwk-set-uri` | `oidc` | Optional. Omit it and the issuer's `/.well-known/openid-configuration` is discovered instead |
+| `audience` | `oidc` | Optional but recommended: when set, `aud` must contain it |
+| `project-id` | `firebase` | Fixes both issuer (`https://securetoken.google.com/<id>`) and audience |
+| `email-claim` | `oidc` | Default `email`. Some deployments use `upn` |
+| `name-claim` | `oidc` | Default `name`. Entra ID often carries `preferred_username` |
+| `email-verified-claim` | `oidc` | Default `email_verified`. Accepts a boolean or the string `"true"` |
+| `jwk-cache-ttl` | both | Default 15m. The key set is also refetched immediately when a token arrives with an unknown `kid` |
+
+`OidcIdentityProvider` is Spring Security's `NimbusReactiveJwtDecoder` with an issuer validator, an
+audience validator, and the framework's own `exp`/`nbf` checks. That was chosen over a third-party
+JWT library because it is already part of the Spring stack this service is built on and because
+its JWKS handling — cache, plus refetch on an unknown `kid` — is the part everyone gets wrong.
+
+Decoders are built lazily. An IdP that is briefly unreachable delays a login; it does not stop the
+service from booting.
+
+**Misconfiguration is a startup failure, not a mystery 401.** A provider with no issuer, two
+providers claiming one id or one issuer, or a deployment with no providers *and* dev tokens off,
+all refuse to start with a message naming the offending index:
+
+```
+switchboard.auth.providers[0] (id=corp-okta) needs a issuer
+```
+
+#### Pointing it at Auth0, Okta, Entra ID, Keycloak or Cognito
+
+Each is the same four lines with a different `issuer`. Discovery supplies the JWKS in every case,
+so `jwk-set-uri` is only needed for an issuer that does not publish a discovery document.
+
+| IdP | `issuer` | `audience` |
+| --- | --- | --- |
+| Auth0 | `https://<tenant>.us.auth0.com/` (trailing slash included) | your API identifier |
+| Okta | `https://<org>.okta.com/oauth2/<authServerId>` | the authorization server's audience |
+| Entra ID | `https://login.microsoftonline.com/<tenantId>/v2.0` | the application (client) id |
+| Keycloak | `https://<host>/realms/<realm>` | the client id, with an audience mapper configured |
+| Cognito | `https://cognito-idp.<region>.amazonaws.com/<poolId>` | the app client id |
+| Google | `https://accounts.google.com` | the OAuth client id |
+
+**SAML needs no code here.** Enterprise SAML is handled by delegating to an IdP that speaks both:
+Auth0, Okta and Entra ID all terminate a SAML federation and then issue ordinary OIDC tokens to
+Switchboard. Supporting OIDC therefore covers SAML, and this codebase deliberately contains no
+SAML assertion parsing — that is a protocol you do not want to implement twice.
+
+**The emulator caveat.** Firebase in production is an ordinary OIDC issuer and goes through the
+same `OidcIdentityProvider` as Okta would. The local Firebase Auth *emulator* is the one exception
+in the entire system: its tokens are unsigned (`{"alg":"none"}` with an empty signature), so no
+JWKS verifier can accept them. When `FIREBASE_AUTH_EMULATOR_HOST` is set, a `type: firebase`
+provider routes to `FirebaseEmulatorTokenVerifier`, the single class that touches `firebase-admin`.
+The dependency is `<optional>true</optional>`; a deployment authenticating against Okta can delete
+it and never load those classes.
+
+#### One person, one account, several identities
+
+`users` no longer has a `firebase_uid`. An identity is a row in `user_identities` —
+`(issuer, subject, user_id)` with `UNIQUE (issuer, subject)` — and the relationship is
+**many-to-one**. That is what lets a person keep their account through an IdP migration: their
+Okta token is a new identity that attaches to the user their Firebase token created.
+
+Resolution, in `UserService.resolveIdentity`, is three steps: known `(issuer, subject)` wins; else
+match a user by email and link; else provision a new user. The middle step is the dangerous one, so
+it is gated. **Linking by email happens only when the token asserts the email is verified** — or
+when the candidate holds nothing but `switchboard:dev` identities, or when the arriving token is
+itself a dev token. Without that rule, an IdP that lets users self-assert an address would be an
+account-takeover path: sign up somewhere as `ceo@yourcompany.com` and inherit the CEO's account.
+When the rule refuses, the login still succeeds — as a separate new user, which is why
+`users.email` is indexed and not unique.
+
+The dev-row clause is the old adoption behaviour, generalised. A `dev:<email>` row is a
+placeholder nobody has really signed into, so the first real login for that address takes it over —
+now by *adding* the real identity beside the dev one rather than re-keying a column, so the same
+person stays one user id whichever token they arrive with:
+
+```console
+$ curl -s -H "Authorization: Bearer dev:adopt@switchboard.dev" $API/api/users/me | jq -r .id
+3a8b52ee-6797-45f0-a57e-4fe73c660658
+
+$ TOKEN=$(../scripts/token.sh adopt@switchboard.dev)
+$ curl -s -H "Authorization: Bearer $TOKEN" $API/api/users/me | jq -r .id
+3a8b52ee-6797-45f0-a57e-4fe73c660658
+```
+
+One id, two ways in:
+
+```
+         email         |                     issuer
+-----------------------+-------------------------------------------------
+ adopt@switchboard.dev | switchboard:dev
+ adopt@switchboard.dev | https://securetoken.google.com/demo-switchboard
+```
 
 ### Scoped RBAC with union semantics
 
@@ -630,8 +760,8 @@ make smoke   # node scripts/smoke-test.mjs, against a running backend
 `./mvnw verify` runs both halves and is the gate:
 
 ```
-Tests run: 254, Failures: 0, Errors: 0, Skipped: 0     surefire  (unit)
-Tests run:  66, Failures: 0, Errors: 0, Skipped: 0     failsafe  (integration)
+Tests run: 280, Failures: 0, Errors: 0, Skipped: 0     surefire  (unit)
+Tests run:  74, Failures: 0, Errors: 0, Skipped: 0     failsafe  (integration)
 BUILD SUCCESS
 ```
 
@@ -649,8 +779,23 @@ them would share one cached context and therefore one database. Delete that anno
 suite still passes for a while, then starts failing in ways that depend on class ordering.
 
 Authentication in the suite uses the dev-token path, so tests exercise the real security filter
-chain with no Firebase project; `FirebaseAuth` is mocked only because the production bean would
-otherwise reach for application-default credentials at startup.
+chain with no identity provider reachable. Nothing needs stubbing for that: provider adapters are
+built lazily and are only ever contacted by a token naming their issuer.
+
+`SecondProviderIT` is the exception, and it is the test that justifies the provider abstraction.
+It stands up a real OIDC issuer in-process — its own RSA key pair, a JWKS endpoint, a discovery
+document, signed RS256 tokens, an issuer URL with nothing to do with Google — configures it
+*alongside* the Firebase provider, and drives the real API with a token it minted. An abstraction
+exercised by one implementation is not an abstraction, so this one is exercised by two:
+
+```
+Identity provider 'firebase-local' (FIREBASE) verifying tokens from https://securetoken.google.com/demo-switchboard
+Identity provider 'second-idp' (OIDC) verifying tokens from http://127.0.0.1:60582
+```
+
+`IdentityResolutionIT` pins the rules underneath it: lookup by `(issuer, subject)`, a verified
+email linking a second provider onto an existing user, an unverified email declining to, and
+dev-row adoption.
 
 The three race tests are the ones that justify the write path's design, and each states what it
 would catch:
@@ -690,7 +835,7 @@ invocation, which is exactly what `scripts/resolve-java.sh` returns. A jenv shim
 older JDK — globally or by a `.java-version` in a parent directory — makes the build fail during
 compilation rather than at startup, which reads like a code problem and is not one.
 
-**`FIREBASE_AUTH_EMULATOR_HOST=localhost:29099`, or real logins break silently.** The failure
+**`FIREBASE_AUTH_EMULATOR_HOST=localhost:29099`, or emulator logins break silently.** The failure
 mode is the reason this has its own section. Run the backend without it and:
 
 ```
@@ -700,9 +845,9 @@ emulator token  -> HTTP 401
 
 The app starts cleanly, logs nothing unusual, and every script and integration test that uses
 `Bearer dev:<email>` keeps passing — while the dashboard and the mobile app, which sign in
-through the emulator and send a real ID token, get a 401 on every request. The Admin SDK simply
-verified an emulator-issued token against real Google. `make backend` sets the variable;
-anything else you invent has to as well.
+through the emulator and send a real ID token, get a 401 on every request. Without the variable
+the `firebase` provider is an ordinary OIDC provider expecting Google-signed tokens, and emulator
+tokens are unsigned. `make backend` sets it; anything else you invent has to as well.
 
 **No `timeout` on macOS.** The BSD userland has no `timeout(1)`, so `timeout 30 ./mvnw ...`
 fails with "command not found" rather than doing anything useful. Use `curl --max-time`, or

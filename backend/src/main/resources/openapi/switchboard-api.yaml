@@ -1543,7 +1543,10 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Firebase ID token, or dev token (Bearer dev:email) in local profile.
+      description: >-
+        OIDC ID token from any configured identity provider (Auth0, Okta, Entra ID,
+        Keycloak, Cognito, Google, Firebase), or a dev token (Bearer dev:email) in the
+        local profile.
     sdkKeyAuth:
       type: http
       scheme: bearer

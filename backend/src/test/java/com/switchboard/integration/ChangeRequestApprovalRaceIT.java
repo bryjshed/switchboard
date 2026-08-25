@@ -8,6 +8,7 @@ import com.switchboard.domain.changerequest.ChangeRequestStatus;
 import com.switchboard.interfaces.rest.model.ChangeRequestResponse;
 import com.switchboard.interfaces.rest.model.FlagDetailResponse;
 import com.switchboard.interfaces.rest.model.ScopeType;
+import com.switchboard.domain.identity.Identities;
 import com.switchboard.interfaces.security.AuthenticatedUser;
 import java.time.Duration;
 import java.util.List;
@@ -96,7 +97,7 @@ class ChangeRequestApprovalRaceIT extends IntegrationTestBase {
         String email = uniqueEmail(prefix);
         UUID userId = provisionUser(email);
         grantRole(workspace, email, ScopeType.ENVIRONMENT, envId, "APPROVER");
-        return new AuthenticatedUser(userId, email);
+        return new AuthenticatedUser(userId, email, Identities.DEV_ISSUER, email);
     }
 
     private ChangeRequestResponse openRequest(Workspace workspace, FlagDetailResponse flag) {

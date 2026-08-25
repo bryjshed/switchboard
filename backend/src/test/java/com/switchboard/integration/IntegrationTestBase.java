@@ -1,6 +1,5 @@
 package com.switchboard.integration;
 
-import com.google.firebase.auth.FirebaseAuth;
 import com.switchboard.interfaces.rest.model.ApprovalSettingsResponse;
 import com.switchboard.interfaces.rest.model.ApprovalSettingsUpdateRequest;
 import com.switchboard.interfaces.rest.model.EnvironmentResponse;
@@ -44,7 +43,6 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -64,10 +62,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * the same inherited method for all of them - and therefore one database.
  *
  * <p>Authentication uses the local dev-token path ({@code Bearer dev:<email>}),
- * so tests exercise the real security filter chain without a Firebase project.
- * {@link FirebaseAuth} is mocked because the production bean would otherwise
- * reach for application-default credentials at startup; nothing in this suite
- * takes the Firebase branch of the authentication manager.
+ * so tests exercise the real security filter chain without any identity
+ * provider reachable. Nothing needs stubbing for that: provider adapters are
+ * built lazily and only ever contacted by a token that names their issuer.
  */
 @Tag("integration")
 @DirtiesContext
@@ -98,10 +95,6 @@ public abstract class IntegrationTestBase {
     static {
         POSTGRES.start();
     }
-
-    /** Never exercised: the dev-token path resolves users without Firebase. */
-    @MockitoBean
-    private FirebaseAuth firebaseAuth;
 
     @Value("${local.server.port}")
     private int port;

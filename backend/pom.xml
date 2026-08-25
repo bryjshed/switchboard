@@ -41,6 +41,15 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
         <dependency>
+            <!--
+              Generic OIDC verification: JWKS fetch + caching, signature, iss/aud/exp/nbf.
+              Spring Security's own JOSE module rather than a third-party JWT library, so the
+              decoder and its validators are the ones the framework already ships and tests.
+            -->
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
@@ -75,9 +84,18 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <!--
+              Optional, and needed for exactly one thing: the Firebase Auth EMULATOR issues
+              unsigned (alg: none) tokens that no JWKS verifier can accept. Production Firebase is
+              an ordinary OIDC issuer and goes through OidcIdentityProvider. A deployment that
+              authenticates against Okta, Auth0, Entra ID or Keycloak can delete this dependency;
+              FirebaseEmulatorTokenVerifier is the only class that references it, and it is loaded
+              only when a firebase provider is configured with FIREBASE_AUTH_EMULATOR_HOST set.
+            -->
             <groupId>com.google.firebase</groupId>
             <artifactId>firebase-admin</artifactId>
             <version>${firebase-admin.version}</version>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>com.anthropic</groupId>

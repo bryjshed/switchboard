@@ -14,6 +14,10 @@ spring:
     user: ${DB_USER:postgres}
     password: ${DB_PASSWORD:postgres}
     locations: classpath:db/migration
+    placeholders:
+      # V4 migrates existing users.firebase_uid values into user_identities and needs the
+      # Firebase issuer, which is a function of the project id and unknowable from SQL.
+      firebase_issuer: https://securetoken.google.com/${FIREBASE_PROJECT_ID:demo-switchboard}
 
 server:
   port: ${SERVER_PORT:28080}
@@ -27,8 +31,22 @@ management:
 switchboard:
   security:
     dev-auth-enabled: false
-  firebase:
-    project-id: ${FIREBASE_PROJECT_ID:demo-switchboard}
+  # Identity providers. More than one may be active at once - an org migrating from one IdP to
+  # another needs both to verify while the move is in flight. Routing is by the token's issuer.
+  auth:
+    providers:
+      - id: firebase-local
+        type: firebase
+        project-id: ${FIREBASE_PROJECT_ID:demo-switchboard}
+      # Any OIDC issuer works the same way. Uncomment, point it at your IdP, and tokens from it
+      # authenticate against this API with no code change:
+      # - id: corp-okta
+      #   type: oidc
+      #   issuer: https://example.okta.com/oauth2/default
+      #   audience: switchboard
+      #   email-claim: email          # 'email' everywhere except a few IdPs
+      #   name-claim: name            # Entra ID often prefers 'preferred_username'
+      #   jwk-set-uri:                # optional; omit to use OIDC discovery on the issuer
   ai:
     anthropic-api-key: ${ANTHROPIC_API_KEY:}
   jobs:

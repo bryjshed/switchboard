@@ -1,8 +1,10 @@
 package com.switchboard.interfaces.security;
 
-import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseToken;
 import com.switchboard.application.user.UserService;
+import com.switchboard.domain.identity.IdentityProviderPort;
+import com.switchboard.domain.identity.IdentityVerificationException;
+import com.switchboard.domain.identity.VerifiedIdentity;
+import com.switchboard.domain.user.User;
 import io.r2dbc.spi.Readable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -10,8 +12,6 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
@@ -20,17 +20,20 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 /**
- * Routes bearer tokens to one of three principal types:
- * dev:&lt;email&gt; (local profile only), sb_srv_* SDK keys, or Firebase ID tokens.
+ * Routes bearer tokens to one of three principal types.
+ *
+ * <p>An SDK key is not an identity - it names an environment, not a person - so it is resolved
+ * here against the {@code sdk_keys} table and never reaches the identity layer. Everything else is
+ * a user token, and which provider verifies it is the registry's problem rather than this class's:
+ * dev token, Firebase, Okta, Auth0, Entra ID and Keycloak all arrive at the same
+ * {@link VerifiedIdentity} and the same {@link AuthenticatedUser}.
  */
 @Component
 public class SwitchboardAuthenticationManager implements ReactiveAuthenticationManager {
 
     static final String SDK_KEY_PREFIX = "sb_srv_";
-    private static final String DEV_PREFIX = "dev:";
     private static final List<SimpleGrantedAuthority> USER_AUTHORITIES =
         List.of(new SimpleGrantedAuthority("ROLE_USER"));
     private static final List<SimpleGrantedAuthority> SDK_AUTHORITIES =
@@ -38,18 +41,13 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
 
     private final UserService userService;
     private final DatabaseClient db;
-    private final ObjectProvider<FirebaseAuth> firebaseAuth;
-    private final boolean devAuthEnabled;
+    private final IdentityProviderPort identities;
 
     public SwitchboardAuthenticationManager(
-        UserService userService,
-        DatabaseClient db,
-        ObjectProvider<FirebaseAuth> firebaseAuth,
-        @Value("${switchboard.security.dev-auth-enabled:false}") boolean devAuthEnabled) {
+        UserService userService, DatabaseClient db, IdentityProviderPort identities) {
         this.userService = userService;
         this.db = db;
-        this.firebaseAuth = firebaseAuth;
-        this.devAuthEnabled = devAuthEnabled;
+        this.identities = identities;
     }
 
     @Override
@@ -61,41 +59,20 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
         if (token.startsWith(SDK_KEY_PREFIX)) {
             return authenticateSdkKey(token);
         }
-        if (token.startsWith(DEV_PREFIX)) {
-            if (!devAuthEnabled) {
-                return Mono.error(new BadCredentialsException("Dev tokens are disabled"));
-            }
-            String email = token.substring(DEV_PREFIX.length());
-            if (email.isBlank()) {
-                return Mono.error(new BadCredentialsException("Empty dev token email"));
-            }
-            return userService.resolveDevUser(email).map(this::userAuth);
-        }
-        return authenticateFirebase(token);
+        return authenticateUser(token);
     }
 
-    private Mono<Authentication> authenticateFirebase(String token) {
-        FirebaseAuth auth = firebaseAuth.getIfAvailable();
-        if (auth == null) {
-            return Mono.error(new BadCredentialsException("Firebase auth is not configured"));
-        }
-        return Mono.fromCallable(() -> auth.verifyIdToken(token))
-            .subscribeOn(Schedulers.boundedElastic())
-            .onErrorMap(e -> new BadCredentialsException("Invalid Firebase token", e))
-            .flatMap(this::resolveFirebaseUser);
+    private Mono<Authentication> authenticateUser(String token) {
+        return identities.verify(token)
+            .onErrorMap(IdentityVerificationException.class,
+                e -> new BadCredentialsException(e.getMessage(), e))
+            .flatMap(identity -> userService.resolveIdentity(identity)
+                .map(user -> userAuth(user, identity)));
     }
 
-    private Mono<Authentication> resolveFirebaseUser(FirebaseToken decoded) {
-        String email = decoded.getEmail();
-        if (email == null || email.isBlank()) {
-            return Mono.error(new BadCredentialsException("Firebase token carries no email"));
-        }
-        return userService.resolveFirebaseUser(decoded.getUid(), email, decoded.getName())
-            .map(this::userAuth);
-    }
-
-    private Authentication userAuth(com.switchboard.domain.user.User user) {
-        AuthenticatedUser principal = new AuthenticatedUser(user.id(), user.email());
+    private Authentication userAuth(User user, VerifiedIdentity identity) {
+        AuthenticatedUser principal = new AuthenticatedUser(
+            user.id(), user.email(), identity.issuer(), identity.subject());
         return UsernamePasswordAuthenticationToken.authenticated(principal, null, USER_AUTHORITIES);
     }
 

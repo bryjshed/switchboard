@@ -1,7 +1,10 @@
 package com.switchboard.application.user;
 
+import com.switchboard.domain.identity.Identities;
+import com.switchboard.domain.identity.VerifiedIdentity;
 import com.switchboard.domain.org.MembershipView;
 import com.switchboard.domain.user.User;
+import com.switchboard.domain.user.UserIdentity;
 import com.switchboard.domain.user.UserRepository;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -13,8 +16,6 @@ import reactor.core.publisher.Mono;
 @Service
 public class UserService {
 
-    private static final String DEV_PREFIX = "dev:";
-
     private final UserRepository users;
     private final DatabaseClient db;
 
@@ -24,29 +25,72 @@ public class UserService {
     }
 
     /**
-     * Resolves the user for a verified Firebase token, auto-provisioning on first login.
-     * A real login adopts a dev-provisioned row for the same email by re-keying its
-     * firebase_uid, so curl testing and app logins share one identity.
+     * Resolves the user behind a verified identity, whoever verified it.
+     *
+     * <p>Three outcomes, in order:
+     *
+     * <ol>
+     *   <li><b>Known identity.</b> {@code (issuer, subject)} has been seen before - return its user.
+     *   <li><b>Link to an existing user by email.</b> This is how a person keeps their account when
+     *       their org moves from one IdP to another: the Okta token is a new identity, and it
+     *       attaches to the user the Firebase token created. Gated - see below.
+     *   <li><b>Auto-provision.</b> A new user, plus this identity linked to it.
+     * </ol>
+     *
+     * <p><b>The email-linking safety rule.</b> Matching on email is an account-takeover path if the
+     * asserting provider lets a user pick an arbitrary, unproven email: sign up at some IdP as
+     * ceo@victim.com and you would inherit the CEO's account. So linking by email happens only when
+     * one of these holds:
+     *
+     * <ul>
+     *   <li>the token asserts {@code emailVerified}; or
+     *   <li>the candidate user holds <em>only</em> {@code switchboard:dev} identities, i.e. it is a
+     *       placeholder a local dev token provisioned and nobody has ever really signed into; or
+     *   <li>the incoming identity is itself a dev token, which is a local-profile-only capability
+     *       and therefore already inside the trust boundary it would have to cross.
+     * </ul>
+     *
+     * <p>The second clause is the old "a real login adopts the dev-provisioned row" behaviour,
+     * generalised: adoption now <em>adds</em> the real identity beside the dev one rather than
+     * re-keying a column, so the same person stays one user id whichever token they arrive with.
+     *
+     * <p>When the rule refuses, the login still succeeds - as a separate, new user. Two rows may
+     * then share an email, which is why {@code users.email} is indexed but not unique.
      */
-    public Mono<User> resolveFirebaseUser(String firebaseUid, String email, String displayName) {
-        return users.findByFirebaseUid(firebaseUid)
-            .switchIfEmpty(Mono.defer(() -> users.findByEmailPreferringReal(email)
-                .flatMap(existing -> existing.firebaseUid().startsWith(DEV_PREFIX)
-                    ? users.adoptFirebaseUid(existing.id(), firebaseUid)
-                    : Mono.just(existing))
-                .switchIfEmpty(create(firebaseUid, email, displayName))));
+    public Mono<User> resolveIdentity(VerifiedIdentity identity) {
+        return users.findByIssuerAndSubject(identity.issuer(), identity.subject())
+            .switchIfEmpty(Mono.defer(() -> linkOrProvision(identity)));
     }
 
-    /** Resolves a dev-token user by email, auto-provisioning with a dev: firebase uid. */
-    public Mono<User> resolveDevUser(String email) {
-        return users.findByEmailPreferringReal(email)
-            .switchIfEmpty(create(DEV_PREFIX + email, email, null));
+    private Mono<User> linkOrProvision(VerifiedIdentity identity) {
+        return users.findByEmailPreferringReal(identity.email())
+            .filterWhen(candidate -> mayLinkByEmail(identity, candidate))
+            .switchIfEmpty(Mono.defer(() -> users.create(identity.email(), identity.displayName())))
+            .flatMap(user -> link(user, identity));
     }
 
-    private Mono<User> create(String firebaseUid, String email, String displayName) {
-        return users.create(firebaseUid, email, displayName)
+    private Mono<Boolean> mayLinkByEmail(VerifiedIdentity identity, User candidate) {
+        if (identity.emailVerified() || Identities.DEV_ISSUER.equals(identity.issuer())) {
+            return Mono.just(true);
+        }
+        return users.identitiesOf(candidate.id())
+            .all(linked -> Identities.DEV_ISSUER.equals(linked.issuer()));
+    }
+
+    /**
+     * Two first logins for the same identity can race; the unique index on
+     * {@code (issuer, subject)} settles it and the loser reads the winner's row.
+     */
+    private Mono<User> link(User user, VerifiedIdentity identity) {
+        return users.linkIdentity(user.id(), identity.issuer(), identity.subject())
+            .thenReturn(user)
             .onErrorResume(DataIntegrityViolationException.class,
-                e -> users.findByFirebaseUid(firebaseUid));
+                e -> users.findByIssuerAndSubject(identity.issuer(), identity.subject()));
+    }
+
+    /** The provider identities linked to one user, oldest first. */
+    public Flux<UserIdentity> identitiesOf(UUID userId) {
+        return users.identitiesOf(userId);
     }
 
     public Flux<MembershipView> membershipsOf(UUID userId) {
