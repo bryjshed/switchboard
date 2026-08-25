@@ -335,6 +335,9 @@ Each component carries its own README: [backend](backend/README.md),
 [dashboard](dashboard/README.md), [app](app/README.md), [SDK](sdk/typescript/README.md),
 [spec](spec/README.md).
 
+Working on this? [`CLAUDE.md`](CLAUDE.md) has the commands, conventions and environment
+traps; [`docs/REMAINING-WORK.md`](docs/REMAINING-WORK.md) is what is left to build.
+
 **Two contracts, and both are enforced rather than described.** The OpenAPI document at
 `backend/src/main/resources/openapi/switchboard-api.yaml` defines the wire: it generates the
 server interfaces, and the clients mirror it. `spec/evaluation.md` defines evaluation

@@ -1,0 +1,153 @@
+# CLAUDE.md
+
+Working notes for Claude Code sessions in this repo. Read this before touching anything —
+most of what follows was learned by getting it wrong first.
+
+## What this is
+
+Switchboard: a feature-flag platform whose distinguishing feature is an AI layer that
+**heals** bad rollouts (detects a variant erroring, rolls it back) and **optimizes** good
+ones (detects a variant converting better, ramps it up), plus natural language to a typed
+reviewable diff. A monorepo.
+
+| Path | What | Tests |
+|---|---|---|
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 280 unit + 74 integration |
+| `dashboard/` | React + Vite. **The primary UI.** | 329 |
+| `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
+| `app/` | Expo mobile companion (secondary; keep-or-drop undecided) | 95 |
+| `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
+| `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
+
+**Two contracts, both enforced rather than described.** `backend/src/main/resources/openapi/switchboard-api.yaml`
+generates the server interfaces and the clients mirror it. `spec/evaluation.md` plus
+`spec/conformance/` define evaluation *behaviour*, and both the Java server and the
+TypeScript SDK execute those vectors as tests.
+
+## Running it
+
+```bash
+make deps-up     # postgres 18 (:25432) + firebase auth emulator (:29099)
+make backend     # :28080, local profile
+make seed        # demo workspace via the public API; prints SDK keys once
+make dashboard   # :5273 -- the main UI
+make app         # expo, Metro pinned to :8092
+```
+
+Seed logins, password `password123`: `alice@switchboard.dev` (owner),
+`bob@switchboard.dev` (member), `carol@beta.dev` (a second org, proving isolation).
+
+Local dev also accepts **dev tokens**: `Authorization: Bearer dev:<email>` authenticates as
+that user, auto-provisioning. Every check script uses them.
+
+## Gotchas that have already cost time
+
+**Java 25 is required and the shell default is Java 8.** Prefix every Maven call:
+`JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw ...`. Without it the build fails in
+confusing ways.
+
+**`FIREBASE_AUTH_EMULATOR_HOST=localhost:29099` is mandatory when running the backend on the
+host.** Without it the Admin SDK verifies emulator tokens against real Google and rejects
+every real login with a 401 — *while dev tokens keep working*, which is exactly what makes
+the omission invisible. `make backend` sets it. Reproduced deliberately; documented in
+`backend/README.md`.
+
+**Never run a broad `pkill -f spring-boot:run`.** It has twice killed a backend another
+process was depending on. Find the specific PID.
+
+**macOS has no `timeout` command.** Do not use it in scripts.
+
+**A competing Metro on :8081 hijacks the mobile app.** If another Expo project (e.g.
+`nexus-app`) is serving on the default port, this app's dev client attaches to *that*
+bundler and loads someone else's JavaScript into Switchboard's native shell, red-screening
+on native modules we do not ship. The stack trace names files that exist in both projects,
+so it reads like a bug here and is not. Metro is pinned to 8092 for this reason. See
+`.maestro/README.md`.
+
+**Metro logs never show JS runtime errors.** They report bundling only. A red-screened app
+looks perfectly healthy in Metro's output — check the actual screen or a Maestro
+screen-hierarchy dump.
+
+**`app/.expo/types` is gitignored**, so `npm run check` in `app/` can pass on a clean clone
+and fail after Metro has run once (typed routes narrow `Href`). CI on a fresh checkout will
+not catch that class of bug.
+
+## Conventions
+
+**Backend.** `domain/` is pure Java — no Spring, no vendor names, no JWT libraries; a
+violation there is a design defect, not a style one. `application/` composes ports and uses
+`TransactionalOperator`. `infrastructure/` holds `DatabaseClient` adapters. `interfaces/rest`
+controllers are thin and implement generated interfaces with static mappers.
+
+The versioned write path (`FlagTargetingService`) is load-bearing: `SELECT ... FOR UPDATE`
+→ validate `expectedVersion` (409 if stale) → head write at version+1 → immutable snapshot →
+audit row → `state_version` bump → `pg_notify` after commit. **Every** flag mutation goes
+through it, including AI-applied and approval-applied ones. Rollback writes a *new* version;
+history is never rewritten.
+
+**Dashboard.** No React Query — pages use `useState` + `useEffect` + async `load()` with
+loading/error/refreshing flags and toasts for writes. Semantic tokens only, no raw hex, use
+the `warning` token rather than amber. Filter and tab state lives in query params. One API
+module per endpoint group over `src/lib/apiClient.ts`.
+
+**App.** Semantic tokens only; `npm run lint:tokens` fails on raw hex outside
+`shared/theme`.
+
+**Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
+bucketing must land as a `spec/evaluation.md` edit **plus regenerated conformance vectors in
+the same commit**. That rule is the only thing keeping the server and every SDK in
+agreement.
+
+**Flyway.** Migrations are `V1`–`V4` today; the next is **V5**. They run automatically
+locally.
+
+## Verifying
+
+```bash
+cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
+cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
+cd dashboard  && npm run check && npm run build
+cd sdk/typescript && npx vitest run
+cd app        && npm run check
+```
+
+Six live scripts run against a **running** stack and are the real regression net — they
+catch contract drift that unit tests cannot:
+
+```bash
+node scripts/smoke-test.mjs                    # 34  · repo root
+node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
+node dashboard/scripts/service-check.mjs       # 67
+node dashboard/scripts/ai-check.mjs            # 53
+node dashboard/scripts/governance-check.mjs    # 38
+node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
+```
+
+Run all of them after any backend change. If one fails in a tree you do not own, say so
+rather than "fixing" it.
+
+## Working with multiple agents
+
+**One writer per tree.** `backend/`, `dashboard/`, `app/`, `sdk/` and `spec/` are separate
+trees; two agents writing the same one will collide. Reading any tree is always fine.
+
+Agents have stalled mid-task more than once. When resuming, **inventory what actually exists
+before rewriting** — a compile and a test run usually reveal that most of the work landed
+and only the verification step is missing.
+
+**Verify agent reports rather than trusting them.** A stalled agent's unverified work is not
+working code. Re-running claimed results has repeatedly found real problems: a test querying
+a column that does not exist, a mobile red screen invisible in Metro's logs, a check script
+defaulting to a user that was never seeded.
+
+## Where things stand
+
+`docs/REMAINING-WORK.md` is the backlog: what is missing, why it matters, effort estimates,
+and a suggested order. `docs/competitive-gaps.md` is the market research it derives from.
+
+Three things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
+flag creation has never actually executed — everything else in the AI layer works without
+one), the mobile app's keep-or-drop decision, and a visual pass in light and dark.
+
+The local dev database accumulates throwaway data from verification runs. `docker compose
+down -v` then `make deps-up`, restart the backend, and re-seed for a clean demo state.

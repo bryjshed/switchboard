@@ -7,12 +7,23 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today:** backend (254 unit + 66 integration tests), web dashboard
-(246), TypeScript SDK (249), mobile companion (95), an evaluation spec with 201 conformance
-vectors executed by both the server and the SDK, and five live-check scripts against a
-running stack. Flags, targeting, rollouts, versioning, audit, rollback, SSE delivery, the AI
-layer (natural language, healing, optimizing, stale sweep), OFREP, scoped RBAC, and approval
-workflows all work end to end.
+**Status of the product today.** Backend (280 unit + 74 integration), web dashboard (329),
+TypeScript SDK (249), mobile companion (95), an evaluation spec with 201 conformance vectors
+executed by both the server and the SDK, and six live-check scripts against a running stack.
+
+Working end to end: flags, targeting, percentage rollouts, versioning, audit, rollback, SSE
+delivery, the AI layer (natural language, healing, optimizing, stale sweep), OFREP,
+scoped RBAC, approval workflows, and provider-agnostic authentication on both the backend
+and the dashboard.
+
+**Recently landed, so it is no longer a gap:** authentication is no longer tied to Firebase.
+Identity is `(issuer, subject)` in `user_identities`, providers are configuration, and both
+the backend and the dashboard work with any OIDC provider — proven against a real
+non-Firebase issuer, not just unit-tested. See `backend/README.md` and `dashboard/README.md`.
+
+**For anyone picking this up:** read `CLAUDE.md` first — it carries the environment traps
+(Java 25, the Firebase emulator host variable, the Metro port hijack) that have each cost
+real time. This document is what is left to build.
 
 ---
 
@@ -63,6 +74,10 @@ client-side availability, and an evaluated-payload (rather than rule-set) bootst
 client contexts.
 
 ### Smaller
+- **The mobile app still hardcodes Firebase.** The backend and dashboard are now
+  provider-agnostic; the Expo app still authenticates through a Firebase emulator REST
+  bridge. Contained work, mirroring what `dashboard/src/auth/` already does — but pointless
+  if the app is dropped, so it waits on that decision. **S–M**
 - **Flag list pagination is not wired in the dashboard** (`listFlags` returns `nextCursor`;
   the page requests 50 and stops). Invisible at nine seeded flags, breaks at real volume. **S**
 - **429 is not implemented** — no rate limiter exists anywhere. OFREP documents a
