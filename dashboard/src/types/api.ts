@@ -79,13 +79,26 @@ export type SegmentRule = Schemas['SegmentRule']
 
 // Clause operator options, in the order they should appear in a select. Derived from the
 // generated union so a spec change that adds an operator is a compile error here.
+// The operators the editor offers, in the order it offers them: most-used first, grouped by the
+// kind of comparison. NOT_SEGMENT_MATCH is deliberately absent — it is deprecated in favour of
+// SEGMENT_MATCH with "not", and offering both would let someone author the deprecated form.
 export const CLAUSE_OPS = [
   'EQUALS',
   'IN',
   'CONTAINS',
   'STARTS_WITH',
+  'ENDS_WITH',
+  'MATCHES',
+  'GREATER_THAN',
+  'GREATER_THAN_OR_EQUAL',
+  'LESS_THAN',
+  'LESS_THAN_OR_EQUAL',
+  'BEFORE',
+  'AFTER',
+  'SEMVER_EQUAL',
+  'SEMVER_GREATER_THAN',
+  'SEMVER_LESS_THAN',
   'SEGMENT_MATCH',
-  'NOT_SEGMENT_MATCH',
 ] as const satisfies readonly ClauseOp[]
 
 export const CLAUSE_OP_LABELS: Record<ClauseOp, string> = {
@@ -93,8 +106,33 @@ export const CLAUSE_OP_LABELS: Record<ClauseOp, string> = {
   IN: 'is one of',
   CONTAINS: 'contains',
   STARTS_WITH: 'starts with',
+  ENDS_WITH: 'ends with',
+  MATCHES: 'matches regex',
+  GREATER_THAN: 'is greater than',
+  GREATER_THAN_OR_EQUAL: 'is at least',
+  LESS_THAN: 'is less than',
+  LESS_THAN_OR_EQUAL: 'is at most',
+  BEFORE: 'is before',
+  AFTER: 'is after',
+  SEMVER_EQUAL: 'version equals',
+  SEMVER_GREATER_THAN: 'version is greater than',
+  SEMVER_LESS_THAN: 'version is less than',
   SEGMENT_MATCH: 'is in segment',
-  NOT_SEGMENT_MATCH: 'is not in segment',
+  NOT_SEGMENT_MATCH: 'is not in segment (deprecated)',
+}
+
+/** A hint under the value input, so the expected format is visible while typing it. */
+export const CLAUSE_OP_HINTS: Partial<Record<ClauseOp, string>> = {
+  MATCHES: 'Unanchored. No lookahead or backreferences — use ^…$ to match the whole value.',
+  GREATER_THAN: 'Numbers. A text attribute that parses as a number works too.',
+  GREATER_THAN_OR_EQUAL: 'Numbers. A text attribute that parses as a number works too.',
+  LESS_THAN: 'Numbers. A text attribute that parses as a number works too.',
+  LESS_THAN_OR_EQUAL: 'Numbers. A text attribute that parses as a number works too.',
+  BEFORE: 'ISO-8601, e.g. 2026-08-25T12:00:00Z. Epoch milliseconds also work.',
+  AFTER: 'ISO-8601, e.g. 2026-08-25T12:00:00Z. Epoch milliseconds also work.',
+  SEMVER_EQUAL: 'Semver, e.g. 4.2.0. A leading v and missing segments are fine.',
+  SEMVER_GREATER_THAN: 'Semver, e.g. 4.2.0. Pre-releases rank below the release.',
+  SEMVER_LESS_THAN: 'Semver, e.g. 4.2.0. Pre-releases rank below the release.',
 }
 
 // True when the operator's `values` carry segment keys rather than raw attribute values —

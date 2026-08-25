@@ -7,8 +7,9 @@ results to the server, including which contexts land in which half of a percenta
 ```
 spec/
   evaluation.md            the normative prose spec
-  conformance/*.json       machine-readable test vectors (201 of them)
-  tools/verify-bucket.mjs  a four-line reference bucket() in JS, checked against the vectors
+  conformance/*.json           machine-readable test vectors (508 of them)
+  tools/verify-bucket.mjs      a four-line reference bucket() in JS, checked against the vectors
+  tools/generate-vectors.mjs   writes operators.json; --check fails when it is stale
 ```
 
 The Java class `backend/src/main/java/com/switchboard/domain/evaluation/FlagEvaluator.java` is the
@@ -56,8 +57,9 @@ node spec/tools/verify-bucket.mjs --print
 | `ramp-at-10.json` | `evaluation` | 40 | one flag key at a 10% ramp over 40 contexts |
 | `ramp-at-25.json` | `evaluation` | 40 | the SAME flag key and contexts at 25%; every context served at 10% must still be served at 25% |
 | `rollout-weights.json` | `rollout-validation` | 11 | which weight lists are accepted and which are rejected |
+| `operators.json` | `evaluation` | 306 | **generated.** Every operator against every attribute type - string, numeric string, semver string, date string, integer, fraction, boolean, array, absent - with and without negation |
 
-201 vectors total, plus one cross-file assertion (ramp monotonicity, which spans the two `ramp-at-*`
+508 vectors total, plus one cross-file assertion (ramp monotonicity, which spans the two `ramp-at-*`
 files by design because bucketing salts on the flag key and both files must therefore share it).
 
 ## Vector file schema
@@ -128,11 +130,18 @@ monotonicity assertion.
 **Any change to evaluation behaviour lands as a spec change plus regenerated vectors in the SAME
 commit as the code change.**
 
-> **"Regenerated" is aspirational today.** There is no generator: `spec/tools/` holds only
-> `verify-bucket.mjs`, which *checks* `bucket.json` against an independent 4-line reimplementation of
-> `bucket()`. Every vector file is hand-authored, and `sdk/typescript/test/conformance.test.ts`
-> hardcodes the total (`expect(executed).toBe(201)`), so adding a vector means editing that literal
-> by hand as well as the JSON. Read step 3 below as "write" until a generator exists.
+> **Some vectors are generated, some are hand-authored, and that split is deliberate.**
+> `spec/tools/generate-vectors.mjs` writes `operators.json` — the combinatorial part, every operator
+> against every attribute type with and without negation, where writing the cases by hand is tedious
+> and *reviewing* them by hand is worse. Everything else stays hand-authored, because each of those
+> cases exists to pin one specific argument and its name is the point.
+>
+> The generator computes expected values with its **own** implementation of section 3 rather than
+> importing the SDK: a generator that asked the implementation what it does would produce vectors
+> agreeing with any bug it has. That is not theoretical — it caught the server and a JS SDK
+> disagreeing about whether `"4.2.0"` is a date.
+>
+> `node spec/tools/generate-vectors.mjs --check` fails if the generated files are stale.
 
 Not a follow-up PR, not a TODO. The moment `FlagEvaluator` and `spec/` disagree, every SDK author is
 working from a document that lies, and the vectors stop being evidence of anything. Concretely:
@@ -140,6 +149,7 @@ working from a document that lies, and the vectors stop being evidence of anythi
 1. Change `FlagEvaluator`.
 2. Update the affected section of `evaluation.md`.
 3. Update or add the vectors in `conformance/` that pin the new behaviour, including negative cases.
+   Run `node spec/tools/generate-vectors.mjs` if the change touches operators.
 4. `./mvnw test -Dtest=ConformanceVectorTest` must pass without any assertion being loosened.
 5. Keep `FlagEvaluatorTest` too. The vectors prove conformance; the hand-written tests document
    intent in a form a reviewer can read.

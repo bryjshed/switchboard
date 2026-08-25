@@ -12,11 +12,11 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 108 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 108 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
-| `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
+| `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
-| `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
+| `spec/` | Normative evaluation spec + 508 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
 **Two contracts, both enforced rather than described.** `backend/src/main/resources/openapi/switchboard-api.yaml`
@@ -95,9 +95,8 @@ and keys are Strings so they survive the `NOTIFY` invalidation channel intact. R
 **Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
 bucketing must land as a `spec/evaluation.md` edit **plus updated conformance vectors in the
 same commit**. That rule is the only thing keeping the server and every SDK in agreement.
-Note there is no vector *generator* — `spec/tools/` holds a checker only, vectors are
-hand-authored, and `sdk/typescript/test/conformance.test.ts` hardcodes the 201 total, so
-adding a vector means editing that literal too.
+`spec/tools/generate-vectors.mjs` writes the combinatorial vectors (`operators.json`); the rest
+are hand-authored. `--check` fails when they are stale. The runners no longer hardcode a count.
 
 **Flyway.** Migrations are `V1`–`V7` today; the next is **V8**. They run automatically
 locally.
@@ -112,7 +111,7 @@ cd sdk/typescript && npx vitest run
 cd mcp        && npm run check
 ```
 
-Six live scripts run against a **running** stack and are the real regression net — they
+Seven live scripts run against a **running** stack and are the real regression net — they
 catch contract drift that unit tests cannot:
 
 ```bash

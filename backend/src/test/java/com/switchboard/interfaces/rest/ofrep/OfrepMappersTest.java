@@ -3,6 +3,7 @@ package com.switchboard.interfaces.rest.ofrep;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.switchboard.domain.evaluation.AttributeValue;
 import com.switchboard.domain.evaluation.EvalContext;
 import com.switchboard.domain.evaluation.EvalOutcome;
 import com.switchboard.domain.evaluation.EvalReason;
@@ -116,7 +117,7 @@ class OfrepMappersTest {
     }
 
     @Test
-    void scalarsCoerceToStringsAndContainersAreSkipped() {
+    void attributesKeepTheirTypesAndArraysSurvive() {
         Map<String, Object> raw = new LinkedHashMap<>();
         raw.put("targetingKey", "user-1");
         raw.put("plan", "pro");
@@ -124,16 +125,26 @@ class OfrepMappersTest {
         raw.put("seats", 42);
         raw.put("ratio", 4.5);
         raw.put("account", Map.of("tier", "gold"));
-        raw.put("roles", List.of("admin"));
+        raw.put("roles", List.of("admin", "billing"));
         raw.put("absent", null);
 
         EvalContext context = OfrepMappers.toEvalContext(new OfrepEvaluationRequest(raw), "flag");
 
-        assertThat(context.attributes()).containsOnly(
-            Map.entry("plan", "pro"),
-            Map.entry("beta", "true"),
-            Map.entry("seats", "42"),
-            Map.entry("ratio", "4.5"));
+        // This used to stringify every scalar and DROP arrays outright, which meant an OFREP caller
+        // could not use the numeric or version operators at all and could not target on a list.
+        // Types are preserved now, so an OFREP provider gets the same expressiveness a native
+        // caller does.
+        assertThat(context.attribute("plan")).isEqualTo(AttributeValue.of("pro"));
+        assertThat(context.attribute("beta")).isEqualTo(AttributeValue.of(true));
+        assertThat(context.attribute("seats")).isEqualTo(AttributeValue.of(42d));
+        assertThat(context.attribute("ratio")).isEqualTo(AttributeValue.of(4.5d));
+        assertThat(context.attribute("roles"))
+            .isEqualTo(new AttributeValue.Arr(List.of(
+                AttributeValue.of("admin"), AttributeValue.of("billing"))));
+
+        // Still dropped, and for the reason spec 3.1 gives: no operator can act on an object, and
+        // null means absent rather than a value that could match something.
+        assertThat(context.attributes()).doesNotContainKeys("account", "absent");
     }
 
     @Test

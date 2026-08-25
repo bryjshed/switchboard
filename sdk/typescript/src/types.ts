@@ -11,12 +11,38 @@ export type FlagKind = 'BOOLEAN' | 'STRING';
 
 /** The six clause operators (spec/evaluation.md 3.2). */
 export type ClauseOp =
+  // Text
   | 'EQUALS'
   | 'IN'
   | 'CONTAINS'
   | 'STARTS_WITH'
+  | 'ENDS_WITH'
+  | 'MATCHES'
+  // Numeric
+  | 'GREATER_THAN'
+  | 'GREATER_THAN_OR_EQUAL'
+  | 'LESS_THAN'
+  | 'LESS_THAN_OR_EQUAL'
+  // Time
+  | 'BEFORE'
+  | 'AFTER'
+  // Versions
+  | 'SEMVER_EQUAL'
+  | 'SEMVER_GREATER_THAN'
+  | 'SEMVER_LESS_THAN'
+  // Segments. NOT_SEGMENT_MATCH is deprecated in favour of SEGMENT_MATCH + negate, and is
+  // normalised to exactly that on read so old configs keep evaluating identically.
   | 'SEGMENT_MATCH'
   | 'NOT_SEGMENT_MATCH';
+
+/**
+ * An attribute value.
+ *
+ * Typed, because that is what callers have: an app version is a string, a cart total is a number.
+ * Clause values stay strings — the OPERATOR decides how both sides are read. See
+ * spec/evaluation.md 3.1.
+ */
+export type AttributeValue = string | number | boolean | Array<string | number | boolean>;
 
 /** Why a value was served (spec/evaluation.md 1.3). */
 export type EvalReason =
@@ -40,6 +66,12 @@ export interface Clause {
   op: ClauseOp;
   /** Values to test against, or segment keys for the segment operators. Empty never matches. */
   values: string[];
+  /**
+   * Inverts the clause, INCLUDING the missing-attribute case: a negated clause on a missing
+   * attribute is TRUE. "plan is not free" holds for somebody with no plan at all. Matches
+   * LaunchDarkly; pinned by conformance vectors because it surprises people.
+   */
+  negate?: boolean;
 }
 
 export interface WeightedVariation {
@@ -106,7 +138,11 @@ export interface Segment {
 export interface EvalContext {
   /** Stable identifier; the bucketing input. Must be non-empty and not whitespace-only. */
   key: string;
-  attributes?: Record<string, string>;
+  /**
+   * Typed attributes. null and nested objects are treated as absent; nested arrays are flattened.
+   * Every operator matches existentially over an array.
+   */
+  attributes?: Record<string, AttributeValue | null | undefined>;
 }
 
 /** The result of evaluating one flag for one context (spec/evaluation.md 1.3). */

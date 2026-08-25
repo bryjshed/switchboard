@@ -7,9 +7,9 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (336 unit + 108 integration), MCP server (7), web dashboard (329),
-TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
-the SDK, and six live-check scripts against a running stack.
+**Status of the product today.** Backend (642 unit + 108 integration), TypeScript SDK (562), MCP server (7), web dashboard (329),
+an evaluation spec with 508 conformance vectors executed by both the server and
+the SDK, and seven live-check scripts against a running stack.
 
 **The Expo mobile companion was deleted on 2026-08-24** — see
 [DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost, and
@@ -289,15 +289,27 @@ deployment shape justifies it.
 
 ## 4. Now — what a serious buyer expects and we lack
 
-### Richer targeting · effort **M** · highest visible deficit in a demo
-Six operators (`EQUALS`, `IN`, `CONTAINS`, `STARTS_WITH`, `SEGMENT_MATCH`,
-`NOT_SEGMENT_MATCH`), **no negation**, and **string-only attributes**. "Release to app
-version ≥ 4.2.0 on iOS" is currently inexpressible. Every serious competitor has numeric,
-date, semver and set operators; most have regex; ConfigCat has 30+ comparators.
+### ~~Richer targeting~~ · **Landed 2026-08-25**
+"Release to app version ≥ 4.2.0 on iOS" is one rule now, verified live. Typed attributes
+(string / number / boolean / array), sixteen operators across text, numeric, time and semver, and
+per-clause `negate`.
 
-Needs typed attributes (not `Map<String,String>`), the full operator set, and per-clause
-negation. **Any change here must land as a spec change plus regenerated conformance vectors
-in the same commit** — that rule is what keeps the server and every SDK in agreement.
+**Clause values stayed strings and the operator decides how to read both sides.** That keeps the
+wire stable and a rule legible in a form, a diff and a JSON blob — one rule to learn instead of a
+type system to negotiate.
+
+Landed spec-first, in one commit: `spec/evaluation.md` sections 1.1, 3.1, 3.2 and a new 3.3, plus
+**306 generated vectors** executed by both the Java server and the TypeScript SDK. The vector
+generator that `spec/README.md` and `CLAUDE.md` had been promising since the spec was written now
+exists, and the runners no longer hardcode a count.
+
+Two things worth knowing before relying on them, both pinned by vectors: a **negated clause on a
+missing attribute is TRUE** (LaunchDarkly's semantics, and what the English means), and `MATCHES` is
+a **restricted regex** — unanchored, no lookaround, no backreferences, 512-character cap — both to
+stop a pathological pattern stalling evaluation and so Java and JavaScript cannot disagree.
+
+`NOT_SEGMENT_MATCH` is deprecated but still accepted, normalised at read time to `SEGMENT_MATCH` +
+negate, so configs written before negation existed evaluate identically without being rewritten.
 
 ### ~~MCP server~~ · **Landed 2026-08-25**
 A new `mcp/` workspace: twelve tools over the existing REST API, no backend surface of its own,
@@ -447,7 +459,7 @@ Consciously not building, so nobody re-litigates them by accident:
 3. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
    for authorization; this is the cheapest large win in the system.
 4. ~~**Personal access tokens → MCP server.**~~ **Done.**
-5. **Targeting operators and typed attributes.** The most visible gap in a live demo.
+5. ~~**Targeting operators and typed attributes.**~~ **Done.**
 6. **CI and a deployment story.** The bridge from laptop to product — and the point at
    which the shared-cache-tier question needs an answer.
 7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.

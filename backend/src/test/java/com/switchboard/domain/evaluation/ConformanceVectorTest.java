@@ -279,8 +279,11 @@ class ConformanceVectorTest {
     private static List<Clause> toClauses(JsonNode node) {
         List<Clause> clauses = new ArrayList<>();
         for (JsonNode clause : node) {
-            clauses.add(new Clause(clause.path("attribute").asText(),
-                ClauseOp.valueOf(clause.path("op").asText()), toStrings(clause.path("values"))));
+            clauses.add(new Clause(
+                clause.path("attribute").asText(),
+                ClauseOp.valueOf(clause.path("op").asText()),
+                toStrings(clause.path("values")),
+                clause.path("negate").asBoolean(false)));
         }
         return clauses;
     }
@@ -292,10 +295,45 @@ class ConformanceVectorTest {
     }
 
     private static EvalContext toContext(JsonNode node) {
-        Map<String, String> attributes = new HashMap<>();
-        node.path("attributes").properties()
-            .forEach(entry -> attributes.put(entry.getKey(), entry.getValue().asText()));
+        Map<String, AttributeValue> attributes = new HashMap<>();
+        node.path("attributes").properties().forEach(entry -> {
+            AttributeValue value = toAttributeValue(entry.getValue());
+            if (value != null) {
+                attributes.put(entry.getKey(), value);
+            }
+        });
         return new EvalContext(node.path("key").asText(), attributes);
+    }
+
+    /**
+     * Vector JSON to a typed attribute, following spec 3.1: null and objects are absent, arrays
+     * are flattened. Deliberately mirrors AttributeMappers rather than calling it - the vectors
+     * define the contract, and a runner that shared the production converter could not catch that
+     * converter being wrong.
+     */
+    private static AttributeValue toAttributeValue(JsonNode node) {
+        if (node == null || node.isNull() || node.isObject()) {
+            return null;
+        }
+        if (node.isArray()) {
+            List<AttributeValue> values = new ArrayList<>();
+            node.forEach(item -> {
+                AttributeValue converted = toAttributeValue(item);
+                if (converted instanceof AttributeValue.Arr nested) {
+                    values.addAll(nested.values());
+                } else if (converted != null) {
+                    values.add(converted);
+                }
+            });
+            return values.isEmpty() ? null : new AttributeValue.Arr(values);
+        }
+        if (node.isBoolean()) {
+            return AttributeValue.of(node.asBoolean());
+        }
+        if (node.isNumber()) {
+            return AttributeValue.of(node.asDouble());
+        }
+        return AttributeValue.of(node.asText());
     }
 
     private static String md5Hex(String input) {

@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/select'
 import { ServeEditor } from './ServeEditor'
 import { newRule } from './newRule'
-import { CLAUSE_OPS, CLAUSE_OP_LABELS, isSegmentOp } from '@/types/api'
+import { CLAUSE_OPS, CLAUSE_OP_HINTS, CLAUSE_OP_LABELS, isSegmentOp } from '@/types/api'
 import type { Clause, ClauseOp, Rule, Segment, Variation } from '@/types/api'
 
 function newClause(): Clause {
@@ -259,6 +259,26 @@ export function RulesEditor({
                     {clauseIndex === 0 && (
                       <Label className="text-xs text-muted-foreground">Operator</Label>
                     )}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={clause.negate ? 'secondary' : 'ghost'}
+                        className="h-8 shrink-0 px-2 text-xs"
+                        disabled={disabled}
+                        aria-pressed={Boolean(clause.negate)}
+                        aria-label={`Rule ${ruleIndex + 1} clause ${clauseIndex + 1} negate`}
+                        data-testid={`rule-${ruleIndex}-clause-${clauseIndex}-negate`}
+                        title={
+                          'Invert this condition. Note a negated condition is TRUE when the ' +
+                          'attribute is missing entirely.'
+                        }
+                        onClick={() =>
+                          patchClause(ruleIndex, clauseIndex, { negate: !clause.negate })
+                        }
+                      >
+                        not
+                      </Button>
                     <Select
                       value={clause.op}
                       disabled={disabled}
@@ -289,6 +309,7 @@ export function RulesEditor({
                         ))}
                       </SelectContent>
                     </Select>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     {clauseIndex === 0 && (
@@ -301,6 +322,14 @@ export function RulesEditor({
                       idPrefix={`rule-${ruleIndex}-clause-${clauseIndex}`}
                       onChange={(values) => patchClause(ruleIndex, clauseIndex, { values })}
                     />
+                    {CLAUSE_OP_HINTS[clause.op] && (
+                      <p
+                        className="text-xs text-muted-foreground"
+                        data-testid={`rule-${ruleIndex}-clause-${clauseIndex}-hint`}
+                      >
+                        {CLAUSE_OP_HINTS[clause.op]}
+                      </p>
+                    )}
                   </div>
                   <div className={clauseIndex === 0 ? 'pt-6' : ''}>
                     <Button

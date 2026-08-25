@@ -76,7 +76,12 @@ public final class FlagMappers {
     }
 
     private static Clause toDomainClause(com.switchboard.interfaces.rest.model.Clause rest) {
-        return new Clause(rest.getAttribute(), ClauseOp.valueOf(rest.getOp().name()), rest.getValues());
+        return new Clause(
+            rest.getAttribute(),
+            ClauseOp.valueOf(rest.getOp().name()),
+            rest.getValues(),
+            // Absent means false: every clause written before per-clause negation existed.
+            Boolean.TRUE.equals(rest.getNegate()));
     }
 
     private static RolloutOrVariation toDomainServe(com.switchboard.interfaces.rest.model.RolloutOrVariation rest) {
@@ -128,7 +133,8 @@ public final class FlagMappers {
         return new com.switchboard.interfaces.rest.model.Clause(
             clause.attribute(),
             com.switchboard.interfaces.rest.model.ClauseOp.valueOf(clause.op().name()),
-            clause.values());
+            clause.values())
+            .negate(clause.negate());
     }
 
     private static com.switchboard.interfaces.rest.model.RolloutOrVariation toRestServe(RolloutOrVariation serve) {

@@ -18,17 +18,23 @@ Keywords MUST, MUST NOT, SHOULD and MAY are used in the RFC 2119 sense.
 ```
 Context {
   key:        string   // required, non-empty, non-blank
-  attributes: map<string, string>   // may be empty
+  attributes: map<string, AttributeValue>   // may be empty
 }
+
+AttributeValue = string | number | boolean | array<string | number | boolean>
 ```
 
 The `key` is the stable identifier the rollout buckets on: a user id, an account id, a device id, a
 request id. It MUST NOT be empty or whitespace-only; an SDK MUST reject such a context rather than
 substitute a value.
 
-Attribute values are strings. All comparisons in this spec are byte-for-byte on the UTF-8 string,
-and are case-sensitive. There is no type coercion, no numeric comparison and no locale-aware
-folding.
+Attribute values are typed, because that is what callers actually have: an app version is a string,
+a cart total is a number, a trial flag is a boolean. **Clause values, by contrast, are always
+strings** - the operator decides how to read both sides. Section 3.1 has the coercion table and 3.2
+the operators.
+
+Text comparisons remain case-sensitive and operate on UTF-8 code points. There is no locale-aware
+folding anywhere in this spec.
 
 ### 1.2 Flag
 
@@ -123,43 +129,160 @@ clause with an empty `values` list therefore NEVER matches.
 
 ### 3.1 Reading the attribute
 
-For every operator except `SEGMENT_MATCH` and `NOT_SEGMENT_MATCH`, the clause reads one string:
+For every operator except `SEGMENT_MATCH`, the clause reads one attribute value:
 
-- if `attribute` is exactly `"key"` (the reserved attribute), read `context.key`;
+- if `attribute` is exactly `"key"` (the reserved attribute), read `context.key` as a string;
 - otherwise read `context.attributes[attribute]`.
 
 `"key"` is reserved: an entry literally named `key` inside the attributes map is ignored and
 unreachable.
 
-**A missing attribute FAILS the clause.** If the attribute is absent from the map, the clause is
-false. It is not an error, it does not skip the clause, and it does not skip the rule. Because a rule
-is a conjunction, one missing attribute makes the whole rule fail and evaluation moves to the next
-rule.
+**A missing attribute FAILS the clause** (before negation). If the attribute is absent, the clause
+is false. It is not an error, it does not skip the clause, and it does not skip the rule. Because a
+rule is a conjunction, one missing attribute makes the whole rule fail and evaluation moves to the
+next rule.
+
+An attribute explicitly set to `null` is **absent**. So is one whose value is a JSON object: no
+operator can act on one, and inventing a coercion would invent matches.
+
+#### Attribute types
+
+An attribute value is a string, a number, a boolean, or an array of those. Nested arrays are
+flattened; a nested object is dropped.
+
+**Clause values are always strings**, at every operator. The *operator* decides how both sides are
+read - one rule to learn, and a wire format that stays legible in a form, a diff and a JSON blob.
+
+| Attribute is | As text | As number | As instant | As version |
+|---|---|---|---|---|
+| string `"4.2.0"` | `4.2.0` | - | - | `4.2.0` |
+| string `"12"` | `12` | `12` | epoch millis `12` | `12.0.0` |
+| number `12` | `12` | `12` | epoch millis `12` | `12.0.0` |
+| number `12.5` | `12.5` | `12.5` | epoch millis `12` | - |
+| boolean `true` | `true` | - | - | - |
+| array | - | - | - | - |
+
+An integral number renders as text **without** a trailing `.0`: the number `4` is the text `"4"`, so
+`version EQUALS 4` matches it and `"4.0"` does not.
+
+A string that parses as a number IS accepted by the numeric operators. An attribute arriving from a
+query string or a header is text even when it means a number, and refusing it would make those
+operators useless exactly where they are most wanted.
+
+#### Arrays match existentially
+
+Every operator is existential twice over: the clause matches when **any** element of an array-valued
+attribute relates to **any** listed value. So with `roles = ["admin", "billing"]`,
+`roles EQUALS ["owner", "admin"]` matches.
+
+An array has no single text, so it never satisfies a text operator directly - only its elements do.
 
 ### 3.2 Operators
 
+**Text.** Case-sensitive, over UTF-8 code points rather than bytes.
+
 | Operator | Matches when |
 |----------|--------------|
-| `EQUALS` | the attribute is byte-for-byte equal to any listed value |
+| `EQUALS` | the attribute's text equals any listed value |
 | `IN` | identical to `EQUALS`; the name exists for readability when the list has several values |
-| `CONTAINS` | the attribute contains any listed value as a substring |
-| `STARTS_WITH` | the attribute begins with any listed value |
+| `CONTAINS` | the attribute's text contains any listed value as a substring |
+| `STARTS_WITH` | the attribute's text begins with any listed value |
+| `ENDS_WITH` | the attribute's text ends with any listed value |
+| `MATCHES` | the attribute's text matches any listed value as a regular expression |
+
+**Numeric.** Both sides read as numbers; either side failing to parse makes the clause false.
+
+| Operator | Matches when |
+|----------|--------------|
+| `GREATER_THAN` | attribute > any listed value |
+| `GREATER_THAN_OR_EQUAL` | attribute >= any listed value |
+| `LESS_THAN` | attribute < any listed value |
+| `LESS_THAN_OR_EQUAL` | attribute <= any listed value |
+
+**Time.** Both sides read as instants: ISO-8601 date-time text or a number read as epoch
+milliseconds.
+
+The accepted text form is **strictly** `YYYY-MM-DDTHH:MM:SS[.sss](Z|±HH:MM)`. An implementation MUST
+NOT hand arbitrary text to a permissive platform date parser. JavaScript's `Date.parse` is
+implementation-defined outside ISO-8601 and V8 reads `"4.2.0"` as 2 April 2000, where a strict
+parser rejects it — so the same rule would match in a browser and not on the server. This was found
+by the conformance vectors during the operator work, which is what they are for.
+
+| Operator | Matches when |
+|----------|--------------|
+| `BEFORE` | the attribute is strictly before any listed instant |
+| `AFTER` | the attribute is strictly after any listed instant |
+
+**Versions.** Both sides parsed as semver 2.0.0.
+
+| Operator | Matches when |
+|----------|--------------|
+| `SEMVER_EQUAL` | the attribute equals any listed version in precedence |
+| `SEMVER_GREATER_THAN` | the attribute is greater than any listed version |
+| `SEMVER_LESS_THAN` | the attribute is less than any listed version |
+
+**Segments.**
+
+| Operator | Matches when |
+|----------|--------------|
 | `SEGMENT_MATCH` | the context matches any segment named in `values` (section 4) |
-| `NOT_SEGMENT_MATCH` | the context matches NONE of the segments named in `values` |
+| `NOT_SEGMENT_MATCH` | **Deprecated.** Exactly `SEGMENT_MATCH` with `negate` flipped |
 
-`EQUALS` and `IN` are exact and case-sensitive: `"PRO"` does not match `"pro"`, and `"pro-plus"` does
-not match `"pro"`.
+For the segment operators the `attribute` field is IGNORED. The wire format still requires it to be
+non-empty; the dashboard writes `"key"`. An implementation MUST NOT read the attribute for these.
 
-`CONTAINS` and `STARTS_WITH` operate on UTF-8 code points, not bytes; splitting a multi-byte
-character is not possible because both operands are strings, not byte arrays.
+`NOT_SEGMENT_MATCH` remains accepted so configurations written before per-clause negation existed
+keep evaluating identically. An implementation MUST normalise it to `SEGMENT_MATCH` with `negate`
+inverted, and MUST NOT emit it.
 
-For `SEGMENT_MATCH` and `NOT_SEGMENT_MATCH` the `attribute` field is IGNORED. The wire format still
-requires it to be non-empty; the dashboard writes `"key"`. An implementation MUST NOT read the
-attribute for these operators.
+#### Semver parsing
 
-`NOT_SEGMENT_MATCH` is the exact logical negation of `SEGMENT_MATCH` over the same segment list,
-including the failure modes: an unknown segment key does not match, so `NOT_SEGMENT_MATCH` on an
-unknown segment key MATCHES.
+Lenient about the leading `v` and about missing segments: `4`, `v4.2` and `4.2.0` all parse, and
+absent segments are zero. Build metadata (`+sha`) is discarded, because semver 2.0.0 excludes it
+from precedence. Pre-release versions rank **below** the same version without one, so
+`1.0.0-rc.1 < 1.0.0`; numeric pre-release identifiers compare numerically and rank below
+alphanumeric ones. Anything else fails to parse, and its clause is false.
+
+#### The regex subset
+
+`MATCHES` is **unanchored** - it matches anywhere in the text, like JavaScript's `RegExp.test`. An
+author wanting the whole string writes `^...$`.
+
+Patterns are restricted to a portable subset, and an implementation MUST reject anything outside it
+by failing the clause:
+
+- **No lookaround**: `(?=`, `(?!`, `(?<=`, `(?<!`.
+- **No backreferences**: `\1` through `\9`.
+- **Pattern at most 512 characters**, and the text being matched at most 4096.
+
+Two reasons, and both matter. A pattern is untrusted input on the hot path, and backtracking engines
+take exponential time on patterns like `(a+)+$` - somebody who can edit a flag must not be able to
+stop evaluation for everyone. And a rule evaluated in Java on the server and in JavaScript in a
+browser must mean the same thing in both; lookaround and backreferences are where those engines
+diverge from each other and from RE2.
+
+An unsupported, invalid, or over-long pattern makes the clause **false** in every implementation.
+That is the same answer for the same reason everywhere, so conformance holds even for a pattern
+nobody will run.
+
+### 3.3 Negation
+
+A clause may set `negate: true`, which **inverts its result**.
+
+Negation is applied last, to the result of the comparison, and it inverts the missing-attribute case
+too. **A negated clause on a missing attribute is TRUE.**
+
+That is deliberate and matches LaunchDarkly. "Release to everyone whose plan is not free" should
+include somebody with no plan attribute at all - they are, after all, not on the free plan. But it
+surprises people often enough to be worth stating twice, so it is also pinned by conformance
+vectors.
+
+The segment operators negate the same way: `SEGMENT_MATCH` with `negate` is true when the context
+matches none of the named segments, including when a named segment does not exist (an unknown
+segment never matches, so its negation does).
+
+Inside a **segment rule**, a nested segment operator fails the clause outright and negation does not
+rescue it - see section 4.2. A refusal to follow a configuration must not become a match.
 
 ---
 
@@ -199,6 +322,10 @@ A segment rule's clauses support attribute operators only. If a segment rule con
 operator is `SEGMENT_MATCH` or `NOT_SEGMENT_MATCH`, that clause FAILS, which fails its rule. This
 makes segment evaluation non-recursive and unable to cycle. An SDK MUST NOT attempt to resolve nested
 segments.
+
+**Negation does not rescue it.** A nested segment clause fails its rule whether or not `negate` is
+set: this is a refusal to follow a configuration, not a comparison that came out false, and turning
+a refusal into a match would let an unsupported config silently match everybody.
 
 ---
 

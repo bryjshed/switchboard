@@ -9,6 +9,7 @@ import com.switchboard.domain.common.ValidationException;
 import com.switchboard.domain.evaluation.EvalContext;
 import com.switchboard.domain.evaluation.FlagEvaluator;
 import com.switchboard.interfaces.rest.api.EvaluationApi;
+import com.switchboard.interfaces.rest.mapper.AttributeMappers;
 import com.switchboard.interfaces.rest.mapper.FlagMappers;
 import com.switchboard.interfaces.rest.model.BootstrapResponse;
 import com.switchboard.interfaces.rest.model.BulkEvalRequest;
@@ -199,7 +200,8 @@ public class EvaluationController implements EvaluationApi {
 
     private static EvalContext toContext(com.switchboard.interfaces.rest.model.EvalContext rest) {
         try {
-            return new EvalContext(rest.getKey(), rest.getAttributes());
+            return new EvalContext(
+                rest.getKey(), AttributeMappers.toAttributes(rest.getAttributes()));
         } catch (IllegalArgumentException e) {
             throw new ValidationException(e.getMessage());
         }

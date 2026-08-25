@@ -1,4 +1,5 @@
-import type { Clause, EvalContext, Segment } from '../types.js';
+import type { AttributeValue, Clause, EvalContext, Segment } from '../types.js';
+import { matchesOne } from './compare.js';
 
 /** The reserved attribute name that reads the context key instead of the attributes map. */
 export const KEY_ATTRIBUTE = 'key';
@@ -8,42 +9,57 @@ function isSegmentOp(clause: Clause): boolean {
 }
 
 /**
- * Reads the string a non-segment clause compares against (spec/evaluation.md 3.1).
- *
- * The literal attribute name `key` reads `context.key`; an entry actually named `key` inside the
- * attributes map is unreachable. A missing attribute returns undefined, which FAILS the clause.
+ * `NOT_SEGMENT_MATCH` predates per-clause negation and still appears in stored configs. Folding it
+ * into `SEGMENT_MATCH` + negate here means one code path serves both, and a config written before
+ * negation existed evaluates identically without being rewritten under anyone.
  */
-function readAttribute(clause: Clause, context: EvalContext): string | undefined {
-  if (clause.attribute === KEY_ATTRIBUTE) {
-    return context.key;
-  }
-  return context.attributes?.[clause.attribute];
+function normalise(clause: Clause): Clause {
+  if (clause.op !== 'NOT_SEGMENT_MATCH') return clause;
+  return { ...clause, op: 'SEGMENT_MATCH', negate: !clause.negate };
 }
 
 /**
- * Matches an attribute clause. Comparisons are byte-for-byte on the string and case-sensitive;
- * there is no coercion, no numeric comparison and no locale folding (spec/evaluation.md 1.1).
+ * Reads the value a non-segment clause compares against (spec/evaluation.md 3.1).
  *
- * A clause with an empty `values` list never matches, because every operator is an any-of over
- * `values`.
+ * The literal attribute name `key` reads `context.key`; an entry actually named `key` inside the
+ * attributes map is unreachable. A missing attribute returns undefined, which FAILS the clause —
+ * before negation, which the caller applies afterwards.
+ *
+ * `null` is absent, and so is a nested object: no operator can act on one, and inventing a coercion
+ * would invent matches.
+ */
+function readAttribute(clause: Clause, context: EvalContext): AttributeValue | undefined {
+  if (clause.attribute === KEY_ATTRIBUTE) {
+    return context.key;
+  }
+  const value = context.attributes?.[clause.attribute];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'object' && !Array.isArray(value)) return undefined;
+  return value;
+}
+
+/** An array's elements, or the value itself. Every operator is existential over an array. */
+function elements(value: AttributeValue): AttributeValue[] {
+  if (!Array.isArray(value)) return [value];
+  // Nested arrays are flattened: the operators are already existential, so flattening keeps that
+  // one rule true at any depth.
+  return value.flat(Infinity) as AttributeValue[];
+}
+
+/**
+ * Matches an attribute clause, BEFORE negation.
+ *
+ * Doubly existential: any element of an array attribute against any listed value. A clause with an
+ * empty `values` list never matches, because every operator is an any-of over `values`.
  */
 export function attributeClauseMatches(clause: Clause, context: EvalContext): boolean {
   const attribute = readAttribute(clause, context);
   if (attribute === undefined) {
     return false;
   }
-  switch (clause.op) {
-    case 'EQUALS':
-    case 'IN':
-      return clause.values.some((value) => attribute === value);
-    case 'CONTAINS':
-      return clause.values.some((value) => attribute.includes(value));
-    case 'STARTS_WITH':
-      return clause.values.some((value) => attribute.startsWith(value));
-    default:
-      // SEGMENT_MATCH / NOT_SEGMENT_MATCH are not attribute clauses.
-      return false;
-  }
+  return elements(attribute).some((element) =>
+    clause.values.some((value) => matchesOne(clause.op, element, value)),
+  );
 }
 
 /**
@@ -90,30 +106,37 @@ export function segmentMatches(segment: Segment, context: EvalContext): boolean 
  * (spec/evaluation.md 4.2).
  */
 function segmentRuleMatches(clauses: readonly Clause[], context: EvalContext): boolean {
-  for (const clause of clauses) {
-    if (isSegmentOp(clause) || !attributeClauseMatches(clause, context)) {
+  for (const raw of clauses) {
+    const clause = normalise(raw);
+    // A nested segment clause fails OUTRIGHT — negation must not turn a refusal to follow a
+    // configuration into a match (spec 4.2).
+    if (isSegmentOp(clause)) {
+      return false;
+    }
+    if (Boolean(clause.negate) === attributeClauseMatches(clause, context)) {
       return false;
     }
   }
   return true;
 }
 
-/** Matches one flag-rule clause, dispatching the segment operators (spec/evaluation.md 3.2). */
+/**
+ * Matches one flag-rule clause, with negation applied last (spec/evaluation.md 3.2, 3.3).
+ *
+ * Negation inverts the missing-attribute case too, so a negated clause on a missing attribute is
+ * TRUE. It also inverts the segment failure modes: an unknown segment key never matches, so a
+ * negated SEGMENT_MATCH over an unknown key MATCHES.
+ */
 export function clauseMatches(
-  clause: Clause,
+  raw: Clause,
   context: EvalContext,
   segmentsByKey: ReadonlyMap<string, Segment>,
 ): boolean {
-  switch (clause.op) {
-    case 'SEGMENT_MATCH':
-      return anySegmentMatches(clause.values, context, segmentsByKey);
-    case 'NOT_SEGMENT_MATCH':
-      // The exact logical negation of SEGMENT_MATCH, including its failure modes: an unknown
-      // segment key does not match, so NOT_SEGMENT_MATCH over an unknown key MATCHES.
-      return !anySegmentMatches(clause.values, context, segmentsByKey);
-    default:
-      return attributeClauseMatches(clause, context);
-  }
+  const clause = normalise(raw);
+  const matched = isSegmentOp(clause)
+    ? anySegmentMatches(clause.values, context, segmentsByKey)
+    : attributeClauseMatches(clause, context);
+  return Boolean(clause.negate) !== matched;
 }
 
 /**

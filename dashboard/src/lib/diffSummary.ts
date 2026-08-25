@@ -129,11 +129,25 @@ export function describeServe(
   return 'not set'
 }
 
+// Phrased for a sentence, so a diff reads as prose: "platform is one of ios, android".
+// Exhaustive over ClauseOp on purpose — adding an operator without a phrase here is a compile
+// error rather than a diff that falls back to shouting the enum name at a reviewer.
 const CLAUSE_PHRASES: Record<ClauseOp, string> = {
   EQUALS: 'is',
   IN: 'is one of',
   CONTAINS: 'contains',
   STARTS_WITH: 'starts with',
+  ENDS_WITH: 'ends with',
+  MATCHES: 'matches',
+  GREATER_THAN: 'is greater than',
+  GREATER_THAN_OR_EQUAL: 'is at least',
+  LESS_THAN: 'is less than',
+  LESS_THAN_OR_EQUAL: 'is at most',
+  BEFORE: 'is before',
+  AFTER: 'is after',
+  SEMVER_EQUAL: 'version is',
+  SEMVER_GREATER_THAN: 'version is greater than',
+  SEMVER_LESS_THAN: 'version is less than',
   SEGMENT_MATCH: 'is in segment',
   NOT_SEGMENT_MATCH: 'is not in segment',
 }
@@ -142,7 +156,11 @@ const CLAUSE_PHRASES: Record<ClauseOp, string> = {
 export function describeClause(clause: Clause): string {
   const attribute = clause.attribute === 'key' ? 'user key' : clause.attribute
   const values = clause.values.length > 0 ? clause.values.join(', ') : '(nothing)'
-  return `${attribute} ${CLAUSE_PHRASES[clause.op] ?? clause.op} ${values}`
+  const phrase = CLAUSE_PHRASES[clause.op] ?? clause.op
+  // "is not", "does not contain" — negation has to be visible in a diff, or a reviewer approves
+  // the exact opposite of what they read.
+  const negated = clause.negate ? `NOT ${phrase}` : phrase
+  return `${attribute} ${negated} ${values}`
 }
 
 /** "platform is ios and plan is one of pro → serve 10% Variant / 90% Control". */

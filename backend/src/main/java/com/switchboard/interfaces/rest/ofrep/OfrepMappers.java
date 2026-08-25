@@ -1,6 +1,7 @@
 package com.switchboard.interfaces.rest.ofrep;
 
 import com.switchboard.domain.evaluation.EvalContext;
+import com.switchboard.interfaces.rest.mapper.AttributeMappers;
 import com.switchboard.domain.evaluation.EvalOutcome;
 import com.switchboard.domain.evaluation.EvalReason;
 import com.switchboard.domain.flag.Flag;
@@ -58,15 +59,18 @@ public final class OfrepMappers {
             throw new OfrepBadRequestException(flagKey, OfrepErrorCode.TARGETING_KEY_MISSING,
                 "Evaluation context is missing a non-empty string targetingKey");
         }
-        Map<String, String> attributes = new LinkedHashMap<>();
+        // Everything except the targeting key is an attribute, typed by the shared mapper - so an
+        // OFREP caller gets the same numeric and version comparisons a native caller does, rather
+        // than the stringified-scalars-only treatment this used to give them.
+        Map<String, Object> contextAttributes = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : context.entrySet()) {
             String name = String.valueOf(entry.getKey());
             if ("targetingKey".equals(name)) {
                 continue;
             }
-            coerce(entry.getValue()).ifPresent(value -> attributes.put(name, value));
+            contextAttributes.put(name, entry.getValue());
         }
-        return new EvalContext(key, attributes);
+        return new EvalContext(key, AttributeMappers.toAttributes(contextAttributes));
     }
 
     /** Scalars stringify; objects, arrays and nulls are dropped. */

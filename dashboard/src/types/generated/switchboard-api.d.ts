@@ -1132,12 +1132,27 @@ export interface components {
             /** @description Whether a holder of a PUBLIC SDK key (sb_cli_) may see this flag. Defaults to false, so no flag is exposed to a browser without someone deciding it should be. Has no effect on a server key, which sees every flag regardless. */
             clientSideAvailable?: boolean;
         };
-        /** @enum {string} */
-        ClauseOp: "EQUALS" | "IN" | "CONTAINS" | "STARTS_WITH" | "SEGMENT_MATCH" | "NOT_SEGMENT_MATCH";
+        /**
+         * @description How a clause compares an attribute against its values. Every operator is existential: it matches when the attribute relates to ANY listed value, and when ANY element of an array-valued attribute does.
+         *
+         *     The operator decides how both sides are read. Clause values are always text on the wire; GREATER_THAN parses them as numbers, SEMVER_* as versions, BEFORE/AFTER as instants. A value that cannot be read that way makes the clause false rather than erroring.
+         *
+         *     MATCHES is restricted to a portable regex subset - no lookaround, no backreferences, and a length cap - so the Java server and a JavaScript SDK cannot disagree about a pattern.
+         *
+         *     NOT_SEGMENT_MATCH is deprecated in favour of SEGMENT_MATCH with negate=true. It is still accepted and still evaluates identically; nothing produces it any more.
+         * @enum {string}
+         */
+        ClauseOp: "EQUALS" | "IN" | "CONTAINS" | "STARTS_WITH" | "ENDS_WITH" | "MATCHES" | "GREATER_THAN" | "GREATER_THAN_OR_EQUAL" | "LESS_THAN" | "LESS_THAN_OR_EQUAL" | "BEFORE" | "AFTER" | "SEMVER_EQUAL" | "SEMVER_GREATER_THAN" | "SEMVER_LESS_THAN" | "SEGMENT_MATCH" | "NOT_SEGMENT_MATCH";
         Clause: {
             /** @description Context attribute name; 'key' targets the context key. For SEGMENT_MATCH ops, values carry segment keys. */
             attribute: string;
             op: components["schemas"]["ClauseOp"];
+            /**
+             * @description Absent means false, which is every clause written before per-clause negation existed.
+             *
+             *     Inverts the clause's result, INCLUDING the missing-attribute case. A missing attribute makes a clause false, so a negated clause on a missing attribute is TRUE - "plan is not free" holds for somebody with no plan attribute at all. This matches LaunchDarkly and is what the phrase means in English, but it surprises people, so it is pinned by conformance vectors.
+             */
+            negate?: boolean;
             values: string[];
         };
         WeightedVariation: {
@@ -1310,8 +1325,9 @@ export interface components {
         EvalContext: {
             /** @description Stable context key (e.g. user id). Bucketing input. */
             key: string;
+            /** @description Typed attribute values. Strings, numbers, booleans and arrays of those are all comparable; the OPERATOR decides how each side is read (see spec/evaluation.md 3.2), so a version string works with SEMVER_* and a number works with GREATER_THAN. null is treated as absent. Nested objects are dropped and nested arrays are flattened - no operator can act on either, and inventing a coercion would invent matches. */
             attributes?: {
-                [key: string]: string;
+                [key: string]: unknown;
             };
         };
         BulkEvalRequest: {
