@@ -13,10 +13,10 @@ reviewable diff. A monorepo.
 | Path | What | Tests |
 |---|---|---|
 | `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 111 integration |
-| `dashboard/` | React + Vite. **The primary UI.** | 329 |
+| `dashboard/` | React + Vite. **The primary UI.** | 337 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
-| `spec/` | Normative evaluation spec + 508 conformance vectors | executed by backend and SDK |
+| `spec/` | Normative evaluation spec + 507 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
 **Two contracts, both enforced rather than described.** `backend/src/main/resources/openapi/switchboard-api.yaml`

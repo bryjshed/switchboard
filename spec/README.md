@@ -7,7 +7,7 @@ results to the server, including which contexts land in which half of a percenta
 ```
 spec/
   evaluation.md            the normative prose spec
-  conformance/*.json           machine-readable test vectors (508 of them)
+  conformance/*.json           machine-readable test vectors (507 of them)
   tools/verify-bucket.mjs      a four-line reference bucket() in JS, checked against the vectors
   tools/generate-vectors.mjs   writes operators.json; --check fails when it is stale
 ```
@@ -59,7 +59,7 @@ node spec/tools/verify-bucket.mjs --print
 | `rollout-weights.json` | `rollout-validation` | 11 | which weight lists are accepted and which are rejected |
 | `operators.json` | `evaluation` | 306 | **generated.** Every operator against every attribute type - string, numeric string, semver string, date string, integer, fraction, boolean, array, absent - with and without negation |
 
-508 vectors total, plus one cross-file assertion (ramp monotonicity, which spans the two `ramp-at-*`
+507 vectors total, plus one cross-file assertion (ramp monotonicity, which spans the two `ramp-at-*`
 files by design because bucketing salts on the flag key and both files must therefore share it).
 
 ## Vector file schema

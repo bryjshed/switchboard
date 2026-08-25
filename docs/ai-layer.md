@@ -90,6 +90,15 @@ A rollout that outruns the configured lookback has its window clipped, which wea
 from "at most α forever" to "at most α per window". Findings record when that happened rather than
 quietly assuming it away.
 
+Two consequences that surprise people in practice, both correct:
+
+- **A killed flag is not scanned at all.** The kill switch is not a rollout, so there is nothing to
+  compare. If you are waiting for a finding on a flag you killed, it will never come.
+- **Toggling the kill switch starts a new epoch**, because `killSwitchActive` is one of the
+  allocation-bearing fields in the epoch fingerprint. Turning a kill switch off therefore discards
+  the evidence gathered before it — the traffic that arrived while the flag was killed is not
+  comparable to the traffic after, which is the whole point.
+
 ### The baseline comes from configuration
 
 The control arm is the heaviest configured weight, and on an even split the flag's off variation —
