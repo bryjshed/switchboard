@@ -168,3 +168,35 @@ export interface MetricEventItem {
   value?: number;
   occurredAt: string;
 }
+
+
+// ---------------------------------------------------------------- client mode
+
+/**
+ * One evaluated flag from `POST /api/eval/bootstrap`.
+ *
+ * Note what is NOT here: no `config`, no `variations`, no segments. A client key receives values,
+ * never the rules that produced them - see the SDK README's client-mode section.
+ */
+export interface ClientBootstrapFlag {
+  key: string;
+  kind: FlagKind;
+  value: string;
+  variationId?: string | null;
+  variationName?: string | null;
+  reason: EvalReason;
+  ruleId?: string | null;
+  version?: number;
+}
+
+export interface ClientBootstrapResponse {
+  envKey: string;
+  stateVersion: number;
+  /**
+   * Hex SHA-256 of the canonicalised context this payload was evaluated for. The client discards a
+   * payload whose hash does not match the context it sent, which is what stops a 304 from being
+   * applied across a `setContext()`.
+   */
+  contextHash: string;
+  flags: ClientBootstrapFlag[];
+}

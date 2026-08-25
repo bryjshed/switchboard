@@ -1,5 +1,6 @@
 import type {
   BootstrapResponse,
+  ClientBootstrapResponse,
   EvalContext,
   EvalEventItem,
   MetricEventItem,
@@ -99,6 +100,54 @@ export async function fetchBootstrap(
     );
   }
   const payload = (await response.json()) as BootstrapResponse;
+  return { status: 200, payload, etag: response.headers.get('etag') };
+}
+
+/** The evaluated-bootstrap result, mirroring {@link BootstrapResult}. */
+export type ClientBootstrapResult =
+  | { status: 200; payload: ClientBootstrapResponse; etag: string | null }
+  | { status: 304 };
+
+/**
+ * POST /api/eval/bootstrap - evaluated values for one context.
+ *
+ * A POST rather than a GET because the context travels in the body: attributes in a query string
+ * end up in access logs, proxies, browser history and Referer headers. It is still conditional -
+ * `If-None-Match` gets a bodiless 304 - but the ETag digests the response body rather than the
+ * environment version, since the payload depends on the context.
+ */
+export async function fetchClientBootstrap(
+  config: ResolvedConfig,
+  etag: string | null,
+  context: EvalContext,
+  signal?: AbortSignal,
+): Promise<ClientBootstrapResult> {
+  const headers: Record<string, string> = {
+    ...authHeaders(config),
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+  if (etag !== null) {
+    headers['If-None-Match'] = etag;
+  }
+  const response = await fetchWithTimeout(
+    config,
+    `${config.baseUrl}/api/eval/bootstrap`,
+    { method: 'POST', headers, body: JSON.stringify({ context }) },
+    config.bootstrapTimeoutMs,
+    signal,
+  );
+  if (response.status === 304) {
+    return { status: 304 };
+  }
+  if (!response.ok) {
+    throw new SwitchboardHttpError(
+      `client bootstrap failed with HTTP ${response.status}`,
+      response.status,
+      await safeText(response),
+    );
+  }
+  const payload = (await response.json()) as ClientBootstrapResponse;
   return { status: 200, payload, etag: response.headers.get('etag') };
 }
 

@@ -1,4 +1,11 @@
-import type { BootstrapResponse, Flag, PatchEvent, Segment } from '../types.js';
+import type {
+  BootstrapResponse,
+  ClientBootstrapFlag,
+  ClientBootstrapResponse,
+  Flag,
+  PatchEvent,
+  Segment,
+} from '../types.js';
 
 /** An immutable view of one environment's flag config at one state version. */
 export interface Snapshot {
@@ -113,6 +120,77 @@ export class ConfigStore {
   /** Drops everything. Used by `close()`; the store is reusable afterwards. */
   clear(): void {
     this.snapshot = EMPTY;
+    this.initialised = false;
+  }
+}
+
+
+/**
+ * The client-mode store: evaluated values for one context, not rules.
+ *
+ * Deliberately a separate class rather than a looser `ConfigStore`. The two hold different things -
+ * answers versus the means to compute them - and blurring that would let a client-mode payload
+ * silently satisfy a rule-set-shaped read, producing an empty rule set that evaluates everything to
+ * its default while looking perfectly healthy. Keeping them apart makes that shape a type error.
+ */
+export class ClientStore {
+  private flags: ReadonlyMap<string, ClientBootstrapFlag> = new Map();
+  private version = -1;
+  private hash = '';
+  private initialised = false;
+  private envKeyValue = '';
+
+  get isInitialised(): boolean {
+    return this.initialised;
+  }
+
+  get stateVersion(): number {
+    return this.version;
+  }
+
+  get envKey(): string {
+    return this.envKeyValue;
+  }
+
+  /** The context this payload was evaluated for, as the server canonicalised it. */
+  get contextHash(): string {
+    return this.hash;
+  }
+
+  get flagKeys(): string[] {
+    return [...this.flags.keys()];
+  }
+
+  getFlag(flagKey: string): ClientBootstrapFlag | undefined {
+    return this.flags.get(flagKey);
+  }
+
+  /** Returns true when anything changed, so a no-op refetch does not emit a change event. */
+  apply(payload: ClientBootstrapResponse): boolean {
+    const flags = new Map<string, ClientBootstrapFlag>();
+    for (const flag of payload.flags ?? []) {
+      flags.set(flag.key, flag);
+    }
+    const changed =
+      !this.initialised ||
+      this.version !== payload.stateVersion ||
+      this.hash !== payload.contextHash ||
+      this.flags.size !== flags.size ||
+      [...flags].some(([key, flag]) => this.flags.get(key)?.value !== flag.value);
+
+    this.flags = flags;
+    this.version = payload.stateVersion;
+    this.hash = payload.contextHash;
+    this.envKeyValue = payload.envKey;
+    this.initialised = true;
+    return changed;
+  }
+
+  clear(): void {
+    this.flags = new Map();
+    this.version = -1;
+    this.hash = '';
+    this.envKeyValue = '';
     this.initialised = false;
   }
 }
