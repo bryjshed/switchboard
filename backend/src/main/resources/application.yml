@@ -23,10 +23,22 @@ server:
   port: ${SERVER_PORT:28080}
 
 management:
+  # Actuator moves to its own port so the scrape endpoint is never on the public listener. NOTE
+  # this takes /actuator/health with it: health and readiness probes must target MANAGEMENT_PORT,
+  # not SERVER_PORT, where the path now 404s.
+  #
+  # SecurityConfig's filter chain still applies to this listener, so health/info/prometheus are
+  # named permitAll there. The port, not the filter chain, is the boundary - bind it to the pod
+  # or host network and do not publish it.
+  server:
+    port: ${MANAGEMENT_PORT:28081}
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 switchboard:
   security:

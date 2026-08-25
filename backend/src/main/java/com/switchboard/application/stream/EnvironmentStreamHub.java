@@ -29,4 +29,17 @@ public class EnvironmentStreamHub {
                 id -> Sinks.many().multicast().onBackpressureBuffer(256, false))
             .asFlux();
     }
+
+    /** Live SSE subscribers across every environment. Gauged; see MetricsConfig. */
+    public int subscriberCount() {
+        return sinks.values().stream().mapToInt(Sinks.Many::currentSubscriberCount).sum();
+    }
+
+    /**
+     * Environments holding a sink. Sinks are never removed, so this only grows - it is gauged
+     * alongside {@link #subscriberCount()} precisely so the gap between the two is visible.
+     */
+    public int trackedEnvironmentCount() {
+        return sinks.size();
+    }
 }

@@ -78,7 +78,11 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
         // Force the keyless assistant even when the developer exports ANTHROPIC_API_KEY.
         "switchboard.ai.anthropic-api-key=",
         // The race tests hold one connection per in-flight write.
-        "spring.r2dbc.pool.max-size=25"
+        "spring.r2dbc.pool.max-size=25",
+        // Random management port. application.yml pins it to 28081, which a locally running
+        // backend usually owns - and every test class builds its own context, so a fixed port
+        // would collide with the developer's own stack rather than with another test.
+        "management.server.port=0"
     })
 public abstract class IntegrationTestBase {
 

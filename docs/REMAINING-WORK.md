@@ -200,10 +200,20 @@ polymorphic type handling has to be configured deliberately; unknown-property fa
 be tolerated or a rolling deploy breaks the moment two versions share a cache; and
 replicated entries need a real TTL rather than living forever. **M**
 
-**No cache observability.** Hit rate, eviction count and load latency are not measured
-anywhere, so none of the above can be prioritised with evidence rather than reasoning.
-Caffeine exposes these directly; wiring them to metrics is small and should come *first*.
-**S**
+**~~No cache observability.~~ Landed 2026-08-24.** `micrometer-registry-prometheus` is wired
+and `/actuator/prometheus` is served on a **separate management port** (`MANAGEMENT_PORT`,
+default 28081), so the scrape endpoint is not on the public listener. `EnvSnapshotCache` now
+calls `recordStats()` — without it every meter reads zero, which looks exactly like a working
+cache with no traffic — and is bound under cache name `envSnapshot` for hit rate, evictions,
+load latency and size. The two paths this section argues for caching are timed:
+`switchboard.auth.sdk_key.resolve` and `switchboard.access.permissions.resolve`. SSE
+subscribers and tracked environments are gauged, the second so the never-evicted sink map
+shows up as a widening gap against the first. `MetricsIT` asserts each meter **moves**, not
+merely that it exists.
+
+**The management port is unauthenticated** — the management child context does not inherit
+`SecurityConfig`'s filter chain. It must be bound to the pod or host network and never
+published; this needs restating in the deployment story.
 
 **The SDK has no local persistence.** Config lives in memory only, so a process restart
 always requires a successful network fetch before the first evaluation is accurate. If
@@ -216,8 +226,8 @@ nothing is set up to serve it from an edge. Related to the multi-region non-goal
 **L**
 
 ### Suggested order within this area
-1. **Metrics**, so everything after is evidence-driven rather than reasoned. Caffeine exposes
-   hit rate, evictions and load latency directly.
+1. ~~**Metrics**, so everything after is evidence-driven rather than reasoned.~~ **Done** —
+   see above. The remaining items below are now measurable before and after.
 2. **Introduce the Spring cache abstraction** and migrate `EnvSnapshotCache` onto it — one
    cache, already working, so the seam is proven against something known-good before
    anything depends on it.

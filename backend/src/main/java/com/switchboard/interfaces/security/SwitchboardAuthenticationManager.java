@@ -5,6 +5,9 @@ import com.switchboard.domain.identity.IdentityProviderPort;
 import com.switchboard.domain.identity.IdentityVerificationException;
 import com.switchboard.domain.identity.VerifiedIdentity;
 import com.switchboard.domain.user.User;
+import com.switchboard.infrastructure.config.MetricsConfig;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.r2dbc.spi.Readable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -12,6 +15,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
@@ -42,12 +46,17 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
     private final UserService userService;
     private final DatabaseClient db;
     private final IdentityProviderPort identities;
+    private final Timer sdkKeyResolve;
 
     public SwitchboardAuthenticationManager(
-        UserService userService, DatabaseClient db, IdentityProviderPort identities) {
+        UserService userService, DatabaseClient db, IdentityProviderPort identities,
+        MeterRegistry meters) {
         this.userService = userService;
         this.db = db;
         this.identities = identities;
+        this.sdkKeyResolve = Timer.builder(MetricsConfig.SDK_KEY_RESOLVE_TIMER)
+            .description("Resolving an SDK key to its environment: sdk_keys -> environments -> projects")
+            .register(meters);
     }
 
     @Override
@@ -76,19 +85,29 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
         return UsernamePasswordAuthenticationToken.authenticated(principal, null, USER_AUTHORITIES);
     }
 
+    /**
+     * Timed because it runs on every single evaluation request and is uncached: the mapping from
+     * a key to an environment changes only when a key is minted or revoked, so this timer is the
+     * evidence for caching it.
+     */
     private Mono<Authentication> authenticateSdkKey(String token) {
-        return db.sql("""
-                SELECT k.id AS key_id, k.environment_id, e.project_id, p.org_id, e.key AS env_key
-                FROM sdk_keys k
-                JOIN environments e ON e.id = k.environment_id
-                JOIN projects p ON p.id = e.project_id
-                WHERE k.key_hash = :hash AND k.revoked_at IS NULL
-                """)
-            .bind("hash", sha256(token))
-            .map(SwitchboardAuthenticationManager::mapSdkKey)
-            .one()
-            .switchIfEmpty(Mono.error(new BadCredentialsException("Unknown or revoked SDK key")))
-            .map(p -> UsernamePasswordAuthenticationToken.authenticated(p, null, SDK_AUTHORITIES));
+        return Mono.defer(() -> {
+            long startedAt = System.nanoTime();
+            return db.sql("""
+                    SELECT k.id AS key_id, k.environment_id, e.project_id, p.org_id, e.key AS env_key
+                    FROM sdk_keys k
+                    JOIN environments e ON e.id = k.environment_id
+                    JOIN projects p ON p.id = e.project_id
+                    WHERE k.key_hash = :hash AND k.revoked_at IS NULL
+                    """)
+                .bind("hash", sha256(token))
+                .map(SwitchboardAuthenticationManager::mapSdkKey)
+                .one()
+                .doFinally(signal -> sdkKeyResolve.record(
+                    System.nanoTime() - startedAt, TimeUnit.NANOSECONDS))
+                .switchIfEmpty(Mono.error(new BadCredentialsException("Unknown or revoked SDK key")))
+                .map(p -> UsernamePasswordAuthenticationToken.authenticated(p, null, SDK_AUTHORITIES));
+        });
     }
 
     private static SdkKeyPrincipal mapSdkKey(Readable row) {

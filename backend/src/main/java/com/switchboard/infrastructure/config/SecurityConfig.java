@@ -36,7 +36,14 @@ public class SecurityConfig {
             .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeExchange(exchanges -> exchanges
-                .pathMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                // Actuator. These are mapped on the MANAGEMENT port only (management.server.port),
+                // so permitAll here does not expose them on the public listener: the path is
+                // unmapped there and 404s after passing this rule. The port is the real boundary -
+                // bind it to the pod or host network and never publish it. The filter chain does
+                // apply to the management listener, which is why prometheus needs naming: without
+                // it the scrape 401s and the endpoint is silently useless.
+                .pathMatchers("/actuator/health", "/actuator/health/**",
+                    "/actuator/info", "/actuator/prometheus").permitAll()
                 // Job triggers authenticate via the X-Job-Token shared secret in the controller.
                 .pathMatchers("/api/jobs/**").permitAll()
                 // SDK surface, including OFREP - one SDK key, whether it arrives as a bearer
