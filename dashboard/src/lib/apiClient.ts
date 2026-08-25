@@ -1,4 +1,4 @@
-import { auth } from './firebase'
+import { requireAuthProvider } from '@/auth'
 import { env } from './env'
 import { classifyWriteResponse, type WriteResult } from './writeResult'
 import type { ApiErrorBody, ApiErrorCode } from '@/types/api'
@@ -64,10 +64,18 @@ export class NotAuthenticatedError extends Error {
   }
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const user = auth.currentUser
-  if (!user) throw new NotAuthenticatedError()
-  const token = await user.getIdToken()
+/**
+ * The bearer token, from whichever auth provider this build is configured with. The client has
+ * no idea whether that is Firebase or an OIDC IdP, which is the point.
+ */
+async function bearerToken(forceRefresh = false): Promise<string> {
+  const provider = await requireAuthProvider()
+  const token = await provider.getIdToken(forceRefresh)
+  if (!token) throw new NotAuthenticatedError()
+  return token
+}
+
+function authHeaders(token: string): Record<string, string> {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 }
 
@@ -78,13 +86,16 @@ async function throwForResponse(res: Response): Promise<never> {
   throw new ApiClientError(message, res.status, code)
 }
 
-async function request(method: string, path: string, body?: unknown): Promise<Response> {
-  const headers = await authHeaders()
-  let res: Response
+async function send(
+  method: string,
+  path: string,
+  body: unknown,
+  token: string,
+): Promise<Response> {
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    return await fetch(`${API_BASE}${path}`, {
       method,
-      headers,
+      headers: authHeaders(token),
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch (err) {
@@ -92,6 +103,20 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
       `Could not reach the Switchboard API at ${API_BASE}: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
+}
+
+async function request(method: string, path: string, body?: unknown): Promise<Response> {
+  let res = await send(method, path, body, await bearerToken())
+
+  // A 401 is usually a token that expired between mint and use — a clock skew, a laptop waking
+  // up, an OIDC access token that outlived its silent renew. Force one refresh and retry before
+  // surfacing it, because the alternative the user sees is a random logged-out page. Exactly one
+  // retry: a genuinely revoked session must fail rather than loop.
+  if (res.status === 401) {
+    const refreshed = await bearerToken(true).catch(() => null)
+    if (refreshed) res = await send(method, path, body, refreshed)
+  }
+
   if (!res.ok) await throwForResponse(res)
   return res
 }

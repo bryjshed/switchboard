@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { LoginPage } from '@/pages/LoginPage'
+import { AuthCallbackPage } from '@/pages/AuthCallbackPage'
+import { AuthSilentCallbackPage } from '@/pages/AuthSilentCallbackPage'
 import { FlagsPage } from '@/pages/FlagsPage'
 import { FlagDetailPage } from '@/pages/FlagDetailPage'
 import { SegmentsPage } from '@/pages/SegmentsPage'
@@ -17,6 +19,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* OIDC redirect targets. Outside the gate: nobody is signed in yet when they land here,
+          and the silent one renders inside a hidden iframe that must not mount the app shell. */}
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      <Route path="/auth/silent-callback" element={<AuthSilentCallbackPage />} />
       <Route
         path="/"
         element={

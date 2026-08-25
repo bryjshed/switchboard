@@ -1,17 +1,39 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { WorkspaceProvider } from '@/context/WorkspaceProvider'
 import { PermissionsProvider } from '@/context/PermissionsProvider'
 import { Button } from '@/components/ui/button'
 
+function FullScreen({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+      {children}
+    </div>
+  )
+}
+
 /**
- * Gates the app shell on a signed-in Firebase session AND a resolved Switchboard profile.
+ * Gates the app shell on a signed-in session AND a resolved Switchboard profile.
  * The workspace provider mounts inside the gate so it never fires API calls without a token,
  * and the permissions provider inside that, because the scope it asks about is whatever the
  * workspace has selected.
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { firebaseUser, profile, loading, profileError, reloadProfile, signOut } = useAuth()
+  const { user, profile, loading, profileError, authError, reloadProfile, signOut } = useAuth()
+  const location = useLocation()
+
+  // A configuration fault is not a sign-in problem, and bouncing to /login would hide it behind
+  // a form that cannot work either.
+  if (authError) {
+    return (
+      <FullScreen>
+        <h2 className="text-2xl font-semibold">Authentication is not configured</h2>
+        <p className="max-w-md text-sm text-muted-foreground" data-testid="auth-config-error">
+          {authError}
+        </p>
+      </FullScreen>
+    )
+  }
 
   if (loading) {
     return (
@@ -25,18 +47,19 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     )
   }
 
-  if (!firebaseUser) {
-    return <Navigate to="/login" replace />
+  if (!user) {
+    // Carry the intended destination so an OIDC redirect round-trip can land back on it.
+    return <Navigate to="/login" state={{ from: location.pathname + location.search }} replace />
   }
 
   if (!profile) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background px-6 text-center">
+      <FullScreen>
         <h2 className="text-2xl font-semibold">Could not load your account</h2>
         <p className="max-w-md text-sm text-muted-foreground">
           {profileError ?? 'The Switchboard API did not return a profile for this sign-in.'}
         </p>
-        <p className="text-sm text-muted-foreground">Signed in as {firebaseUser.email}</p>
+        <p className="text-sm text-muted-foreground">Signed in as {user.email ?? user.subject}</p>
         <div className="flex gap-2">
           <Button onClick={() => void reloadProfile()} data-testid="retry-profile">
             Try again
@@ -45,7 +68,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
             Sign out
           </Button>
         </div>
-      </div>
+      </FullScreen>
     )
   }
 

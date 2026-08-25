@@ -14,7 +14,8 @@
     "generate:api-types": "node scripts/generate-api-types.mjs",
     "service-check": "node scripts/service-check.mjs",
     "ai-check": "node scripts/ai-check.mjs",
-    "governance-check": "node scripts/governance-check.mjs"
+    "governance-check": "node scripts/governance-check.mjs",
+    "auth-check": "node scripts/auth-check.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
@@ -31,6 +32,7 @@
     "clsx": "^2.1.1",
     "firebase": "^12.11.0",
     "lucide-react": "^1.29.0",
+    "oidc-client-ts": "^3.5.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.14.0",
