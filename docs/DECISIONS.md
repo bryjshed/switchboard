@@ -114,6 +114,17 @@ Full design in [REMAINING-WORK.md](REMAINING-WORK.md).
 **Change propagation uses Postgres `NOTIFY`, not Redis pub/sub or a broker.** One fewer piece
 of infrastructure for a self-hoster to run, and Postgres is already a hard dependency.
 
+**Flag delivery is REST bootstrap + ETag/304 + SSE push. No gRPC, no WebSockets, and
+polling is an SDK fallback mode, not the default.** This matches where the industry
+converged in 2026: OFREP — the only vendor-neutral delivery protocol — is REST/OpenAPI
+(gRPC is an open discussion, open-feature/protocol#72, not a spec); OpenFeature ADR-0008
+standardized SSE change-notification, ADR-0009 ETag-keyed persistence, and ADR-0010
+removed default timer polling; LaunchDarkly's FDv2 (GA 2026-05) is still SSE. Do not "add
+gRPC for performance" or "simplify to polling" — either move would be a departure from the
+standard, not a catch-up. The known delivery gaps are payload-shaped, not
+transport-shaped: client key kinds with an evaluated bootstrap, and SDK local persistence.
+Full evidence in [design-review-2026-08-24.md](design-review-2026-08-24.md).
+
 **Two controllers are hand-written rather than implementing their generated interface**
 (`/api/stream` and the OFREP endpoints). A generated method is fixed to one response type,
 and these answer one operation with several body schemas, a bodiless 304, or an infinite

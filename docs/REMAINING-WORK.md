@@ -20,6 +20,8 @@ and the dashboard.
 Identity is `(issuer, subject)` in `user_identities`, providers are configuration, and both
 the backend and the dashboard work with any OIDC provider — proven against a real
 non-Firebase issuer, not just unit-tested. See `backend/README.md` and `dashboard/README.md`.
+Also landed: **the repo is committed** — the tree is under version control on `main`
+(2026-08-24), so the former top item here (an entirely uncommitted working tree) is gone.
 
 **For anyone picking this up:** read `CLAUDE.md` first — it carries the environment traps
 (Java 25, the Firebase emulator host variable, the Metro port hijack) that have each cost
@@ -33,7 +35,6 @@ Nothing here is a technical problem. Each needs a human.
 
 | Item | What is blocked | Why it matters |
 |---|---|---|
-| **The repo has zero commits** | Everything | Four applications, a spec, an SDK, three migrations and all documentation exist only as an uncommitted working tree on one disk. This is the highest-value, lowest-effort item on the entire list, and the only one whose downside is losing work rather than lacking a feature. Suggested shape: several coherent commits on a branch (backend foundation, AI layer, spec, SDK, dashboard, governance), not one giant one. |
 | **No `ANTHROPIC_API_KEY`** | Natural-language flag creation | The Claude adapter, its forced-tool schema, and the calm `503 AI_UNAVAILABLE` degradation are all built and tested, but the real prompt-to-diff-to-apply loop **has never executed**. Everything else in the AI layer (healing, optimizing, stale sweep) works without a key. |
 | **`nexus-app`'s Metro holds port 8081** | Mobile e2e | The dev client attaches to whichever bundler owns 8081 and loads *that* project's JavaScript into Switchboard's native shell, red-screening on native modules Switchboard does not ship. Resolutions: stop the competing Metro, or produce a release build where the bundler-URL fallback does not apply. See `.maestro/README.md`. |
 | **Mobile app: keep or drop?** | Roadmap clarity | The web dashboard is now the primary surface. The app builds, runs, and has 95 tests, but every feature added to the product is a second implementation cost while it lives. No competitor ships a first-party mobile management app — it is a genuine differentiator, but a demo asset rather than something anyone buys on. |
@@ -378,14 +379,13 @@ Consciously not building, so nobody re-litigates them by accident:
 
 ## Suggested order
 
-1. **Commit the repo.** Nothing else matters if this is lost.
-2. **Peeking fix.** A defect in the headline differentiator; small and contained.
-3. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
+1. **Peeking fix.** A defect in the headline differentiator; small and contained.
+2. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
    from a browser.
-4. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
+3. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
    for authorization; this is the cheapest large win in the system.
-5. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
-6. **Targeting operators and typed attributes.** The most visible gap in a live demo.
-7. **CI and a deployment story.** The bridge from laptop to product — and the point at
+4. **Personal access tokens → MCP server.** Cheap, and MCP is table stakes now.
+5. **Targeting operators and typed attributes.** The most visible gap in a live demo.
+6. **CI and a deployment story.** The bridge from laptop to product — and the point at
    which the shared-cache-tier question needs an answer.
-8. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
