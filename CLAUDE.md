@@ -12,7 +12,7 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 108 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 111 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |

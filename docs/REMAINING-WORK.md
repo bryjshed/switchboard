@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (642 unit + 108 integration), TypeScript SDK (562), MCP server (7), web dashboard (329),
+**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (329),
 an evaluation spec with 508 conformance vectors executed by both the server and
 the SDK, and seven live-check scripts against a running stack.
 
@@ -114,12 +114,19 @@ Remaining: the TypeScript SDK has no client mode yet, so a client key is usable 
 but not yet from the first-party SDK. **S–M**
 
 ### Smaller
-- **Flag list pagination is not wired in the dashboard** (`listFlags` returns `nextCursor`;
-  the page requests 50 and stops). Invisible at nine seeded flags, breaks at real volume. **S**
-- **429 is not implemented** — no rate limiter exists anywhere. OFREP documents a
-  `Retry-After` path that will never fire. **S–M**
-- **Dashboard ships as one 589 kB chunk** (Firebase dominates). Fine internally; route-level
-  lazy loading is the fix. **S**
+- ~~**Flag list pagination**~~ **Done 2026-08-25.** The cursor existed end to end; the page dropped
+  it and silently truncated at 50. Now a Load-more button, matching the three other pages that
+  already had it.
+- ~~**429 is not implemented**~~ **Done 2026-08-25.** A per-credential token bucket, in front of
+  authentication so a client spraying invented keys is refused before it reaches the database.
+  Sends a real `Retry-After`, which OFREP has always documented and nothing could produce.
+  **Per instance:** two instances mean two buckets, and this is the first thing here that genuinely
+  wants a shared store.
+- ~~**Dashboard ships as one 589 kB chunk**~~ **Done 2026-08-25.** Route-level lazy loading: 49
+  chunks, largest 352 kB, with Firebase (104 kB) now deferred to its own. Login and the auth
+  callbacks stay eager — they are the first paint for a signed-out visitor, so a chunk request in
+  front of the login form would be latency for nothing.
+- ~~**`listEnvironments()` is dead code**~~ — removed; environments arrive embedded in `Project`.
 - **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Step 1 is done — AI applies now
   route through the approval gate. Remaining: make `ai_proposals` a *source* table and
   `change_requests` the single lifecycle for every proposed write, then collapse the status

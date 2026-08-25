@@ -28,6 +28,8 @@ export function FlagsPage() {
   const [flags, setFlags] = useState<FlagSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
@@ -64,6 +66,10 @@ export function FlagsPage() {
         // re-filters a partial page.
         const res = await listFlags(projectId, { query: query || undefined, tag: tag || undefined })
         setFlags(res.items)
+        // The cursor exists end to end -- the backend emits one on a full page and the client
+        // accepts it -- but this page used to drop it, so the list silently truncated at the
+        // backend's default of 50. Invisible with nine seeded flags; wrong at any real volume.
+        setNextCursor(res.nextCursor ?? null)
       } catch (err) {
         setError(errorMessage(err, 'Could not load flags'))
       } finally {
@@ -73,6 +79,24 @@ export function FlagsPage() {
     },
     [query, tag],
   )
+
+  const loadMore = async () => {
+    if (!nextCursor || !project) return
+    setLoadingMore(true)
+    try {
+      const res = await listFlags(project.id, {
+        query: query || undefined,
+        tag: tag || undefined,
+        cursor: nextCursor,
+      })
+      setFlags((prev) => [...prev, ...res.items])
+      setNextCursor(res.nextCursor ?? null)
+    } catch (err) {
+      setError(errorMessage(err, 'Could not load more flags'))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     if (!project) {
@@ -303,6 +327,20 @@ export function FlagsPage() {
               })}
             </TableBody>
           </Table>
+        </div>
+      )}
+
+      {nextCursor && (
+        <div className="flex justify-center pt-1">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loadingMore}
+            data-testid="flags-load-more"
+            onClick={() => void loadMore()}
+          >
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </Button>
         </div>
       )}
 

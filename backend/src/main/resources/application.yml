@@ -61,6 +61,16 @@ switchboard:
       #   jwk-set-uri:                # optional; omit to use OIDC discovery on the issuer
   ai:
     anthropic-api-key: ${ANTHROPIC_API_KEY:}
+  # A token bucket per credential, in front of authentication -- so a client spraying invented
+  # keys is refused before it reaches the database. Per instance: two instances mean two buckets
+  # and therefore twice the rate, which is the first thing here that genuinely wants a shared
+  # store. Limits are set high enough that the drift does not matter for the abuse this stops.
+  ratelimit:
+    enabled: ${RATELIMIT_ENABLED:true}
+    requests-per-minute: ${RATELIMIT_RPM:6000}
+    # Idle clients may spend this at once. Generous, because a page load fans out into several
+    # requests and an SDK reconnecting after a deploy is a legitimate burst.
+    burst: ${RATELIMIT_BURST:600}
   jobs:
     token: ${JOB_TOKEN:}
     scheduled-enabled: ${JOBS_SCHEDULED_ENABLED:true}

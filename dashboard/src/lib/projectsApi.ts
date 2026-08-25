@@ -1,5 +1,5 @@
 import { apiGet, apiPost } from './apiClient'
-import type { Environment, Project, SdkKey, SdkKeyCreateRequest, SdkKeyCreated } from '@/types/api'
+import type { Project, SdkKey, SdkKeyCreateRequest, SdkKeyCreated } from '@/types/api'
 import { apiDelete } from './apiClient'
 
 export function listProjects(orgId: string): Promise<Project[]> {
@@ -10,9 +10,6 @@ export function getProject(projectId: string): Promise<Project> {
   return apiGet<Project>(`/api/projects/${encodeURIComponent(projectId)}`)
 }
 
-export function listEnvironments(projectId: string): Promise<Environment[]> {
-  return apiGet<Environment[]>(`/api/projects/${encodeURIComponent(projectId)}/environments`)
-}
 
 export function listSdkKeys(envId: string): Promise<SdkKey[]> {
   return apiGet<SdkKey[]>(`/api/environments/${encodeURIComponent(envId)}/sdk-keys`)
