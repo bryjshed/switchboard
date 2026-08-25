@@ -12,7 +12,7 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 328 unit + 93 integration |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 336 unit + 98 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
@@ -77,13 +77,13 @@ loading/error/refreshing flags and toasts for writes. Semantic tokens only, no r
 the `warning` token rather than amber. Filter and tab state lives in query params. One API
 module per endpoint group over `src/lib/apiClient.ts`.
 
-**Caching goes through Spring's cache abstraction**, backed by Caffeine and swappable to
-Redis by configuration — not hand-rolled per call site. Note the reactive trap: `@Cacheable`
-on a method returning `Mono` caches the cold publisher rather than the value, so it appears
-to work while doing nothing. The Caffeine manager needs async cache mode, `@Cacheable`
-methods must live in their own loader bean (self-invocation bypasses the proxy), and cache
-keys must survive the `NOTIFY` invalidation channel intact. Design in
-`docs/REMAINING-WORK.md`.
+**Caching goes through `CacheRegistry` / `SwitchboardCache`** — a reactive seam over Caffeine,
+provider chosen by `switchboard.cache.provider`. **Do not reach for `@Cacheable`**: on a method
+returning `Mono` it caches the cold publisher rather than the value, so it appears to work while
+doing nothing. The seam sidesteps that (and the self-invocation trap) by not using proxies at all.
+Add a cache by adding a `CacheName` enum constant — names are an enum so a typo is a compile error,
+and keys are Strings so they survive the `NOTIFY` invalidation channel intact. Reasoning in
+`docs/DECISIONS.md`.
 
 **Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
 bucketing must land as a `spec/evaluation.md` edit **plus updated conformance vectors in the

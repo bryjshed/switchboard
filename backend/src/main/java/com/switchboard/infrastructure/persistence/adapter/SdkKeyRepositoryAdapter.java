@@ -70,6 +70,14 @@ public class SdkKeyRepositoryAdapter implements SdkKeyRepository {
     }
 
     @Override
+    public Mono<String> findHashById(UUID keyId) {
+        return db.sql("SELECT key_hash FROM sdk_keys WHERE id = :id")
+            .bind("id", keyId)
+            .map(row -> row.get("key_hash", String.class))
+            .one();
+    }
+
+    @Override
     public Mono<SdkKey> revoke(UUID keyId) {
         return db.sql("UPDATE sdk_keys SET revoked_at = now() WHERE id = :id AND revoked_at IS NULL RETURNING *")
             .bind("id", keyId)

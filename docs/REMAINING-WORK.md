@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (328 unit + 93 integration), web dashboard (329),
+**Status of the product today.** Backend (336 unit + 98 integration), web dashboard (329),
 TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
 the SDK, and six live-check scripts against a running stack.
 
@@ -265,12 +265,16 @@ nothing is set up to serve it from an edge. Related to the multi-region non-goal
 ### Suggested order within this area
 1. ~~**Metrics**, so everything after is evidence-driven rather than reasoned.~~ **Done** —
    see above. The remaining items below are now measurable before and after.
-2. **Introduce the Spring cache abstraction** and migrate `EnvSnapshotCache` onto it — one
-   cache, already working, so the seam is proven against something known-good before
-   anything depends on it.
-3. **The SDK-key cache**, the largest single win, written through the new seam.
-4. **Negative caching**, which closes the denial-of-service vector.
-5. **Permissions**, then **rollout stats**.
+2. ~~**Introduce the cache abstraction**~~ **Done** — a reactive `SwitchboardCache` seam rather
+   than Spring's synchronous one; see [DECISIONS.md](DECISIONS.md) for why the mechanism changed
+   while the intent did not.
+3. ~~**The SDK-key cache**, the largest single win.~~ **Done** — measured live at 20 evaluation
+   requests to **1** database resolution (19 hits). Invalidated on mint and revoke, across
+   instances, over a second `NOTIFY` channel.
+4. ~~**Negative caching**, which closes the denial-of-service vector.~~ **Done** for SDK keys, on a
+   shorter TTL than positive entries.
+5. **Permissions**, then **identity**, then **rollout stats** — the caches are declared and their
+   meters are bound; the read-through call sites are not wired yet.
 
 Redis is not on this list on purpose. The seam makes it a configuration change whenever the
 deployment shape justifies it.

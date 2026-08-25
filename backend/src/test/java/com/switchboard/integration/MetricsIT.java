@@ -63,7 +63,7 @@ class MetricsIT extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("SDK-key resolution is timed on every evaluation request")
+    @DisplayName("SDK-key resolution is timed, and now happens once rather than per request")
     void sdkKeyResolutionIsTimed() {
         Workspace workspace = createWorkspace("metrics-sdk-key");
         createBooleanFlag(workspace, "metrics-sdk-key-flag");
@@ -74,11 +74,14 @@ class MetricsIT extends IntegrationTestBase {
         bootstrap(sdkKey);
         bootstrap(sdkKey);
 
-        // Two requests, two resolutions: the snapshot cache covers the flag reads but nothing
-        // covers this join, which is the whole argument for caching it.
+        // This asserted 2 when it was written, and that was correct then: nothing cached the
+        // sdk_keys -> environments -> projects join, so it ran once per evaluation request. It is
+        // 1 now because the cache landed, and this measurement is what argued for it. Left as an
+        // equality rather than a bound, so a regression that quietly reverts the cache fails here
+        // rather than passing a "<= 2".
         assertThat(timer.count() - before)
-            .as("one SDK-key resolution per evaluation request, uncached")
-            .isEqualTo(2);
+            .as("the key resolves against the database once, then from cache")
+            .isEqualTo(1);
     }
 
     @Test

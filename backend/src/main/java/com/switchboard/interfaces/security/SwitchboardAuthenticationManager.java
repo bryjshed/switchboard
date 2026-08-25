@@ -1,5 +1,8 @@
 package com.switchboard.interfaces.security;
 
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.application.user.UserService;
 import com.switchboard.domain.identity.IdentityProviderPort;
 import com.switchboard.domain.identity.IdentityVerificationException;
@@ -54,14 +57,16 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
     private final UserService userService;
     private final DatabaseClient db;
     private final IdentityProviderPort identities;
+    private final SwitchboardCache<String, SdkKeyPrincipal> sdkKeys;
     private final Timer sdkKeyResolve;
 
     public SwitchboardAuthenticationManager(
         UserService userService, DatabaseClient db, IdentityProviderPort identities,
-        MeterRegistry meters) {
+        CacheRegistry caches, MeterRegistry meters) {
         this.userService = userService;
         this.db = db;
         this.identities = identities;
+        this.sdkKeys = caches.cache(CacheName.SDK_KEY);
         this.sdkKeyResolve = Timer.builder(MetricsConfig.SDK_KEY_RESOLVE_TIMER)
             .description("Resolving an SDK key to its environment: sdk_keys -> environments -> projects")
             .register(meters);
@@ -94,11 +99,28 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
     }
 
     /**
-     * Timed because it runs on every single evaluation request and is uncached: the mapping from
-     * a key to an environment changes only when a key is minted or revoked, so this timer is the
-     * evidence for caching it.
+     * Resolves an SDK key to its environment, through the cache.
+     *
+     * <p>This ran a three-table join on <b>every</b> evaluation request - the single hottest path in
+     * the product - to answer a question whose answer changes only when a key is minted or revoked.
+     * Both of those evict, locally and across instances, so the cache is not merely TTL-bounded.
+     *
+     * <p><b>The key is the hash, never the token.</b> The token is a live credential; the hash is
+     * what the database already stores and what a heap dump may safely contain.
+     *
+     * <p>Absence is cached too, briefly. An unknown key used to reach the database on every attempt,
+     * so spraying invented keys was an unbounded-load denial-of-service vector rather than just
+     * waste. The timer stays: it is now the evidence that the cache is working, and it is the
+     * before/after that justified writing it.
      */
     private Mono<Authentication> authenticateSdkKey(String token) {
+        String hash = sha256(token);
+        return sdkKeys.get(hash, this::loadSdkKey)
+            .switchIfEmpty(Mono.error(new BadCredentialsException("Unknown or revoked SDK key")))
+            .map(p -> UsernamePasswordAuthenticationToken.authenticated(p, null, SDK_AUTHORITIES));
+    }
+
+    private Mono<SdkKeyPrincipal> loadSdkKey(String hash) {
         return Mono.defer(() -> {
             long startedAt = System.nanoTime();
             return db.sql("""
@@ -109,13 +131,11 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
                     JOIN projects p ON p.id = e.project_id
                     WHERE k.key_hash = :hash AND k.revoked_at IS NULL
                     """)
-                .bind("hash", sha256(token))
+                .bind("hash", hash)
                 .map(SwitchboardAuthenticationManager::mapSdkKey)
                 .one()
                 .doFinally(signal -> sdkKeyResolve.record(
-                    System.nanoTime() - startedAt, TimeUnit.NANOSECONDS))
-                .switchIfEmpty(Mono.error(new BadCredentialsException("Unknown or revoked SDK key")))
-                .map(p -> UsernamePasswordAuthenticationToken.authenticated(p, null, SDK_AUTHORITIES));
+                    System.nanoTime() - startedAt, TimeUnit.NANOSECONDS));
         });
     }
 
