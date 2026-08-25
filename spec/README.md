@@ -128,6 +128,12 @@ monotonicity assertion.
 **Any change to evaluation behaviour lands as a spec change plus regenerated vectors in the SAME
 commit as the code change.**
 
+> **"Regenerated" is aspirational today.** There is no generator: `spec/tools/` holds only
+> `verify-bucket.mjs`, which *checks* `bucket.json` against an independent 4-line reimplementation of
+> `bucket()`. Every vector file is hand-authored, and `sdk/typescript/test/conformance.test.ts`
+> hardcodes the total (`expect(executed).toBe(201)`), so adding a vector means editing that literal
+> by hand as well as the JSON. Read step 3 below as "write" until a generator exists.
+
 Not a follow-up PR, not a TODO. The moment `FlagEvaluator` and `spec/` disagree, every SDK author is
 working from a document that lies, and the vectors stop being evidence of anything. Concretely:
 

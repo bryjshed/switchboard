@@ -9,6 +9,25 @@ happen is changing one without knowing it was a decision.
 
 ---
 
+## Product scope
+
+**The mobile companion in `app/` is not maintained, as of 2026-08-24.** The web dashboard is the
+primary management surface and the app was always secondary. Three things decided it: no competitor
+ships a first-party mobile management app, so it was never load-bearing for a buyer; every feature
+added to the product cost a second implementation while it lived; and its e2e suite cannot run here
+anyway, because another project's Metro owns :8081.
+
+What this means concretely — the code stays in the tree and in history, it is **excluded from CI and
+from the definition of done**, and it is not updated when a contract changes. It will therefore drift,
+and that is expected rather than a bug to report. Reversing this is a catch-up pass against whatever
+contract changes have landed since, not a rebuild.
+
+The item it closes out is "mobile app: keep or drop?" in
+[REMAINING-WORK.md](REMAINING-WORK.md) §1. It also moots "the mobile app still hardcodes Firebase" in
+§2 — true, and now irrelevant.
+
+---
+
 ## Evaluation
 
 **Bucketing uses MD5, not SHA-256.** Chosen for ubiquity, not security. Bucketing is not a

@@ -325,6 +325,7 @@ and `docker-compose.yml`.
 backend/    Spring Boot (WebFlux, R2DBC, Flyway) — DDD: domain / application / infrastructure / interfaces
 dashboard/  Web UI — React + Vite (the primary management surface)
 app/        Expo mobile companion (expo-router, TanStack Query, semantic design tokens)
+            -- UNMAINTAINED since 2026-08-24, see docs/DECISIONS.md
 sdk/        Client libraries — sdk/typescript is an OpenFeature provider with local evaluation
 spec/       Normative evaluation spec + conformance vectors (the cross-language contract)
 scripts/    seed-local.mjs · smoke-test.mjs · token.sh · resolve-java.sh

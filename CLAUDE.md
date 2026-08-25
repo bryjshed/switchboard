@@ -15,7 +15,7 @@ reviewable diff. A monorepo.
 | `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 280 unit + 74 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 329 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 249 |
-| `app/` | Expo mobile companion (secondary; keep-or-drop undecided) | 95 |
+| `app/` | Expo mobile companion. **Unmaintained** since 2026-08-24 — excluded from CI and from the definition of done. Do not update it when a contract changes; it is expected to drift. See `docs/DECISIONS.md`. | 95 |
 | `spec/` | Normative evaluation spec + 201 conformance vectors | executed by backend and SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
@@ -31,7 +31,7 @@ make deps-up     # postgres 18 (:25432) + firebase auth emulator (:29099)
 make backend     # :28080, local profile
 make seed        # demo workspace via the public API; prints SDK keys once
 make dashboard   # :5273 -- the main UI
-make app         # expo, Metro pinned to :8092
+make app         # expo, Metro pinned to :8092 -- unmaintained, still runs
 ```
 
 Seed logins, password `password123`: `alice@switchboard.dev` (owner),
@@ -102,9 +102,11 @@ keys must survive the `NOTIFY` invalidation channel intact. Design in
 `docs/REMAINING-WORK.md`.
 
 **Evaluation behaviour is spec-first.** Any change to precedence, operators, segments or
-bucketing must land as a `spec/evaluation.md` edit **plus regenerated conformance vectors in
-the same commit**. That rule is the only thing keeping the server and every SDK in
-agreement.
+bucketing must land as a `spec/evaluation.md` edit **plus updated conformance vectors in the
+same commit**. That rule is the only thing keeping the server and every SDK in agreement.
+Note there is no vector *generator* — `spec/tools/` holds a checker only, vectors are
+hand-authored, and `sdk/typescript/test/conformance.test.ts` hardcodes the 201 total, so
+adding a vector means editing that literal too.
 
 **Flyway.** Migrations are `V1`–`V4` today; the next is **V5**. They run automatically
 locally.
@@ -116,8 +118,10 @@ cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
 cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
 cd dashboard  && npm run check && npm run build
 cd sdk/typescript && npx vitest run
-cd app        && npm run check
 ```
+
+`app/` is deliberately absent from that list — it is unmaintained, and a failing check there is
+expected drift rather than a regression to fix.
 
 Six live scripts run against a **running** stack and are the real regression net — they
 catch contract drift that unit tests cannot:
@@ -147,7 +151,6 @@ cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify -Dit.test=
 
 cd dashboard && npx vitest run src/lib/__tests__/rollout.test.ts
 cd sdk/typescript && npx vitest run test/conformance.test.ts
-cd app && npx jest __tests__/design-tokens.test.ts
 ```
 
 Backend logs go to `/tmp/sb-boot.log` when started the way `make backend` starts it. A
@@ -183,9 +186,10 @@ things are deliberate (the kill switch bypassing approval, MD5 bucketing, permis
 unioning rather than narrowing, an unknown flag returning 200). `docs/competitive-gaps.md`
 is the market research the backlog derives from.
 
-Three things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
+Two things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
 flag creation has never actually executed — everything else in the AI layer works without
-one), the mobile app's keep-or-drop decision, and a visual pass in light and dark.
+one), and a visual pass in light and dark. The mobile app's keep-or-drop question was
+decided on 2026-08-24 — dropped; see `docs/DECISIONS.md`.
 
 The local dev database accumulates throwaway data from verification runs. `docker compose
 down -v` then `make deps-up`, restart the backend, and re-seed for a clean demo state.

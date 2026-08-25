@@ -8,8 +8,11 @@ Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), mea
 against the architecture as it stands.
 
 **Status of the product today.** Backend (280 unit + 74 integration), web dashboard (329),
-TypeScript SDK (249), mobile companion (95), an evaluation spec with 201 conformance vectors
-executed by both the server and the SDK, and six live-check scripts against a running stack.
+TypeScript SDK (249), an evaluation spec with 201 conformance vectors executed by both the server and
+the SDK, and six live-check scripts against a running stack.
+
+**`app/` is unmaintained as of 2026-08-24** and is excluded from CI and from the definition of done —
+see [DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost.
 
 Working end to end: flags, targeting, percentage rollouts, versioning, audit, rollback, SSE
 delivery, the AI layer (natural language, healing, optimizing, stale sweep), OFREP,
@@ -36,8 +39,7 @@ Nothing here is a technical problem. Each needs a human.
 | Item | What is blocked | Why it matters |
 |---|---|---|
 | **No `ANTHROPIC_API_KEY`** | Natural-language flag creation | The Claude adapter, its forced-tool schema, and the calm `503 AI_UNAVAILABLE` degradation are all built and tested, but the real prompt-to-diff-to-apply loop **has never executed**. Everything else in the AI layer (healing, optimizing, stale sweep) works without a key. |
-| **`nexus-app`'s Metro holds port 8081** | Mobile e2e | The dev client attaches to whichever bundler owns 8081 and loads *that* project's JavaScript into Switchboard's native shell, red-screening on native modules Switchboard does not ship. Resolutions: stop the competing Metro, or produce a release build where the bundler-URL fallback does not apply. See `.maestro/README.md`. |
-| **Mobile app: keep or drop?** | Roadmap clarity | The web dashboard is now the primary surface. The app builds, runs, and has 95 tests, but every feature added to the product is a second implementation cost while it lives. No competitor ships a first-party mobile management app — it is a genuine differentiator, but a demo asset rather than something anyone buys on. |
+| **`nexus-app`'s Metro holds port 8081** | Mobile e2e | Moot as of 2026-08-24 — the app is unmaintained. Kept because the trap is real for anyone who does run it: the dev client attaches to whichever bundler owns 8081 and loads *that* project's JavaScript into Switchboard's native shell, red-screening on native modules Switchboard does not ship. See `.maestro/README.md`. |
 | **Visual review in light and dark** | Design sign-off | Never done. Both UIs use semantic tokens only and are theme-aware by construction, but nobody has looked at the pixels. |
 
 ---
@@ -75,10 +77,6 @@ client-side availability, and an evaluated-payload (rather than rule-set) bootst
 client contexts.
 
 ### Smaller
-- **The mobile app still hardcodes Firebase.** The backend and dashboard are now
-  provider-agnostic; the Expo app still authenticates through a Firebase emulator REST
-  bridge. Contained work, mirroring what `dashboard/src/auth/` already does — but pointless
-  if the app is dropped, so it waits on that decision. **S–M**
 - **Flag list pagination is not wired in the dashboard** (`listFlags` returns `nextCursor`;
   the page requests 50 and stops). Invisible at nine seeded flags, breaks at real volume. **S**
 - **429 is not implemented** — no rate limiter exists anywhere. OFREP documents a
@@ -312,10 +310,11 @@ What breaks at that scale is everything around them:
 - **Only three environments have a visual identity.** `envColors.ts` maps `dev`, `staging`
   and `production` (plus a `prod` alias); every other key falls back to neutral, so seven of
   ten environments look identical at a glance.
-- **The UI assumes a handful.** The flags list uses a segmented control for environment
-  selection, which is unusable past about five, and flag detail renders one card per
-  environment — a long scroll at ten. Both need to become a searchable picker and a
-  collapsed or filtered list.
+- **The UI assumes a handful.** Environment selection is one global `Select` in the header
+  (`WorkspaceSwitchers.tsx`), but the flags list renders **one state chip per environment on
+  every row** (`FlagsPage.tsx`) — at ten environments each row carries ten chips — and flag
+  detail renders a left rail with one entry per environment plus an at-a-glance chip row
+  (`FlagDetailPage.tsx`). Both need to collapse or filter rather than enumerate.
 - **Ordering is conventional, not declared.** Environments sort by a hardcoded
   dev → staging → production preference with extras appended. There is no sort key, so a
   team with `dev`, `qa`, `uat`, `perf`, `staging-eu`, `staging-us`, `prod-eu`, `prod-us`

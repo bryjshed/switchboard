@@ -29,8 +29,10 @@ smoke:
 dashboard:
 	cd dashboard && npm run dev
 
-# Optional mobile companion. Metro on 8092, not the default 8081: a Metro from another
-# project (e.g. nexus-app) squatting on 8081 silently serves the wrong bundle to the simulator.
+# Mobile companion. UNMAINTAINED since 2026-08-24 (see docs/DECISIONS.md) -- it still runs, but
+# it is excluded from CI and is not updated when an API contract changes, so expect drift.
+# Metro on 8092, not the default 8081: a Metro from another project (e.g. nexus-app) squatting
+# on 8081 silently serves the wrong bundle to the simulator.
 app:
 	cd app && npx expo start --port 8092 --ios
 

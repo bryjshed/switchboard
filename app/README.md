@@ -1,5 +1,11 @@
 # Switchboard mobile
 
+> **Unmaintained as of 2026-08-24.** The keep-or-drop question was decided in favour of drop:
+> see [Product scope](../docs/DECISIONS.md#product-scope) for why. The code stays in the tree
+> and still builds, but it is excluded from CI, it is not updated when an API contract changes,
+> and it will drift. Everything below describes how it worked at the point it stopped being
+> maintained.
+
 The companion app — the kill switch in your pocket. Flags, targeting, version history and
 rollback, the monitor, and AI proposals, on a phone. The [web dashboard](../dashboard/README.md)
 is the primary management surface; this is the one you reach for when the pager goes off and you
