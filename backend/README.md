@@ -848,8 +848,8 @@ emulator token  -> HTTP 401
 ```
 
 The app starts cleanly, logs nothing unusual, and every script and integration test that uses
-`Bearer dev:<email>` keeps passing — while the dashboard and the mobile app, which sign in
-through the emulator and send a real ID token, get a 401 on every request. Without the variable
+`Bearer dev:<email>` keeps passing — while the dashboard, which signs in through the emulator
+and sends a real ID token, gets a 401 on every request. Without the variable
 the `firebase` provider is an ordinary OIDC provider expecting Google-signed tokens, and emulator
 tokens are unsigned. `make backend` sets it; anything else you invent has to as well.
 

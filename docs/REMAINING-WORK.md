@@ -7,8 +7,8 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (329),
-an evaluation spec with 508 conformance vectors executed by both the server and
+**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (337),
+an evaluation spec with 507 conformance vectors executed by both the server and
 the SDK, and seven live-check scripts against a running stack.
 
 **The Expo mobile companion was deleted on 2026-08-24** — see
@@ -134,10 +134,12 @@ but not yet from the first-party SDK. **S–M**
 
 ---
 
-## 3. Caching — largely absent outside the evaluation path
+## 3. Caching — **largely landed 2026-08-25**
 
-One environment snapshot cache does the heavy lifting and nothing else is cached. That is
-fine at demo scale and wrong at any real one.
+This section was written when one environment snapshot cache did all the work and nothing else
+was cached. Five caches and a seam later, most of it is done; the original reasoning is kept
+below with the outcome marked against it, because the *arguments* for each cache are what a
+reader needs when deciding whether to change one.
 
 ### What exists
 - **`EnvSnapshotCache`** — now on the shared `CacheRegistry` seam (it was migrated first, on
@@ -151,94 +153,101 @@ fine at demo scale and wrong at any real one.
 - **Client-side** — the TypeScript SDK holds config in memory and evaluates locally, so a
   flag check costs nothing after the initial load.
 
-### What is not cached, and where it hurts
+### What was not cached, and where it hurt
 
-**SDK key resolution runs a SQL join on every evaluation request.** `sdk_keys` →
+All but the last of these landed on 2026-08-25. The measurements are live, not projected.
+
+**~~SDK key resolution runs a SQL join on every evaluation request.~~ Done.** `sdk_keys` →
 `environments` → `projects`, per request, on the single hottest path in the product. At any
 meaningful evaluation QPS this is the database's dominant workload, and it is pure overhead:
 an SDK key's mapping to an environment changes only when a key is minted or revoked. Cache
 it keyed by the key hash, invalidated on those two events. **S** · **highest-value cache
-work.**
+work.** Measured after: 20 evaluation requests, **1** database resolution.
 
-**RBAC permission resolution runs a union query per authorization decision.** Every
+**~~RBAC permission resolution runs a union query per authorization decision.~~ Done.** Every
 management request resolves permissions across org, project and environment scopes, and a
 single dashboard page load makes several. Cache per `(user, scope)` with invalidation on
-role-assignment change. **S–M**
+role-assignment change. **S–M** Measured after: 15 flag-list requests, **0** extra
+resolutions. Shortest TTL of any cache (30s), because staleness here means someone keeps access
+that was just taken away.
 
-**Identity lookup per authenticated request.** Every request resolves the token subject to a
-user row. Same shape of fix. **S**
+**~~Identity lookup per authenticated request.~~ Done.** Same shape of fix. Absence is
+deliberately *not* cached for identity or permissions: "no such user" and "no standing" both stop
+being true the moment somebody signs in for the first time or is granted a role.
 
-**JWKS fetching in the new OIDC provider.** Key sets must be cached with a sane TTL and
-refreshed on an unknown `kid` — without it, every login is an outbound HTTPS round-trip to
-the identity provider, and an IdP hiccup becomes a Switchboard outage. Verify this is
-actually implemented rather than assumed. **S**
+**~~JWKS fetching in the new OIDC provider.~~ Already implemented; verified, not rebuilt.**
+Nimbus's own cache plus a decoder-rebuild TTL (default 15 minutes) in `OidcIdentityProvider`. The
+instruction to check rather than assume was the right one — the answer was simply yes.
 
-**Rollout statistics are aggregated from scratch every time.** The Monitor screen and every
+**~~Rollout statistics are aggregated from scratch every time.~~ Done**, short TTL. The Monitor screen and every
 `rollout-scan` run a `GROUP BY` across the partitioned event tables over a 48-hour window.
 This is the most expensive query in the system and it is recomputed on every page load.
 Needs either a short-TTL cache or incremental rollups. **M**
 
-**No negative caching.** An unknown flag key or an invalid SDK key hits the database every
-time. Besides the waste, a scanner spraying bad keys turns into unbounded database load —
+**~~No negative caching.~~ Done for SDK keys**, on a shorter TTL than positive entries. An
+unknown flag key or an invalid SDK key hit the database every time. Besides the waste, a scanner spraying bad keys turns into unbounded database load —
 this is a denial-of-service vector as much as a performance one. **S**
 
-**Dashboard list queries** — flags, audit, change requests — are uncached. Lower stakes,
-since they are human-paced. **S**
+**Dashboard list queries** — flags, audit, change requests — are **still uncached**, and
+deliberately last: they are human-paced, and a stale flag list is a worse trade than a fast one.
+The only item in this subsection not done. **S**
 
-### The architecture to build toward
+### The architecture — as built, and where it departed from this plan
 
-**Decision: go through Spring's cache abstraction, backed by Caffeine now and swappable to
-Redis by configuration.** Today's `EnvSnapshotCache` is a hand-rolled Caffeine `AsyncCache`
-wired directly into the service. It works, but every future cache written the same way is
-another call site to rewrite the day a shared tier is needed. Adopting
-`org.springframework.cache` means the provider is a config choice — `cache.provider:
-caffeine | redis` — and no service code changes when it flips.
+**The original decision here was "go through Spring's cache abstraction". It was reversed
+during implementation, and the reversal is the most useful thing in this section.**
 
-Shape it as:
+The intent survived intact: one seam, provider chosen by `switchboard.cache.provider`, cache
+names/TTLs/sizes declared centrally, a typed facade rather than `@Cacheable` strings scattered
+across call sites, and two tiers declared per cache. What changed is the mechanism —
+`CacheRegistry` / `SwitchboardCache` is a **reactive seam that uses no proxies at all**, rather
+than `@EnableCaching` over `org.springframework.cache`.
 
-- **`@EnableCaching` with a `CacheManager` chosen by property.** `CaffeineCacheManager` by
-  default; `RedisCacheManager` (reactive) when configured. Declare cache names, TTLs and
-  maximum sizes in `application.yml` so adding a cache is one config entry rather than new
-  manager code, and freeze the name set so a typo fails loudly at startup instead of
-  silently creating an unbounded cache.
-- **A typed facade** over `Cache` rather than scattering `@Cacheable` string keys — a small
-  `SwitchboardCache<V>` with `get`/`getOrCompute`/`put`/`evict`, obtained from a registry
-  that validates the name against the configured set at bean construction.
-- **Two tiers, declared per cache.** `REPLICATED` entries live in the shared store under the
-  Redis provider; `LOCAL` entries stay per-instance under both providers and are invalidated
-  by notification. The distinction is not premature — anything holding decrypted secrets or
-  per-instance state must never leave the pod, and deciding that per cache up front is much
-  cheaper than retrofitting it.
+The reason is the trap below. Spring's abstraction is synchronous, and every workaround for that
+on a `Mono`-returning method costs more than the abstraction is worth. Names are a `CacheName`
+enum, so a typo is a compile error rather than a startup one; keys are Strings, so they survive
+the `NOTIFY` invalidation channel intact. Full reasoning in [DECISIONS.md](DECISIONS.md).
 
-### The trap that will bite first
+### The trap that bit — and how the seam avoids it
 
 **`@Cacheable` on a method returning `Mono` caches the cold publisher, not the value.** Every
-subsequent caller gets a publisher that re-executes on subscribe, so the cache appears to
-work while doing nothing — or worse, the cached `Mono` is consumed once and later
-subscribers see empty. The Caffeine manager must be configured with **async cache mode** for
-`@Cacheable` to behave on reactive return types, and the current explicit
-`AsyncCache` + `Mono.fromFuture` approach is correct precisely because it sidesteps this.
-Whatever is adopted, prove it with a test that asserts the loader ran **once** across two
-subscriptions.
+subsequent caller gets a publisher that re-executes on subscribe, so the cache appears to work
+while doing nothing — or worse, the cached `Mono` is consumed once and later subscribers see
+empty. This is the single most dangerous thing in this whole section, because it fails *open*:
+nothing errors, the code looks right, and the cache is simply inert.
 
-Two more that follow from it:
+**Do not reach for `@Cacheable` here.** The seam sidesteps it — and the two below — by not using
+proxies. The test that proves it asserts the loader ran **once** across two subscriptions, and it
+exists.
 
-- **Self-invocation bypasses the proxy.** `@Cacheable` methods must live in their own
-  `@Component` loader bean that the service calls, not on the service itself. A private or
-  same-class call goes straight past the caching advice and silently does nothing.
-- **Key types must survive the invalidation channel.** Invalidation today rides Postgres
-  `NOTIFY`, whose payload is text. If keys are stringified UUIDs on one side and `UUID`
-  objects on the other, eviction quietly misses and instances serve stale config
-  indefinitely. Pick one representation and pin it with a test.
+Two more that the proxy-free design also disposes of:
+
+- **Self-invocation bypasses the proxy.** With `@Cacheable`, cached methods must live in their own
+  `@Component` loader bean that the service calls, never on the service itself; a same-class call
+  goes straight past the advice and silently does nothing. No proxy, no trap.
+- **Key types must survive the invalidation channel.** Invalidation rides Postgres `NOTIFY`, whose
+  payload is text. Stringified UUIDs on one side and `UUID` objects on the other means eviction
+  quietly misses and instances serve stale config indefinitely. Settled by making keys Strings
+  throughout, pinned by a test.
 
 ### When Redis actually earns its place
 
-Not yet. Caffeine is correct for a single instance, and `NOTIFY` already invalidates every
-instance, so correctness does not require a shared store. Redis earns its place when there
-are enough instances that cold starts hurt — a new pod today rebuilds every cache from the
-database — or when something genuinely needs shared state, such as rate limiting. Both are
-deployment-shaped questions, and there is no deployment yet. **Build the seam now, choose the
-provider later** — that is the whole point of routing through the abstraction.
+**Still not yet, and the question now has a sharper answer than when this was written.** Caffeine
+is correct for a single instance and `NOTIFY` already invalidates every instance, so correctness
+does not require a shared store — a shared cache would be a correctness *equal* and a latency
+loss. Redis earns its place when there are enough instances that cold starts hurt (a new pod
+rebuilds every cache from the database), or when something genuinely needs shared state.
+
+That second condition now has exactly one occupant: **the rate limiter**, added 2026-08-25 and
+deliberately *not* on the cache seam. The seam is read-through over values that can be recomputed;
+a rate-limit bucket is mutable state that must not be. It is per-instance, so two instances mean
+twice the configured rate — honest rather than ideal, and the first thing here that genuinely
+wants a shared store. The order to work in is written down in
+[DEPLOYMENT.md](DEPLOYMENT.md#scaling-past-one-node): divide the limits by the instance count,
+then move migrations out of boot, then reach for Redis.
+
+There *is* a deployment story now, which is what this paragraph used to be waiting on. **The seam
+was built; the provider is still a configuration change away.**
 
 When it does happen, the serializer is where the time goes: Java records are final, so
 polymorphic type handling has to be configured deliberately; unknown-property failures must
@@ -256,9 +265,13 @@ subscribers and tracked environments are gauged, the second so the never-evicted
 shows up as a widening gap against the first. `MetricsIT` asserts each meter **moves**, not
 merely that it exists.
 
-**The management port is unauthenticated** — the management child context does not inherit
-`SecurityConfig`'s filter chain. It must be bound to the pod or host network and never
-published; this needs restating in the deployment story.
+**The management port's endpoints are unauthenticated, but not for the reason first written
+here.** The claim in this spot used to be that the management child context does not inherit
+`SecurityConfig`'s filter chain. **That is false** — it does, which is exactly why `health`,
+`info` and `prometheus` have to be named `permitAll` there, and why Prometheus returned 401
+until they were. The boundary is the *port*, not the filter chain: bind it to the pod or host
+network and never publish it. Now restated in [DEPLOYMENT.md](DEPLOYMENT.md#the-management-port),
+and `docker-compose.prod.yml` does not publish 28081.
 
 **The SDK has no local persistence.** Config lives in memory only, so a process restart
 always requires a successful network fetch before the first evaluation is accurate. If
@@ -472,16 +485,35 @@ Consciously not building, so nobody re-litigates them by accident:
 
 ## Suggested order
 
-1. **Peeking fix.** A defect in the headline differentiator; small and contained.
-2. **Bootstrap exposure + client key kinds.** A security issue the moment anyone uses this
-   from a browser.
-3. **Cache metrics, then the SDK-key cache.** Every evaluation currently pays a SQL join
-   for authorization; this is the cheapest large win in the system.
+**Items 1–6 all landed between 2026-08-24 and 2026-08-25.** They are kept here rather than deleted
+because the ordering argument is the useful part: each was placed where it was for a reason, and
+the reasons held.
+
+1. ~~**Peeking fix.**~~ **Done.** A defect in the headline differentiator; small and contained.
+   Turned out to sit on a larger one — the "proportions" were denominated in evaluation *events*
+   rather than subjects — which no sequential test would have fixed.
+2. ~~**Bootstrap exposure + client key kinds.**~~ **Done.** A security issue the moment anyone
+   used this from a browser. The same ETag bug was in the OFREP bulk endpoint and went with it.
+3. ~~**Cache metrics, then the SDK-key cache.**~~ **Done.** Metrics first was the right call: the
+   caching that followed was justified by hit-rate evidence rather than by reasoning.
 4. ~~**Personal access tokens → MCP server.**~~ **Done.**
 5. ~~**Targeting operators and typed attributes.**~~ **Done.**
 6. ~~**CI and a deployment story.**~~ **Done.** The shared-cache question it was meant to force
    has an answer: not yet, and the reason is written down — the caches are read-through over
    `NOTIFY`-invalidated data, so a shared store buys nothing there. The rate limiter is the one
    thing that genuinely wants Redis, and only above one instance.
-7. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
-8. **Load and performance testing**, which is now the largest untested claim in the repo.
+
+### What is actually next
+
+7. **Load and performance testing.** Now the largest untested claim in the repo, and it has been
+   promoted above the enterprise cluster on purpose: every latency number in the docs is
+   unmeasured, retention has never run against real volume, and the caches added in 3 were sized
+   by argument rather than by load. Worth knowing that no vendor publishes p50/p95/p99 for flag
+   delivery either — the bar is internal honesty, not a public benchmark. **M**
+8. **Signed webhooks.** The cheapest remaining thing everyone else has. **S**
+9. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
+10. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Deliberately deferred through the
+    contract churn in the client-keys and operators work; that churn has now settled, so the
+    reason for waiting is spent.
+11. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
+    first piece of it and was not planned as such.

@@ -347,6 +347,14 @@ construction, and they run there on every pull request.
 - **`dashboard/scripts/auth-check.mjs` fails its OIDC leg unless the backend has a second
   provider configured.** The script prints the exact command. The Firebase leg passing alone
   is expected on a default stack.
+- **The seeded demo produces optimize findings but no healing finding.** The error-heavy flag
+  (`payment-provider-v2`) is kill-switched by the seed on purpose, to demo the kill switch, and a
+  killed flag is correctly not a live rollout. `TESTING.md` has the drill that produces one by
+  hand.
+- **A fresh `make seed` shows `itemsScanned=0` if the version rows were not backdated.** The
+  monitor measures from the allocation epoch, and the seed writes configs *now* while ingesting
+  48h of backdated traffic. The seed backdates the rollout flags for exactly this reason; the same
+  trap catches anyone hand-building a scenario.
 - **`java -jar` refuses to start with `FIREBASE_AUTH_EMULATOR_HOST` set.** The optional
   `firebase-admin` dependency is not in the packaged jar. Use `make backend`. See Deployment.
 - **The live check scripts 401 against anything but a local stack.** Dev tokens are

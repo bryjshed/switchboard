@@ -109,11 +109,16 @@ folds one branch away entirely:
 | Build                          | JS emitted                                            |
 | ------------------------------ | ----------------------------------------------------- |
 | before this seam existed       | one 703 kB chunk, Firebase inside it                   |
-| `VITE_AUTH_PROVIDER` unset/firebase | 607 kB entry + 104 kB `firebaseAuthProvider` chunk, loaded on demand |
-| `VITE_AUTH_PROVIDER=oidc`      | 607 kB entry + 70 kB `oidcAuthProvider` chunk. **No Firebase chunk at all** |
+| `VITE_AUTH_PROVIDER` unset/firebase | 352 kB entry + 104 kB `firebaseAuthProvider` chunk, loaded on demand |
+| `VITE_AUTH_PROVIDER=oidc`      | 352 kB entry + 70 kB `oidcAuthProvider` chunk. **No Firebase chunk at all** |
+
+Route-level lazy loading (2026-08-25) split the rest into 48 chunks and took the entry from
+607 kB to 352 kB. Login and the auth callbacks stay eager: they are the first paint for a
+signed-out visitor, so a chunk request in front of the login form would be latency for nothing.
 
 An Okta deployment ships no `@firebase/*` code — `grep identitytoolkit dist/assets/*.js` finds
-nothing — and initialises no Firebase app. Switching providers means rebuilding, not restarting.
+nothing, verified in both directions — and initialises no Firebase app. Switching providers means
+rebuilding, not restarting.
 
 ### Why `oidc-client-ts`
 
