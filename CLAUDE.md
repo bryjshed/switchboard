@@ -134,6 +134,32 @@ node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC prov
 Run all of them after any backend change. If one fails in a tree you do not own, say so
 rather than "fixing" it.
 
+### Tight loops
+
+Do not run the full suite to check one thing. These are verified working:
+
+```bash
+# one unit test class (fast, no container)
+cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw test -Dtest=FlagEvaluatorTest -Dcheckstyle.skip
+
+# one integration test class (starts Testcontainers, ~10s)
+cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify -Dit.test=EvalApiIT -Dsurefire.skip=true -Dcheckstyle.skip
+
+cd dashboard && npx vitest run src/lib/__tests__/rollout.test.ts
+cd sdk/typescript && npx vitest run test/conformance.test.ts
+cd app && npx jest __tests__/design-tokens.test.ts
+```
+
+Backend logs go to `/tmp/sb-boot.log` when started the way `make backend` starts it. A
+`DnsServerAddressStreamProviders` error on macOS during tests is noise, not a failure.
+
+Reset the local database — it accumulates throwaway users, orgs and flags from verification
+runs:
+
+```bash
+docker compose down -v && docker compose up -d --wait   # then restart backend, then: make seed
+```
+
 ## Working with multiple agents
 
 **One writer per tree.** `backend/`, `dashboard/`, `app/`, `sdk/` and `spec/` are separate
@@ -151,7 +177,11 @@ defaulting to a user that was never seeded.
 ## Where things stand
 
 `docs/REMAINING-WORK.md` is the backlog: what is missing, why it matters, effort estimates,
-and a suggested order. `docs/competitive-gaps.md` is the market research it derives from.
+and a suggested order. `docs/DECISIONS.md` records the choices that look wrong until you know
+why — **read it before "fixing" something that seems obviously broken**, because several
+things are deliberate (the kill switch bypassing approval, MD5 bucketing, permissions
+unioning rather than narrowing, an unknown flag returning 200). `docs/competitive-gaps.md`
+is the market research the backlog derives from.
 
 Three things need a human rather than an agent: an `ANTHROPIC_API_KEY` (natural-language
 flag creation has never actually executed — everything else in the AI layer works without
