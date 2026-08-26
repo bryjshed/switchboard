@@ -678,9 +678,39 @@ the reasons held.
     mapping and produced a 500, which is what the first version did. And deactivation evicts the
     identity cache, without which a deprovisioned person keeps working for five more minutes.
     12 integration tests, including that one. **Groups: S–M if a buyer asks.**
-15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
-    Deliberately deferred through the contract churn in the client-keys and operators work; that
-    churn has now settled, so the reason for waiting is spent.
+15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** **Reassessed 2026-08-26 and
+    deliberately not done as written** — investigating it found the premise had been overtaken by
+    step 1, and the two concrete defects underneath it were fixed instead.
+
+    **Why the merge would make the model worse.** The two statuses answer genuinely different
+    questions: a proposal's says *has this suggestion been acted on*, a change request's says
+    *what did reviewers decide*. Collapsing them conflates a suggestion with a review. And
+    reconciliation is already single-sourced — `ChangeRequestApplier.settleProposal` is the only
+    thing that moves a proposal to APPLIED, and it runs **inside the same transaction as the
+    write**, so the two can never disagree about what landed. Routing every ungated apply through
+    a change request would add a row and a lifecycle to the common path, and put queue latency in
+    front of automated healing, which fires during an incident.
+
+    Step 1 — routing AI applies through the approval gate — was the part that carried the value,
+    because it closed a real hole: an org with approvals on still had an unreviewed write path
+    into production. Steps 2–3 were speculative follow-ons written before that landed.
+
+    **The two real defects, both fixed:**
+
+    - **`EXPIRED` was a status nothing ever wrote.** Allowed by the schema since V1, produced by
+      no code path. A value nothing produces still costs every reader a decision about whether to
+      handle it and every client a branch. Removed in `V12`.
+    - **A parked proposal was indistinguishable from an untouched one.** Both are `DRAFT` —
+      correctly, since a parked proposal genuinely has not been applied — so a proposal list
+      could not tell *awaiting review* from *nobody has acted on this*, and those call for
+      opposite actions from whoever is looking. `AiProposalResponse` now carries
+      `pendingChangeRequestId`, derived from the open request rather than stored, so it cannot
+      drift. DECLINED, WITHDRAWN and STALE deliberately read as **not** parked, because all three
+      leave the proposal re-appliable.
+
+    What remains genuinely open is smaller than the original line: nothing. If a future reader
+    still wants one lifecycle, the argument above is what they need to rebut.
+
 16. ~~**Experimentation as a product**~~ — **first step done 2026-08-26: user-defined metrics.**
     The monitor knew exactly two keys, `error` and `conversion`, hard-coded into the aggregation
     as pivoted columns. A metric is now an entity with a **direction** (which way is good), its

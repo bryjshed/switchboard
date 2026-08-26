@@ -1565,7 +1565,7 @@ export interface components {
         /** @enum {string} */
         ProposalKind: "FLAG_CREATE" | "FLAG_UPDATE" | "ROLLBACK" | "RETIREMENT";
         /** @enum {string} */
-        ProposalStatus: "DRAFT" | "APPLIED" | "REJECTED" | "EXPIRED";
+        ProposalStatus: "DRAFT" | "APPLIED" | "REJECTED";
         EnvChange: {
             envKey: string;
             enabled?: boolean;
@@ -1601,6 +1601,13 @@ export interface components {
             createdBy: string;
             appliedBy?: string;
             appliedVersion?: number;
+            /**
+             * Format: uuid
+             * @description The change request this proposal is parked behind, when its apply required review.
+             *
+             *     DRAFT DOES NOT MEAN UNTOUCHED. A proposal whose apply was gated stays DRAFT - it has not been applied - so without this field a parked proposal is indistinguishable from one nobody has acted on. Present means "awaiting review"; applying it again is refused with a 409 rather than opening a second parked request.
+             */
+            pendingChangeRequestId?: string;
             /** Format: date-time */
             createdAt: string;
         };
@@ -3418,7 +3425,7 @@ export interface operations {
     listProposals: {
         parameters: {
             query?: {
-                status?: "DRAFT" | "APPLIED" | "REJECTED" | "EXPIRED";
+                status?: "DRAFT" | "APPLIED" | "REJECTED";
                 cursor?: string;
                 limit?: number;
             };

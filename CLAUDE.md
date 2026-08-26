@@ -128,7 +128,7 @@ same commit**. That rule is the only thing keeping the server and every SDK in a
 `spec/tools/generate-vectors.mjs` writes the combinatorial vectors (`operators.json`); the rest
 are hand-authored. `--check` fails when they are stale. The runners no longer hardcode a count.
 
-**Flyway.** Migrations are `V1`–`V11` today; the next is **V12**. They run automatically
+**Flyway.** Migrations are `V1`–`V12` today; the next is **V13**. They run automatically
 locally.
 
 ## Verifying

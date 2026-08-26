@@ -214,6 +214,28 @@ the newer config. Same semantics as the `expectedVersion` 409 on direct writes.
 **An AI proposal declined or gone stale leaves the proposal DRAFT.** That is the state it can
 be re-applied from, so nothing gets stuck.
 
+**DRAFT therefore does not mean "untouched", and the API says which is which.** A proposal parked
+behind an open change request is also DRAFT - it genuinely has not been applied - so on the wire
+it was indistinguishable from one nobody had acted on, and those call for opposite actions from
+whoever is looking at the list. `AiProposalResponse.pendingChangeRequestId` is derived from the
+open request rather than stored, so it cannot drift from reality. DECLINED, WITHDRAWN and STALE
+deliberately read as *not* parked, because all three leave the proposal re-appliable.
+
+**The proposal and change-request lifecycles are NOT merged, and that was reconsidered
+deliberately.** The backlog carried "make `ai_proposals` a source table and `change_requests` the
+single lifecycle" as remaining work. It was investigated on 2026-08-26 and rejected: the two
+statuses answer different questions - a proposal's is *has this suggestion been acted on*, a
+change request's is *what did reviewers decide* - and merging them conflates a suggestion with a
+review. Reconciliation is already single-sourced in `ChangeRequestApplier.settleProposal`, which
+runs inside the same transaction as the write, so the two cannot disagree about what landed.
+Routing every ungated apply through a change request would also put queue latency in front of
+automated healing, which by definition fires during an incident. If someone wants to revisit
+this, that is the argument to rebut.
+
+**`ProposalStatus` has no EXPIRED.** The schema allowed it from V1 and nothing ever wrote it.
+Removed in V12: a value nothing produces still costs every reader a decision about whether to
+handle it.
+
 ---
 
 ## SCIM provisioning

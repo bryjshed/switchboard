@@ -194,7 +194,10 @@ export function ProposalsPage() {
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <ProposalKindBadge kind={proposal.kind} />
-                  <ProposalStatusBadge status={proposal.status} />
+                  <ProposalStatusBadge
+                    status={proposal.status}
+                    pendingChangeRequestId={proposal.pendingChangeRequestId}
+                  />
                   <span className="font-mono text-sm font-medium">{proposal.diff.flagKey}</span>
                   <span
                     className="ml-auto text-xs text-muted-foreground"

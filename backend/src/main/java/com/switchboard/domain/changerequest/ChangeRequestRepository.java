@@ -48,4 +48,12 @@ public interface ChangeRequestRepository {
      * what makes it retryable.
      */
     Mono<Long> countNotAppliedByProposal(UUID aiProposalId, UUID excludingId);
+
+    /**
+     * The open (PENDING or APPROVED) change request a proposal is parked behind, if any.
+     *
+     * <p>What makes a parked proposal distinguishable from an untouched one: both are DRAFT,
+     * because a parked proposal has genuinely not been applied.
+     */
+    Mono<UUID> findOpenRequestIdByProposal(UUID aiProposalId);
 }

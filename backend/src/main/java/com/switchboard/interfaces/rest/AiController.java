@@ -9,6 +9,7 @@ import com.switchboard.domain.ai.AiProposal;
 import com.switchboard.domain.ai.AnomalyStatus;
 import com.switchboard.domain.ai.ProposalStatus;
 import com.switchboard.domain.common.ValidationException;
+import com.switchboard.domain.changerequest.ChangeRequestRepository;
 import com.switchboard.domain.flag.FlagRepository;
 import com.switchboard.interfaces.rest.api.AiApi;
 import com.switchboard.interfaces.rest.mapper.AiMappers;
@@ -39,16 +40,19 @@ public class AiController implements AiApi {
     private final AnomalyService anomalies;
     private final RolloutStatsService stats;
     private final FlagRepository flags;
+    private final ChangeRequestRepository changeRequests;
 
     public AiController(
         ProposalService proposals,
         AnomalyService anomalies,
         RolloutStatsService stats,
-        FlagRepository flags) {
+        FlagRepository flags,
+        ChangeRequestRepository changeRequests) {
         this.proposals = proposals;
         this.anomalies = anomalies;
         this.stats = stats;
         this.flags = flags;
+        this.changeRequests = changeRequests;
     }
 
     @Override
@@ -153,9 +157,19 @@ public class AiController implements AiApi {
      * FLAG_CREATE diff has no flag yet and renders without a resolved config.
      */
     private Mono<AiProposalResponse> toResponse(AiProposal proposal) {
-        return flags.findDetail(proposal.projectId(), proposal.diff().flagKey())
-            .map(detail -> AiMappers.toProposalResponse(proposal, detail))
-            .switchIfEmpty(Mono.fromSupplier(() -> AiMappers.toProposalResponse(proposal, null)));
+        // Only looked up for DRAFT proposals: an APPLIED or REJECTED one cannot be parked, and
+        // this runs per row of the proposal list.
+        Mono<java.util.UUID> parked = proposal.status() == ProposalStatus.DRAFT
+            ? changeRequests.findOpenRequestIdByProposal(proposal.id())
+            : Mono.empty();
+
+        return parked
+            .map(java.util.Optional::of)
+            .defaultIfEmpty(java.util.Optional.empty())
+            .flatMap(pending -> flags.findDetail(proposal.projectId(), proposal.diff().flagKey())
+                .map(detail -> AiMappers.toProposalResponse(proposal, detail, pending.orElse(null)))
+                .switchIfEmpty(Mono.fromSupplier(() ->
+                    AiMappers.toProposalResponse(proposal, null, pending.orElse(null)))));
     }
 
     private static ProposalActor actor(AuthenticatedUser user) {

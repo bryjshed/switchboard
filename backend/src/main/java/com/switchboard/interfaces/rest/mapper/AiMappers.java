@@ -51,6 +51,18 @@ public final class AiMappers {
 
     public static com.switchboard.interfaces.rest.model.AiProposalResponse toProposalResponse(
         AiProposal proposal, FlagDetail target) {
+        return toProposalResponse(proposal, target, null);
+    }
+
+    /**
+     * @param pendingChangeRequestId the open change request this proposal is parked behind, or
+     *     null. Needed because a parked proposal is still DRAFT - it has genuinely not been
+     *     applied - so without it the response cannot distinguish "awaiting review" from
+     *     "nobody has acted on this", and those call for opposite actions from whoever is
+     *     looking at the list.
+     */
+    public static com.switchboard.interfaces.rest.model.AiProposalResponse toProposalResponse(
+        AiProposal proposal, FlagDetail target, java.util.UUID pendingChangeRequestId) {
         return new com.switchboard.interfaces.rest.model.AiProposalResponse(
             proposal.id(),
             proposal.orgId(),
@@ -64,7 +76,8 @@ public final class AiMappers {
             .sourcePrompt(proposal.sourcePrompt())
             .rationale(proposal.rationale())
             .appliedBy(proposal.appliedBy())
-            .appliedVersion(proposal.appliedVersion());
+            .appliedVersion(proposal.appliedVersion())
+            .pendingChangeRequestId(pendingChangeRequestId);
     }
 
     /** {@code target} is the flag the diff edits, or null for a FLAG_CREATE. */

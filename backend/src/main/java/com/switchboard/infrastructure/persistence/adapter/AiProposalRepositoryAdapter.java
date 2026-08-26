@@ -70,7 +70,7 @@ public class AiProposalRepositoryAdapter implements AiProposalRepository {
 
     @Override
     public Mono<Long> casFromDraft(UUID proposalId, ProposalStatus toStatus, String actor) {
-        // APPLIED records who applied it; REJECTED/EXPIRED leave applied_by alone.
+        // APPLIED records who applied it; REJECTED leaves applied_by alone.
         String sql = toStatus == ProposalStatus.APPLIED
             ? """
                 UPDATE ai_proposals SET status = :toStatus, applied_by = :actor, updated_at = now()

@@ -1123,7 +1123,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [DRAFT, APPLIED, REJECTED, EXPIRED]
+            enum: [DRAFT, APPLIED, REJECTED]
         - name: cursor
           in: query
           schema:
@@ -3071,7 +3071,7 @@ components:
 
     ProposalStatus:
       type: string
-      enum: [DRAFT, APPLIED, REJECTED, EXPIRED]
+      enum: [DRAFT, APPLIED, REJECTED]
 
     EnvChange:
       type: object
@@ -3151,6 +3151,17 @@ components:
           type: string
         appliedVersion:
           type: integer
+        pendingChangeRequestId:
+          type: string
+          format: uuid
+          description: >-
+            The change request this proposal is parked behind, when its apply required review.
+
+
+            DRAFT DOES NOT MEAN UNTOUCHED. A proposal whose apply was gated stays DRAFT - it has
+            not been applied - so without this field a parked proposal is indistinguishable from
+            one nobody has acted on. Present means "awaiting review"; applying it again is
+            refused with a 409 rather than opening a second parked request.
         createdAt:
           type: string
           format: date-time

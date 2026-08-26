@@ -155,7 +155,6 @@ export const PROPOSAL_STATUSES = [
   'DRAFT',
   'APPLIED',
   'REJECTED',
-  'EXPIRED',
 ] as const satisfies readonly ProposalStatus[]
 
 export const PROPOSAL_KIND_LABELS: Record<ProposalKind, string> = {

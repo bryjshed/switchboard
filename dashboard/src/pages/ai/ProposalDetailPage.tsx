@@ -92,7 +92,10 @@ export function ProposalDetailPage() {
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <ProposalKindBadge kind={proposal.kind} />
-          <ProposalStatusBadge status={proposal.status} />
+          <ProposalStatusBadge
+                    status={proposal.status}
+                    pendingChangeRequestId={proposal.pendingChangeRequestId}
+                  />
           <span className="font-mono text-xl font-bold tracking-tight">
             {proposal.diff.flagKey}
           </span>

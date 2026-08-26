@@ -315,7 +315,10 @@ export function MonitorPage() {
                     >
                       <Sparkles className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                       <ProposalKindBadge kind={proposal.kind} />
-                      <ProposalStatusBadge status={proposal.status} />
+                      <ProposalStatusBadge
+                    status={proposal.status}
+                    pendingChangeRequestId={proposal.pendingChangeRequestId}
+                  />
                       <span className="font-mono text-sm">{proposal.diff.flagKey}</span>
                       <span
                         className="ml-auto text-xs text-muted-foreground"

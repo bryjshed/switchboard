@@ -228,6 +228,22 @@ public class ChangeRequestRepositoryAdapter implements ChangeRequestRepository {
         return spec.map(row -> row.get(0, Long.class)).one();
     }
 
+    @Override
+    public Mono<UUID> findOpenRequestIdByProposal(UUID aiProposalId) {
+        // PENDING or APPROVED: both mean the write has not landed and the proposal is still
+        // waiting on somebody. DECLINED, WITHDRAWN and STALE are all terminal states that leave the
+        // proposal genuinely re-appliable, so they must NOT read as parked.
+        return db.sql("""
+                SELECT id FROM change_requests
+                WHERE ai_proposal_id = :proposalId AND status IN ('PENDING', 'APPROVED')
+                ORDER BY created_at
+                LIMIT 1
+                """)
+            .bind("proposalId", aiProposalId)
+            .map(row -> row.get("id", UUID.class))
+            .one();
+    }
+
     // ---------------------------------------------------------------- mapping
 
     private Mono<ChangeRequest> withReviews(ChangeRequest request) {
