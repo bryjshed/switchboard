@@ -8,10 +8,11 @@ import { AiTab } from './settings/AiTab'
 import { TokensTab } from './settings/TokensTab'
 import { AccessTab } from './settings/AccessTab'
 import { ApprovalsTab } from './settings/ApprovalsTab'
+import { WebhooksTab } from './settings/WebhooksTab'
 import { useWorkspace } from '@/hooks/useWorkspace'
 import { usePermissions } from '@/hooks/usePermissions'
 
-const TABS = ['organization', 'access', 'approvals', 'sdk-keys', 'tokens', 'ai'] as const
+const TABS = ['organization', 'access', 'approvals', 'sdk-keys', 'tokens', 'webhooks', 'ai'] as const
 type TabValue = (typeof TABS)[number]
 
 function isTab(value: string | null): value is TabValue {
@@ -46,7 +47,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <PageHeading
         title="Settings"
-        description="Membership and roles, environment approval policy, SDK keys, and the AI layer's switches."
+        description="Membership and roles, environment approval policy, SDK keys, webhooks, and the AI layer's switches."
       />
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
@@ -65,6 +66,9 @@ export function SettingsPage() {
           </TabsTrigger>
           <TabsTrigger value="tokens" data-testid="tab-tokens">
             Tokens
+          </TabsTrigger>
+          <TabsTrigger value="webhooks" data-testid="tab-webhooks">
+            Webhooks
           </TabsTrigger>
           <TabsTrigger value="ai" data-testid="tab-ai">
             AI
@@ -93,6 +97,18 @@ export function SettingsPage() {
               Granting and revoking roles needs the permission to manage people and roles. Ask
               an owner or admin — they can see who holds what on this tab.
             </p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="webhooks" className="mt-4">
+          {loading && !org ? (
+            <Skeleton className="h-64 w-full" />
+          ) : org ? (
+            // Guarded by MANAGE_SETTINGS on the server; the tab stays visible and the API
+            // refuses, matching how the other admin tabs behave.
+            <WebhooksTab orgId={org.id} />
+          ) : (
+            <p className="text-sm text-muted-foreground">No organization selected.</p>
           )}
         </TabsContent>
 

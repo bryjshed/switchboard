@@ -42,10 +42,35 @@ public class RolloutMonitorProperties {
      */
     private Duration maxLookback = Duration.ofDays(30);
 
+    /**
+     * How many candidates the scan measures at once.
+     *
+     * <p>Each measurement is one aggregation across the partitioned event tables, and those were
+     * run strictly one at a time until 2026-08-25 - so a scan cost the SUM of them, measured at
+     * 2.0-5.6 s per flag at 2.4M events. Bounded rather than unbounded because the work is
+     * database-bound: fanning out further than the connection pool can serve moves the queue
+     * from the scan into the pool without making anything finish sooner.
+     *
+     * <p>Four is deliberately below the default pool size (10), so a scan cannot starve the
+     * evaluation hot path of connections while it runs.
+     */
+    private int scanConcurrency = 4;
+
     private final Metrics metrics = new Metrics();
     private final Alpha alpha = new Alpha();
     private final Tau tau = new Tau();
     private final Srm srm = new Srm();
+
+    public int getScanConcurrency() {
+        return scanConcurrency;
+    }
+
+    public void setScanConcurrency(int scanConcurrency) {
+        // One means serial, which is the old behaviour and a legitimate choice on a small
+        // instance. Zero or negative would make flatMapSequential throw at scan time rather
+        // than at startup, so it is clamped here where the mistake is visible.
+        this.scanConcurrency = Math.max(1, scanConcurrency);
+    }
 
     public boolean isEnabled() {
         return enabled;

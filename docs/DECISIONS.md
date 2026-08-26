@@ -214,6 +214,82 @@ the newer config. Same semantics as the `expectedVersion` 409 on direct writes.
 **An AI proposal declined or gone stale leaves the proposal DRAFT.** That is the state it can
 be re-applied from, so nothing gets stuck.
 
+**DRAFT therefore does not mean "untouched", and the API says which is which.** A proposal parked
+behind an open change request is also DRAFT - it genuinely has not been applied - so on the wire
+it was indistinguishable from one nobody had acted on, and those call for opposite actions from
+whoever is looking at the list. `AiProposalResponse.pendingChangeRequestId` is derived from the
+open request rather than stored, so it cannot drift from reality. DECLINED, WITHDRAWN and STALE
+deliberately read as *not* parked, because all three leave the proposal re-appliable.
+
+**The proposal and change-request lifecycles are NOT merged, and that was reconsidered
+deliberately.** The backlog carried "make `ai_proposals` a source table and `change_requests` the
+single lifecycle" as remaining work. It was investigated on 2026-08-26 and rejected: the two
+statuses answer different questions - a proposal's is *has this suggestion been acted on*, a
+change request's is *what did reviewers decide* - and merging them conflates a suggestion with a
+review. Reconciliation is already single-sourced in `ChangeRequestApplier.settleProposal`, which
+runs inside the same transaction as the write, so the two cannot disagree about what landed.
+Routing every ungated apply through a change request would also put queue latency in front of
+automated healing, which by definition fires during an incident. If someone wants to revisit
+this, that is the argument to rebut.
+
+**`ProposalStatus` has no EXPIRED.** The schema allowed it from V1 and nothing ever wrote it.
+Removed in V12: a value nothing produces still costs every reader a decision about whether to
+handle it.
+
+---
+
+## SCIM provisioning
+
+**Users only. No `/Groups`.** Roles stay assigned in Switchboard. Mapping IdP groups onto role
+assignments collides with the rule that permissions are a **union** across org, project and
+environment scopes: removing someone from a group would have to work out which of their grants
+came from that group and which a human made deliberately, and getting that wrong either strips
+access someone still needs or leaves access they should have lost. That is a decision to make
+explicitly, not to infer.
+
+**No SAML, and SCIM changes nothing about that.** Enterprise SAML is still handled by delegating
+to an OIDC-capable IdP — see the Identity section below. SCIM is provisioning, not
+authentication, and the two are routinely confused when people say "SSO".
+
+**Deactivation is a column, never a delete.** SCIM's `DELETE` and its `active: false` PATCH both
+set `users.deactivated_at`. Audit entries name their actor and change requests name their
+approver; deleting the person who did those things would orphan the record of who authorised a
+production change — the opposite of what an org running SCIM for compliance reasons wants. A
+timestamp rather than a boolean, so "when did they lose access" has an answer.
+
+**A deactivated user authenticates with no authorities rather than failing to authenticate.**
+This is the idiomatic Spring Security expression of "we know exactly who this is and they may do
+nothing", and it yields the right status for free: every user-facing route requires `ROLE_USER`,
+so the authorization layer answers 403. The two alternatives are both worse — throwing from
+inside the authentication manager escapes the security chain's error mapping and surfaces as a
+**500** (which is what the first implementation did), and a 401 would invite a client to
+re-authenticate, which cannot help because the credential is fine and the account is not.
+
+**Deactivating evicts `USER_IDENTITY` and `PERMISSIONS`, and that eviction is the
+security-relevant half.** Identity resolution is cached for five minutes, so without it a person
+deprovisioned by their IdP would keep authenticating for up to five minutes after their employer
+believed access was revoked — precisely the window deprovisioning exists to close.
+
+**Provisioning an existing person ADOPTS them rather than creating a second account.** People
+sign in before anyone turns SCIM on; that is the normal order of events. A duplicate `userName`
+is a 409 only when the person is already a member of *this* org.
+
+**Authentication is a personal access token, not a new credential type.** DECISIONS.md already
+records that a second authorization vocabulary is a second place for a permission bug to live,
+and the existing advice for narrowing a token — create a user with a narrow role and mint it as
+them — is exactly right for a provisioning integration. The token's owner needs
+`MANAGE_MEMBERS`.
+
+**The base path carries the org (`/scim/v2/orgs/{orgId}`).** SCIM has no notion of one, and every
+IdP lets an administrator configure an arbitrary base URL, so this costs nothing and removes the
+alternative — inferring the org from the token — which is ambiguous the moment a provisioning
+user belongs to two.
+
+**SCIM is not in the OpenAPI document, and that is deliberate.** It is its own specification with
+its own envelope, media type, error shape and 1-based paging. Modelling it inside the document
+that describes *this* product would put a second, foreign contract in the middle of it. The
+contract implemented is RFC 7644; the reference is the RFC.
+
 ---
 
 ## Identity
@@ -431,6 +507,86 @@ recorded as "at least this, on this rig".
 development database would outlive the run and quietly change every later measurement — and
 `CLAUDE.md` already notes that dev-database accumulation is a recurring nuisance. The harnesses
 target `switchboard_load` on the same Postgres instance.
+
+---
+
+## Metric definitions
+
+**A metric declares which way is good, and both questions are asked of it.** The monitor used to
+know exactly two keys, and the direction was implicit in which one it was: `error` was only ever
+tested for degradation, `conversion` only ever for improvement. That implicitness hid a real
+blind spot — **a variation that destroyed conversion was never healed**, because nothing ever
+asked whether conversion had regressed. Every defined metric is now tested in both directions.
+
+The consequence to know about: with two metrics that is four hypotheses per challenger where it
+was two, so each e-BH family is larger and the correction correspondingly stricter. That is the
+right trade; the alternative is not asking the question.
+
+**`tau` is per metric, and must never be fitted to data.** A 1% shift means something different
+for an error rate than for a refund rate, which is why it moved from two global constants onto
+the metric. The prohibition is unchanged and load-bearing: deriving tau from the effect being
+measured makes the constant a function of the sample and destroys the supermartingale property
+that makes repeated looks safe.
+
+**`autoAct` exists so a metric can be watched without moving traffic.** A team measuring
+something noisy wants to see it in the readout without it triggering rollbacks.
+
+**Epoch evidence is keyed by DIRECTION as well as metric, and V11 exists because of it.** The
+supremum table was keyed `(environment, flag, epoch, metric_key, variation)`, which was
+sufficient only while the metric key uniquely determined the direction. Once both directions are
+tested per metric they collide on that key and **share a running supremum**: the improvement
+hypothesis reads back the evidence the degradation accumulated, concludes it has crossed, and
+recommends *ramping a variation that is in fact broken* — reported with an always-valid p-value
+and an e-BH family size, which is what makes it dangerous rather than merely wrong. The finding
+dedupe key had the same hole and gained direction too.
+
+Caught by `RolloutScanIT`, which asserts a rescan is a no-op and instead saw a second finding.
+The existing test caught a new bug in code it was not written for, which is the argument for
+keeping assertions like "and doing it again changes nothing".
+
+**Metric keys are not a foreign key on `metric_events`.** Events arrive from SDKs before anyone
+defines a metric, and refusing telemetry for an undefined key would discard data that becomes
+meaningful the moment someone defines it. Deleting a definition likewise leaves its events.
+
+**New projects are seeded with the two built-ins.** V10 seeds every project that existed when it
+ran; without seeding at creation a project made afterwards would have no metrics, and the monitor
+would silently do nothing for it — indistinguishable from "no traffic yet".
+
+**`VariantStats` keeps its `errorRate` and `conversionRate` fields.** Generalising the domain did
+not have to break a client contract the dashboard reads, so it did not. Those two accessors name
+the built-in keys explicitly and are marked for display only; everything that makes a decision
+goes through the metric map.
+
+---
+
+## The rollout scan
+
+**Candidates are measured with `flatMapSequential`, not `flatMap` and not `concatMap`.** It was
+`concatMap` — strictly serial — so a scan cost the sum of its aggregations: 40.8 s for eight
+flags, and over fifteen minutes at 2 M events each. Concurrency of four takes that to 19.2 s.
+
+`flatMapSequential` rather than plain `flatMap` because it runs concurrently while still emitting
+**in order**, and order is load-bearing here: `decide()` indexes e-BH's `survives[]` array back
+against family position and breaks ties on it, so an unordered merge would leave every decision
+identical but the reported ranks non-deterministic between runs. That is the kind of difference
+nobody notices until they are comparing two findings and cannot explain why the numbers moved.
+
+**Four, and bounded.** Eight measured *worse* than four (21.8 s against 19.2 s): the work is
+database-bound, so past a handful of concurrent aggregations Postgres is the constraint and more
+fan-out only adds contention. Four also sits below the default connection-pool size of ten, so a
+scan cannot starve the evaluation hot path of connections while it runs.
+
+**Raising `work_mem` for the aggregation is available and OFF by default.** It looked like the
+cheapest win in the system and is not a general one. At 2 M events for one flag it helped — the
+~31 MB sort stopped spilling and the query went 4.4 s to 3.6 s. At 500 k events per flag it made
+the whole scan *slower* (44.1 s against 40.8 s), because at that size the sort never spills and
+there is nothing to buy. `work_mem` is per sort node per connection, so a raised default would
+multiply by the scan concurrency and charge every deployment memory to benefit only some. Blank
+by default; set `switchboard.rollout-monitor.aggregate-work-mem` after measuring your own volume.
+
+When it *is* set, the `SET LOCAL` and the query must run on the same connection or the setting
+applies to a connection that returns to the pool and the query runs at the default anyway — a
+tuning change that looks applied and does nothing. The transaction is what pins them together.
 
 ---
 

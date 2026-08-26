@@ -12,6 +12,7 @@ import com.switchboard.domain.ai.ProposalStatus;
 import com.switchboard.domain.ai.TargetingDraft;
 import com.switchboard.domain.ai.ValueServe;
 import com.switchboard.interfaces.rest.model.ChangeRequestDecisionRequest;
+import com.switchboard.interfaces.rest.model.AiProposalResponse;
 import com.switchboard.interfaces.rest.model.ChangeRequestResponse;
 import com.switchboard.interfaces.rest.model.ChangeRequestStatus;
 import com.switchboard.interfaces.rest.model.FlagDetailResponse;
@@ -88,6 +89,75 @@ class AiProposalApprovalIT extends IntegrationTestBase {
                 WHERE environment_id = :envId AND action = 'CHANGE_REQUEST_OPEN'
                 """, String.class, Map.of("envId", environmentId)))
             .contains(draft.id().toString());
+    }
+
+    @Test
+    void aParkedProposalIsDistinguishableFromAnUntouchedOne() {
+        // Both are DRAFT, because a parked proposal genuinely has not been applied. Without
+        // pendingChangeRequestId the two are identical on the wire, so a proposal list cannot
+        // tell "awaiting review" from "nobody has acted on this" - and those call for opposite
+        // actions from whoever is looking at it.
+        Workspace workspace = createWorkspace("ai-parked-visible");
+        FlagDetailResponse flag = createStringFlag(
+            workspace, "parked-visible", List.of("control", "treatment"));
+        requireApproval(workspace, GATED_ENV, 1, false);
+
+        AiProposal untouched = insertDraft(workspace, flag.getKey(), GATED_ENV, "control");
+        assertThat(proposalOverHttp(workspace, untouched.id()).getPendingChangeRequestId())
+            .as("nobody has acted on this one")
+            .isNull();
+
+        ChangeRequestResponse parked = applyOverHttp(workspace, untouched.id())
+            .expectStatus().isAccepted()
+            .expectBody(ChangeRequestResponse.class)
+            .returnResult().getResponseBody();
+
+        AiProposalResponse afterParking = proposalOverHttp(workspace, untouched.id());
+        assertThat(afterParking.getStatus())
+            .as("still DRAFT - it has not been applied")
+            .isEqualTo(com.switchboard.interfaces.rest.model.ProposalStatus.DRAFT);
+        assertThat(afterParking.getPendingChangeRequestId())
+            .as("but now visibly awaiting review")
+            .isEqualTo(parked.getId());
+    }
+
+    @Test
+    void aDeclinedProposalReadsAsReAppliableRatherThanParked() {
+        // DECLINED, WITHDRAWN and STALE all leave the proposal genuinely re-appliable, so they
+        // must NOT read as parked - otherwise the UI would show a permanent "awaiting review"
+        // for something no reviewer will ever see again.
+        Workspace workspace = createWorkspace("ai-declined-visible");
+        FlagDetailResponse flag = createStringFlag(
+            workspace, "declined-visible", List.of("control", "treatment"));
+        requireApproval(workspace, GATED_ENV, 1, false);
+        AiProposal draft = insertDraft(workspace, flag.getKey(), GATED_ENV, "control");
+
+        ChangeRequestResponse parked = applyOverHttp(workspace, draft.id())
+            .expectStatus().isAccepted()
+            .expectBody(ChangeRequestResponse.class)
+            .returnResult().getResponseBody();
+
+        http.post().uri("/api/change-requests/{id}/decline", parked.getId())
+            .header(HttpHeaders.AUTHORIZATION, workspace.authorization())
+            .bodyValue(Map.of("comment", "not now"))
+            .exchange()
+            .expectStatus().isOk();
+
+        AiProposalResponse afterDecline = proposalOverHttp(workspace, draft.id());
+        assertThat(afterDecline.getStatus())
+            .isEqualTo(com.switchboard.interfaces.rest.model.ProposalStatus.DRAFT);
+        assertThat(afterDecline.getPendingChangeRequestId())
+            .as("declined leaves it re-appliable, not parked")
+            .isNull();
+    }
+
+    private AiProposalResponse proposalOverHttp(Workspace workspace, UUID proposalId) {
+        return http.get().uri("/api/ai/proposals/{id}", proposalId)
+            .header(HttpHeaders.AUTHORIZATION, workspace.authorization())
+            .exchange()
+            .expectStatus().isOk()
+            .expectBody(AiProposalResponse.class)
+            .returnResult().getResponseBody();
     }
 
     /** A second apply cannot quietly open a second queue entry for the same write. */

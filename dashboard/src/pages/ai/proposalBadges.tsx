@@ -8,17 +8,33 @@ const STATUS_VARIANT: Record<ProposalStatus, 'info' | 'ok' | 'secondary' | 'outl
   DRAFT: 'info',
   APPLIED: 'ok',
   REJECTED: 'secondary',
-  EXPIRED: 'outline',
 }
 
 const STATUS_LABEL: Record<ProposalStatus, string> = {
-  DRAFT: 'awaiting review',
+  // NOT "awaiting review", which this used to say. A DRAFT proposal has not been applied, and
+  // that covers two different situations: nobody has acted on it, or an apply was parked behind
+  // an approval. Only the second is awaiting anything, and calling both of them that told the
+  // reader the wrong thing about the more common one. `pendingChangeRequestId` distinguishes
+  // them, so the badge can now say which it is.
+  DRAFT: 'draft',
   APPLIED: 'applied',
   REJECTED: 'rejected',
-  EXPIRED: 'expired',
 }
 
-export function ProposalStatusBadge({ status }: { status: ProposalStatus }) {
+export function ProposalStatusBadge({
+  status,
+  pendingChangeRequestId,
+}: {
+  status: ProposalStatus
+  pendingChangeRequestId?: string | null
+}) {
+  if (status === 'DRAFT' && pendingChangeRequestId) {
+    return (
+      <Badge variant="info" data-testid="proposal-status-AWAITING_REVIEW">
+        awaiting review
+      </Badge>
+    )
+  }
   return (
     <Badge variant={STATUS_VARIANT[status]} data-testid={`proposal-status-${status}`}>
       {STATUS_LABEL[status]}

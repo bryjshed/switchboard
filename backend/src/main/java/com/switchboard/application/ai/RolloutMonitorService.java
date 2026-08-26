@@ -18,6 +18,8 @@ import com.switchboard.domain.ai.ProposalKind;
 import com.switchboard.domain.ai.ProposalStatus;
 import com.switchboard.domain.ai.RolloutBaseline;
 import com.switchboard.domain.ai.RolloutCandidate;
+import com.switchboard.domain.metric.MetricDefinition;
+import com.switchboard.domain.metric.MetricDefinitionRepository;
 import com.switchboard.domain.ai.RolloutMetricsRepository;
 import com.switchboard.domain.ai.RolloutRamp;
 import com.switchboard.domain.ai.TargetingDraft;
@@ -103,6 +105,7 @@ public class RolloutMonitorService {
     private final OrgSettingsService orgSettings;
     private final OrgRepository orgs;
     private final NotificationWebhook webhook;
+    private final MetricDefinitionRepository definitions;
     private final RolloutMonitorProperties properties;
 
     @SuppressWarnings("checkstyle:ParameterNumber")
@@ -115,6 +118,7 @@ public class RolloutMonitorService {
         OrgSettingsService orgSettings,
         OrgRepository orgs,
         NotificationWebhook webhook,
+        MetricDefinitionRepository definitions,
         RolloutMonitorProperties properties) {
         this.metrics = metrics;
         this.findings = findings;
@@ -124,6 +128,7 @@ public class RolloutMonitorService {
         this.orgSettings = orgSettings;
         this.orgs = orgs;
         this.webhook = webhook;
+        this.definitions = definitions;
         this.properties = properties;
     }
 
@@ -134,12 +139,21 @@ public class RolloutMonitorService {
         Instant now = Instant.now();
         return metrics.findRolloutCandidates()
             .filter(RolloutMonitorService::isLiveRollout)
-            .concatMap(candidate -> measure(candidate, now)
+            // flatMapSequential, NOT concatMap: measuring a candidate is one expensive
+            // aggregation over the partitioned event tables (2.0-5.6 s at 2.4M events - see
+            // docs/PERFORMANCE.md), and concatMap ran them strictly one after another, so a
+            // scan cost the SUM. flatMapSequential runs `scanConcurrency` at a time while
+            // still emitting IN ORDER, which matters because decide() indexes e-BH's
+            // survives[] back against family order and breaks ties on it: an unordered
+            // flatMap would leave the decisions identical but the reported ranks
+            // non-deterministic between runs. Concurrency is bounded because the work is
+            // database-bound, and an unbounded fan-out would simply move the queue.
+            .flatMapSequential(candidate -> measure(candidate, now)
                 .onErrorResume(e -> {
                     log.warn("Rollout scan failed for {}/{}: {}",
                         candidate.flag().key(), candidate.envKey(), e.toString());
                     return Mono.empty();
-                }))
+                }), properties.getScanConcurrency())
             .collectList()
             .flatMap(this::decide);
     }
@@ -190,13 +204,22 @@ public class RolloutMonitorService {
                 if (baseline.isEmpty()) {
                     return Mono.empty();
                 }
-                return assemble(candidate, since, truncated, aggregates, baseline.get());
+                // Only metrics the project has defined, and only those it allows the monitor to
+                // act on. A project with none defined produces no hypotheses at all, which is
+                // correct: nobody has said what "worse" means for it.
+                return definitions.findByProject(candidate.projectId())
+                    .filter(MetricDefinition::autoAct)
+                    .collectList()
+                    .flatMap(defined -> defined.isEmpty()
+                        ? Mono.empty()
+                        : assemble(candidate, since, truncated, aggregates, baseline.get(), defined));
             });
     }
 
     private Mono<RolloutEvidence> assemble(
         RolloutCandidate candidate, Instant since, boolean truncated,
-        List<VariantAggregate> aggregates, VariantAggregate baseline) {
+        List<VariantAggregate> aggregates, VariantAggregate baseline,
+        List<MetricDefinition> definitions) {
 
         double srmLogE = sampleRatioLogEValue(candidate, aggregates);
         boolean srmFailed = srmLogE >= -Math.log(properties.getAlpha().getSrm());
@@ -215,10 +238,24 @@ public class RolloutMonitorService {
         RolloutEvidence shell = new RolloutEvidence(
             candidate, since, truncated, aggregates, baseline, false, srmLogE, List.of());
 
+        /*
+         * EVERY defined metric, in BOTH directions.
+         *
+         * This used to be exactly two comparisons: 'error' tested only for degradation and
+         * 'conversion' tested only for improvement. That asymmetry was never stated as a
+         * decision and hid a real blind spot - a variation that DESTROYED conversion was never
+         * healed, because conversion was only ever asked whether it had improved. A metric now
+         * declares which way is good and both questions are asked of it.
+         *
+         * The consequence to be aware of: with two metrics this produces four hypotheses per
+         * challenger where it produced two, so each e-BH family is larger and the correction
+         * correspondingly stricter. That is the correct trade - the alternative is not asking.
+         */
         return Flux.fromIterable(challengers)
-            .concatMap(challenger -> Flux.merge(
-                hypothesis(shell, challenger, RolloutEvidence.Direction.DEGRADATION),
-                hypothesis(shell, challenger, RolloutEvidence.Direction.IMPROVEMENT)))
+            .concatMap(challenger -> Flux.fromIterable(definitions)
+                .concatMap(definition -> Flux.merge(
+                    hypothesis(shell, challenger, definition, RolloutEvidence.Direction.DEGRADATION),
+                    hypothesis(shell, challenger, definition, RolloutEvidence.Direction.IMPROVEMENT))))
             .collectList()
             .map(hypotheses -> new RolloutEvidence(
                 candidate, since, truncated, aggregates, baseline, false, srmLogE, hypotheses));
@@ -230,28 +267,44 @@ public class RolloutMonitorService {
      * always-valid p-value are built from.
      */
     private Mono<RolloutEvidence.Hypothesis> hypothesis(
-        RolloutEvidence shell, VariantAggregate challenger, RolloutEvidence.Direction direction) {
+        RolloutEvidence shell, VariantAggregate challenger,
+        MetricDefinition definition, RolloutEvidence.Direction direction) {
 
-        boolean degradation = direction == RolloutEvidence.Direction.DEGRADATION;
-        String metricKey = degradation
-            ? properties.getMetrics().getErrorKey()
-            : properties.getMetrics().getConversionKey();
-        double tau = degradation
-            ? properties.getTau().getError()
-            : properties.getTau().getConversion();
+        String metricKey = definition.key();
+        double tau = definition.tau();
 
         VariantAggregate baseline = shell.baseline();
-        long challengerHits = degradation ? challenger.errorSubjects() : challenger.conversionSubjects();
-        long baselineHits = degradation ? baseline.errorSubjects() : baseline.conversionSubjects();
+        long challengerHits = challenger.metric(metricKey).subjects();
+        long baselineHits = baseline.metric(metricKey).subjects();
 
-        double logE = MixtureSequentialTest.logEValueOneSided(
-            challengerHits, challenger.subjectCount(), baselineHits, baseline.subjectCount(), tau);
+        /*
+         * The one-sided test always asks "is the challenger's proportion HIGHER", so which
+         * argument order expresses "worse" depends on the metric's direction. For an
+         * error-shaped metric (decrease is better) a degradation is a higher proportion, which
+         * is the arguments as written. For a conversion-shaped metric a degradation is a LOWER
+         * proportion, so the arms swap. Getting this backwards would not fail loudly - it would
+         * quietly test the opposite hypothesis and report it with full statistical ceremony.
+         */
+        boolean degradation = direction == RolloutEvidence.Direction.DEGRADATION;
+        boolean challengerHigherIsWhatWeTest =
+            definition.direction() == com.switchboard.domain.metric.MetricDirection.DECREASE_IS_BETTER
+                == degradation;
+
+        double logE = challengerHigherIsWhatWeTest
+            ? MixtureSequentialTest.logEValueOneSided(
+                challengerHits, challenger.subjectCount(), baselineHits, baseline.subjectCount(), tau)
+            : MixtureSequentialTest.logEValueOneSided(
+                baselineHits, baseline.subjectCount(), challengerHits, challenger.subjectCount(), tau);
         double zScore = TwoProportionZ.zScore(
             challengerHits, challenger.subjectCount(), baselineHits, baseline.subjectCount());
 
+        // DIRECTION is part of the key. Without it the degradation and improvement hypotheses
+        // for one metric share a running supremum, and the improvement one reads back the
+        // degradation's evidence - recommending a ramp of a variation that is in fact broken.
         EpochEvidenceRepository.EpochEvidenceKey key = new EpochEvidenceRepository.EpochEvidenceKey(
             shell.candidate().environmentId(), shell.candidate().flag().key(),
-            shell.candidate().epochStartedAt(), metricKey, challenger.variationId());
+            shell.candidate().epochStartedAt(), metricKey, challenger.variationId(),
+            direction.name());
 
         return evidence.record(key, logE, tau, baseline.variationId())
             .defaultIfEmpty(logE)
@@ -408,8 +461,10 @@ public class RolloutMonitorService {
         RolloutCandidate candidate = evidence.candidate();
         Flag flag = candidate.flag();
         VariantAggregate baseline = evidence.baseline();
-        double baselineRate = baseline.errorProportion();
-        double variantRate = hypothesis.challenger().errorProportion();
+        // The hypothesis names its own metric now; this used to read errorProportion()
+        // unconditionally, which was only correct because degradation could only ever BE error.
+        double baselineRate = baseline.proportion(hypothesis.metricKey());
+        double variantRate = hypothesis.challenger().proportion(hypothesis.metricKey());
 
         AnomalyInput input = new AnomalyInput(
             flag.key(), candidate.envKey(),
@@ -491,15 +546,17 @@ public class RolloutMonitorService {
             "Variation %s converts at %.1f%% of %d exposed subjects against %.1f%% of %d for %s "
                 + "(always-valid p=%.4g, screened against %d hypotheses at alpha=%s). "
                 + "Ramping it from %d%% to %d%% of traffic.",
-            label(candidate.flag(), winner.variationId()), winner.conversionProportion() * 100,
-            hypothesis.challengerSubjects(), baseline.conversionProportion() * 100,
+            label(candidate.flag(), winner.variationId()),
+            winner.proportion(hypothesis.metricKey()) * 100,
+            hypothesis.challengerSubjects(), baseline.proportion(hypothesis.metricKey()) * 100,
             hypothesis.baselineSubjects(), label(candidate.flag(), baseline.variationId()),
             MixtureSequentialTest.alwaysValidP(hypothesis.logEValue()),
             correction.familySize(), correction.alpha(), current, target);
 
         Mono<Integer> recorded = findings.insertIfAbsent(
                 finding(hypothesis, correction, AnomalyKind.IMPROVEMENT,
-                    baseline.conversionProportion(), winner.conversionProportion(), rationale),
+                    baseline.proportion(hypothesis.metricKey()),
+                    winner.proportion(hypothesis.metricKey()), rationale),
                 dedupeKey(hypothesis))
             .thenReturn(1)
             .defaultIfEmpty(0);
@@ -656,9 +713,12 @@ public class RolloutMonitorService {
      */
     private static String dedupeKey(RolloutEvidence.Hypothesis hypothesis) {
         RolloutCandidate candidate = hypothesis.evidence().candidate();
+        // Direction included for the same reason it is part of the evidence key: one metric now
+        // produces two hypotheses, and without it they would dedupe into one finding.
         return String.join(":",
             candidate.environmentId().toString(), candidate.flag().key(),
             String.valueOf(hypothesis.variationId()), hypothesis.metricKey(),
+            hypothesis.direction().name(),
             String.valueOf(epochSeconds(candidate)));
     }
 

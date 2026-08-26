@@ -136,10 +136,26 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
                 .map(user -> userAuth(user, identity)));
     }
 
+    /**
+     * A deactivated account authenticates with NO authorities rather than failing to
+     * authenticate.
+     *
+     * <p>That is the idiomatic Spring Security expression of "we know exactly who this is and
+     * they may do nothing", and it produces the right status for free: every user-facing route
+     * requires ROLE_USER, so the authorization layer answers 403. The alternatives are both
+     * worse - throwing here escapes the security chain's error mapping and surfaces as a 500,
+     * and a 401 would invite a client to re-authenticate, which cannot possibly help because the
+     * credential is fine and the account is not.
+     *
+     * <p>Deactivation is a column rather than a delete (see {@code User#deactivated}) because
+     * audit entries and change requests name their actor. Without this check a deprovisioned
+     * person would therefore keep working perfectly.
+     */
     private Authentication userAuth(User user, VerifiedIdentity identity) {
         AuthenticatedUser principal = new AuthenticatedUser(
             user.id(), user.email(), identity.issuer(), identity.subject());
-        return UsernamePasswordAuthenticationToken.authenticated(principal, null, USER_AUTHORITIES);
+        return UsernamePasswordAuthenticationToken.authenticated(
+            principal, null, user.deactivated() ? List.of() : USER_AUTHORITIES);
     }
 
     /**

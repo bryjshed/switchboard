@@ -932,6 +932,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The metrics the rollout monitor may act on for this project. Every project is seeded with `error` and `conversion`, which are the two the monitor used to hard-code. */
+        get: operations["listMetricDefinitions"];
+        put?: never;
+        post: operations["createMetricDefinition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/metrics/{metricId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Stops the monitor acting on this metric. Events already recorded under the key are NOT deleted - they are telemetry, and a metric may be redefined later. */
+        delete: operations["deleteMetricDefinition"];
+        options?: never;
+        head?: never;
+        /** @description Partial update. The KEY is immutable - events already carry it. */
+        patch: operations["updateMetricDefinition"];
+        trace?: never;
+    };
     "/api/orgs/{orgId}/audit/export": {
         parameters: {
             query?: never;
@@ -1530,7 +1565,7 @@ export interface components {
         /** @enum {string} */
         ProposalKind: "FLAG_CREATE" | "FLAG_UPDATE" | "ROLLBACK" | "RETIREMENT";
         /** @enum {string} */
-        ProposalStatus: "DRAFT" | "APPLIED" | "REJECTED" | "EXPIRED";
+        ProposalStatus: "DRAFT" | "APPLIED" | "REJECTED";
         EnvChange: {
             envKey: string;
             enabled?: boolean;
@@ -1566,6 +1601,13 @@ export interface components {
             createdBy: string;
             appliedBy?: string;
             appliedVersion?: number;
+            /**
+             * Format: uuid
+             * @description The change request this proposal is parked behind, when its apply required review.
+             *
+             *     DRAFT DOES NOT MEAN UNTOUCHED. A proposal whose apply was gated stays DRAFT - it has not been applied - so without this field a parked proposal is indistinguishable from one nobody has acted on. Present means "awaiting review"; applying it again is refused with a 409 rather than opening a second parked request.
+             */
+            pendingChangeRequestId?: string;
             /** Format: date-time */
             createdAt: string;
         };
@@ -2004,11 +2046,58 @@ export interface components {
             /** Format: date-time */
             deliveredAt?: string;
         };
+        /**
+         * @description Which way is good. This is what lets the monitor tell a regression from an improvement, which is the entire decision it makes.
+         *
+         *     Before metric definitions existed the answer was implicit in two hard-coded keys - `error` could only ever degrade and `conversion` could only ever improve - and that implicitness hid a real blind spot: a variation that DESTROYED conversion was never healed, because conversion was only ever tested for improvement.
+         * @enum {string}
+         */
+        MetricDirection: "INCREASE_IS_BETTER" | "DECREASE_IS_BETTER";
+        MetricDefinitionResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            projectId: string;
+            /** @description Matches the metricKey your SDK reports on POST /api/events/metrics. */
+            key: string;
+            name: string;
+            description?: string;
+            direction: components["schemas"]["MetricDirection"];
+            /**
+             * @description The absolute proportion difference worth reacting to, between 0 and 1 exclusive.
+             *
+             *     NEVER fit this to observed data. Deriving tau from the effect you are measuring makes the constant a function of the sample and destroys the supermartingale property that makes the monitor safe to run as often as it likes - see docs/DECISIONS.md.
+             */
+            tau: number;
+            /** @description Whether the monitor may heal or ramp on this metric, or only report it. A team measuring something noisy wants to see it without it moving traffic. */
+            autoAct: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        MetricDefinitionCreateRequest: {
+            key: string;
+            name: string;
+            description?: string;
+            direction: components["schemas"]["MetricDirection"];
+            tau: number;
+            /** @default true */
+            autoAct: boolean;
+        };
+        MetricDefinitionUpdateRequest: {
+            name?: string;
+            description?: string;
+            direction?: components["schemas"]["MetricDirection"];
+            tau?: number;
+            autoAct?: boolean;
+        };
     };
     responses: never;
     parameters: {
         OrgId: string;
         WebhookId: string;
+        MetricId: string;
         ProjectId: string;
         EnvId: string;
         FlagKey: string;
@@ -3336,7 +3425,7 @@ export interface operations {
     listProposals: {
         parameters: {
             query?: {
-                status?: "DRAFT" | "APPLIED" | "REJECTED" | "EXPIRED";
+                status?: "DRAFT" | "APPLIED" | "REJECTED";
                 cursor?: string;
                 limit?: number;
             };
@@ -4040,6 +4129,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebhookDeliveryResponse"][];
+                };
+            };
+        };
+    };
+    listMetricDefinitions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Metric definitions, by key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"][];
+                };
+            };
+        };
+    };
+    createMetricDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["ProjectId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricDefinitionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"];
+                };
+            };
+            /** @description Invalid key, direction or tau */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description That key is already defined for this project */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteMetricDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metricId: components["parameters"]["MetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateMetricDefinition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                metricId: components["parameters"]["MetricId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricDefinitionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDefinitionResponse"];
                 };
             };
         };

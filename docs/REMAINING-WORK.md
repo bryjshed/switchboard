@@ -641,20 +641,114 @@ the reasons held.
    silently narrowed.
 10. ~~**Audit export + configurable retention.**~~ **Done 2026-08-25** — see §5.
 
-### What is actually next now
+### What was next, and is now done
 
 11. **Java SDK follow-ons** — telemetry (event batching, which is what feeds the healing and
     optimizing loops) and local persistence of the last-known payload, for parity with the
-    TypeScript SDK. Both additive. **S–M**
-12. **The rollout scan's serial aggregation**, which item 7 found and nothing had listed: 2.0–5.6 s
-    per flag at 2.4 M events, iterated with `concatMap`, so fifty live rollouts is ~5 minutes a
-    scan. Raising Postgres' `work_mem` roughly halves the query and is a config change; the real
-    fix is incremental rollups. **S** then **M**
+    TypeScript SDK. Both additive. **S–M** — *the only item in this block still open.*
+12. ~~**The rollout scan's serial aggregation**~~ **Done 2026-08-26.** Measured at eight flags
+    carrying ~500 k events each: **40.8 s → 19.2 s**, a 2.1× on the full scan, by measuring four
+    candidates at once instead of one. `flatMapSequential` rather than `flatMap` because
+    `decide()` breaks e-BH ties on family order, so an unordered merge would leave decisions
+    identical and reported ranks non-deterministic.
+
+    Two honest notes. **Eight concurrent measured worse than four** — the work is database-bound,
+    so past a handful more fan-out is contention; four also sits below the connection pool so a
+    scan cannot starve evaluation. And **raising `work_mem` shipped OFF**: it helped at 2 M
+    events for one flag (4.4 s → 3.6 s) and made the scan *slower* at 500 k per flag, where the
+    sort never spills. Since it is per sort node per connection it would multiply by the new
+    concurrency, so it is a knob an operator sets after measuring, not a default.
+
+    **Incremental rollups remain open** and are still the real fix: concurrency divides the
+    cost, rollups would change its order. **M**
 13. **A dashboard UI for webhooks.** The API and the MCP server reach them; the dashboard does
     not. **S**
-14. **The enterprise cluster** (SSO/SAML, SCIM) once a buyer asks.
-15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
-    Deliberately deferred through the contract churn in the client-keys and operators work; that
-    churn has now settled, so the reason for waiting is spent.
-16. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
-    first piece of it and was not planned as such.
+14. ~~**The enterprise cluster** (SSO/SAML, SCIM).~~ **Done 2026-08-26** — with a narrower shape
+    than the line implied, because most of it was already answered. **SAML needed nothing**:
+    DECISIONS.md has recorded since the OIDC work that enterprise SAML is handled by delegating
+    to an OIDC-capable IdP, and Okta, Auth0 and Entra all do SAML and issue OIDC. So the actual
+    work was SCIM, and it is **users only** — `/Groups` would have to reconcile IdP group
+    membership against a permission model that unions across scopes, and getting that wrong
+    silently either strips or grants access.
+
+    The half worth reviewing is deprovisioning, not provisioning. `DELETE` and `active: false`
+    both deactivate rather than delete, because audit entries and change requests name their
+    actor. A deactivated user authenticates with **no authorities** rather than failing to
+    authenticate — throwing inside the authentication manager escapes the security chain's error
+    mapping and produced a 500, which is what the first version did. And deactivation evicts the
+    identity cache, without which a deprovisioned person keeps working for five more minutes.
+    12 integration tests, including that one. **Groups: S–M if a buyer asks.**
+15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** **Reassessed 2026-08-26 and
+    deliberately not done as written** — investigating it found the premise had been overtaken by
+    step 1, and the two concrete defects underneath it were fixed instead.
+
+    **Why the merge would make the model worse.** The two statuses answer genuinely different
+    questions: a proposal's says *has this suggestion been acted on*, a change request's says
+    *what did reviewers decide*. Collapsing them conflates a suggestion with a review. And
+    reconciliation is already single-sourced — `ChangeRequestApplier.settleProposal` is the only
+    thing that moves a proposal to APPLIED, and it runs **inside the same transaction as the
+    write**, so the two can never disagree about what landed. Routing every ungated apply through
+    a change request would add a row and a lifecycle to the common path, and put queue latency in
+    front of automated healing, which fires during an incident.
+
+    Step 1 — routing AI applies through the approval gate — was the part that carried the value,
+    because it closed a real hole: an org with approvals on still had an unreviewed write path
+    into production. Steps 2–3 were speculative follow-ons written before that landed.
+
+    **The two real defects, both fixed:**
+
+    - **`EXPIRED` was a status nothing ever wrote.** Allowed by the schema since V1, produced by
+      no code path. A value nothing produces still costs every reader a decision about whether to
+      handle it and every client a branch. Removed in `V12`.
+    - **A parked proposal was indistinguishable from an untouched one.** Both are `DRAFT` —
+      correctly, since a parked proposal genuinely has not been applied — so a proposal list
+      could not tell *awaiting review* from *nobody has acted on this*, and those call for
+      opposite actions from whoever is looking. `AiProposalResponse` now carries
+      `pendingChangeRequestId`, derived from the open request rather than stored, so it cannot
+      drift. DECLINED, WITHDRAWN and STALE deliberately read as **not** parked, because all three
+      leave the proposal re-appliable.
+
+    What remains genuinely open is smaller than the original line: nothing. If a future reader
+    still wants one lifecycle, the argument above is what they need to rebut.
+
+16. ~~**Experimentation as a product**~~ — **first step done 2026-08-26: user-defined metrics.**
+    The monitor knew exactly two keys, `error` and `conversion`, hard-coded into the aggregation
+    as pivoted columns. A metric is now an entity with a **direction** (which way is good), its
+    own **tau**, and an **autoAct** switch for metrics worth watching but not worth acting on.
+
+    **It closed a blind spot nobody had written down.** Direction used to be implicit in which
+    key it was — `error` only ever tested for degradation, `conversion` only ever for
+    improvement — so *a variation that destroyed conversion was never healed*. Both questions are
+    now asked of every metric. The cost: four hypotheses per challenger instead of two, so each
+    e-BH family is larger and the correction stricter.
+
+    **And it exposed a real defect in the evidence table.** The running-supremum rows were keyed
+    without direction, which was safe only while the metric key implied it. Testing both
+    directions made them collide, so the improvement hypothesis read back the degradation's
+    accumulated e-value and would have recommended **ramping a broken variation** — with an
+    always-valid p-value attached. `RolloutScanIT` caught it by asserting that a rescan changes
+    nothing. Fixed in V11.
+
+    Still open for the rest of this section: an experiment entity, holdouts, layers and mutual
+    exclusion. The SRM gate from item 1 and metric definitions are the two pieces that exist.
+    **M–L**
+
+### What is actually next now
+
+17. **Java SDK telemetry and local persistence** (item 11 above), the last of that block.
+    Telemetry matters more than it sounds: event batching is what feeds the healing and
+    optimizing loops, so a Java shop currently gets local evaluation but contributes nothing
+    back to the monitor. **S–M**
+18. **Incremental rollups for the rollout aggregation.** Item 12 divided the scan's cost by
+    measuring four candidates at once; rollups would change its order. Still the real fix, and
+    now the largest remaining scaling item. **M**
+19. **Experimentation past metric definitions** — an experiment entity, holdouts, layers,
+    mutual exclusion. Item 16 built the prerequisite. **M–L**
+20. **SCIM `/Groups`**, if a buyer asks. Users-only provisioning ships; group-to-role mapping
+    needs a decision about how it interacts with permissions unioning across scopes. **S–M**
+21. The **§5 long tail**: prompt registry, LLM metrics, prerequisite flags, scheduled changes,
+    bulk targeting/CSV, code-references scanner, Terraform provider, CLI, evaluation explainer,
+    OpenTelemetry, Slack app.
+
+Plus §1's two items, which still need a human rather than an agent: an `ANTHROPIC_API_KEY` (the
+prompt-to-diff-to-apply loop has never executed) and a visual pass in light and dark.

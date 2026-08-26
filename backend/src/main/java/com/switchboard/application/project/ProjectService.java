@@ -4,6 +4,7 @@ import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
 import com.switchboard.domain.project.Environment;
+import com.switchboard.domain.metric.MetricDefinitionRepository;
 import com.switchboard.domain.project.EnvironmentRepository;
 import com.switchboard.domain.project.Project;
 import com.switchboard.domain.project.ProjectRepository;
@@ -28,16 +29,19 @@ public class ProjectService {
     private final ProjectRepository projects;
     private final EnvironmentRepository environments;
     private final OrgAccessService access;
+    private final MetricDefinitionRepository metrics;
     private final TransactionalOperator tx;
 
     public ProjectService(
         ProjectRepository projects,
         EnvironmentRepository environments,
         OrgAccessService access,
-        TransactionalOperator tx) {
+        TransactionalOperator tx,
+        MetricDefinitionRepository metrics) {
         this.projects = projects;
         this.environments = environments;
         this.access = access;
+        this.metrics = metrics;
         this.tx = tx;
     }
 
@@ -48,6 +52,12 @@ public class ProjectService {
                 .flatMap(project -> Flux.fromIterable(SEED_ENVIRONMENTS)
                     .concatMap(seed -> environments.create(project.id(), seed.getKey(), seed.getValue()))
                     .collectList()
+                    // The two built-in metrics, in the same transaction as the project. V10
+                    // seeds every project that existed when it ran; without this a project
+                    // created afterwards would have none, and the rollout monitor would
+                    // silently do nothing for it - indistinguishable from "no traffic yet",
+                    // which is the kind of gap nobody notices for a month.
+                    .flatMap(envs -> metrics.seedDefaults(project.id()).thenReturn(envs))
                     .map(envs -> new ProjectWithEnvironments(project, envs)))
                 .as(tx::transactional))
             .onErrorMap(DataIntegrityViolationException.class,

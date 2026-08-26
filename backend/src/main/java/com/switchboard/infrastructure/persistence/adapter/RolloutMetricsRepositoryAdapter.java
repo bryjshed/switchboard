@@ -2,6 +2,7 @@ package com.switchboard.infrastructure.persistence.adapter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.switchboard.domain.ai.MetricCount;
 import com.switchboard.domain.ai.RolloutCandidate;
 import com.switchboard.domain.ai.RolloutMetricsRepository;
 import com.switchboard.domain.ai.StaleFlagCandidate;
@@ -19,7 +20,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -101,6 +104,21 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
             SELECT bucket, variation_id FROM evc
             UNION
             SELECT bucket, variation_id FROM mt
+        ),
+        /*
+         * Metrics as a JSON map rather than two pivoted columns.
+         *
+         * The previous version selected 'error' and 'conversion' into four fixed columns, which
+         * is what made the healing loop unable to act on anything a team actually measures. This
+         * returns whatever metric keys are present, and the caller looks up the ones its metric
+         * definitions name. A key with no events in the window is simply absent, which reads as
+         * zero rather than as an error.
+         */
+        metrics_json AS (
+            SELECT bucket, variation_id,
+                   jsonb_object_agg(metric_key,
+                       jsonb_build_object('events', n, 'subjects', subjects)) AS metrics
+            FROM mt GROUP BY 1, 2
         )
         SELECT k.bucket, k.variation_id,
                COALESCE((SELECT eval_count FROM evc
@@ -111,17 +129,9 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
                COALESCE((SELECT rollout_subject_count FROM evc
                          WHERE evc.bucket = k.bucket AND evc.variation_id = k.variation_id), 0)
                    AS rollout_subject_count,
-               COALESCE((SELECT n FROM mt WHERE mt.bucket = k.bucket
-                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'error'), 0) AS error_count,
-               COALESCE((SELECT subjects FROM mt WHERE mt.bucket = k.bucket
-                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'error'), 0)
-                   AS error_subjects,
-               COALESCE((SELECT n FROM mt WHERE mt.bucket = k.bucket
-                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'conversion'), 0)
-                   AS conversion_count,
-               COALESCE((SELECT subjects FROM mt WHERE mt.bucket = k.bucket
-                         AND mt.variation_id = k.variation_id AND mt.metric_key = 'conversion'), 0)
-                   AS conversion_subjects
+               COALESCE((SELECT metrics FROM metrics_json mj
+                         WHERE mj.bucket = k.bucket AND mj.variation_id = k.variation_id),
+                        '{}'::jsonb) AS metrics
         FROM keys k
         ORDER BY k.bucket, k.variation_id
         """;
@@ -131,23 +141,86 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
     private static final TypeReference<List<EnvRow>> ENVS_TYPE = new TypeReference<>() {
     };
 
+    /** A plain Postgres memory literal: digits plus an optional unit. Nothing else is allowed. */
+    private static final java.util.regex.Pattern WORK_MEM =
+        java.util.regex.Pattern.compile("(?i)^\\d+(kB|MB|GB)?$");
+
+    private static final ObjectMapper METRICS_JSON = new ObjectMapper();
+
     private final DatabaseClient db;
     private final ObjectMapper json;
+    private final TransactionalOperator tx;
+    private final String aggregateWorkMem;
 
-    public RolloutMetricsRepositoryAdapter(DatabaseClient db, ObjectMapper json) {
+    public RolloutMetricsRepositoryAdapter(
+        DatabaseClient db,
+        ObjectMapper json,
+        TransactionalOperator tx,
+        @Value("${switchboard.rollout-monitor.aggregate-work-mem:}") String aggregateWorkMem) {
         this.db = db;
         this.json = json;
+        this.tx = tx;
+        // Interpolated into SQL below, so it is validated HERE, at startup, where a bad value is
+        // a failure to boot rather than a syntax error inside the monitor an hour later. It is
+        // configuration and never request data, but a value that reaches a SQL string unchecked
+        // is worth refusing on principle rather than on threat model.
+        if (!aggregateWorkMem.isBlank() && !WORK_MEM.matcher(aggregateWorkMem.trim()).matches()) {
+            throw new IllegalArgumentException(
+                "switchboard.rollout-monitor.aggregate-work-mem must look like '64MB', got: "
+                    + aggregateWorkMem);
+        }
+        this.aggregateWorkMem = aggregateWorkMem.trim();
+    }
+
+    /**
+     * Optionally runs one aggregation with a raised {@code work_mem}.
+     *
+     * <h2>Off by default, and the measurements are why</h2>
+     *
+     * <p>It looked like an easy win and is not a general one. At 2 M events for a single flag
+     * this query spills a ~31 MB sort to disk and raising {@code work_mem} cut it from 4.4 s to
+     * 3.6 s. At 500 k events per flag across eight flags it made a full scan measurably
+     * <em>slower</em> (44.1 s against 40.8 s) - because at that size the sort never spills, so
+     * there is nothing to buy and only variance to measure.
+     *
+     * <p>{@code work_mem} is per sort node per connection. With the scan running four
+     * candidates at once and this query carrying several sort nodes, a 64 MB default is a
+     * multi-hundred-megabyte peak on every deployment in exchange for a benefit only some of
+     * them can realise. So it ships blank - Postgres' own default applies - and an operator
+     * whose flags carry millions of events per epoch can set it deliberately, having measured.
+     *
+     * <p><b>When it IS set, {@code SET LOCAL} and the query must run on the same connection</b>,
+     * or the SET applies to a connection that returns to the pool and the query runs at the
+     * default anyway - a tuning change that looks applied and does nothing. The transaction is
+     * what guarantees it: R2DBC pins the connection to the reactive context for its life.
+     * {@code SET LOCAL} also reverts at commit, so an evaluation request that borrows the
+     * connection next does not inherit a large sort budget.
+     *
+     * <p>The value is interpolated rather than bound because Postgres does not accept a
+     * parameter in SET. It is configuration, never request data, and is rejected at startup if
+     * it is not a plain Postgres memory literal.
+     */
+    private <T> Flux<T> withRaisedWorkMem(Flux<T> query) {
+        if (aggregateWorkMem.isEmpty()) {
+            // No transaction either: wrapping a read in one to change nothing would cost a
+            // round trip per aggregation for no reason.
+            return query;
+        }
+        return db.sql("SET LOCAL work_mem = '" + aggregateWorkMem + "'")
+            .then()
+            .thenMany(query)
+            .as(tx::transactional);
     }
 
     @Override
     public Mono<List<VariantAggregate>> aggregate(UUID environmentId, String flagKey, Instant since) {
         String sql = AGGREGATE_SQL.formatted("timestamptz 'epoch'");
-        return db.sql(sql)
-            .bind("envId", environmentId)
-            .bind("flagKey", flagKey)
-            .bind("since", since)
-            .map(RolloutMetricsRepositoryAdapter::mapAggregate)
-            .all()
+        return withRaisedWorkMem(db.sql(sql)
+                .bind("envId", environmentId)
+                .bind("flagKey", flagKey)
+                .bind("since", since)
+                .map(RolloutMetricsRepositoryAdapter::mapAggregate)
+                .all())
             .collectList();
     }
 
@@ -253,12 +326,32 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
         return new VariantAggregate(
             row.get("variation_id", UUID.class),
             row.get("eval_count", Long.class),
-            row.get("error_count", Long.class),
-            row.get("conversion_count", Long.class),
             row.get("subject_count", Long.class),
             row.get("rollout_subject_count", Long.class),
-            row.get("error_subjects", Long.class),
-            row.get("conversion_subjects", Long.class));
+            readMetrics(row.get("metrics", io.r2dbc.postgresql.codec.Json.class)));
+    }
+
+    /**
+     * The {@code metrics} JSON map into typed counts.
+     *
+     * <p>Parsed by hand rather than through Jackson: the shape is two longs per key, fixed by
+     * the query directly above, and a databind round trip would add a dependency on that shape
+     * being described in two places instead of one.
+     */
+    private static Map<String, MetricCount> readMetrics(io.r2dbc.postgresql.codec.Json json) {
+        if (json == null) {
+            return Map.of();
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode root = METRICS_JSON.readTree(json.asString());
+            Map<String, MetricCount> out = new LinkedHashMap<>();
+            root.properties().forEach(entry -> out.put(entry.getKey(), new MetricCount(
+                entry.getValue().path("events").asLong(0L),
+                entry.getValue().path("subjects").asLong(0L))));
+            return Map.copyOf(out);
+        } catch (Exception e) {
+            throw new IllegalStateException("Cannot read the aggregated metrics map", e);
+        }
     }
 
     private RolloutCandidate mapCandidate(Readable row) {

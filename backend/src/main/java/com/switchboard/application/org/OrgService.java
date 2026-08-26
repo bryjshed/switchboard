@@ -85,6 +85,28 @@ public class OrgService {
         return roles.grant(userId, AccessScope.org(orgId), role, actor).then();
     }
 
+    /**
+     * Adds an existing user to an org with a role, for a caller that is not a person.
+     *
+     * <p>Exists so SCIM provisioning goes through the SAME path as a human adding a member
+     * rather than reimplementing it. The part that would be easy to leave out of a copy - and
+     * expensive - is the PERMISSIONS cache eviction: membership feeds permission resolution as a
+     * compatibility floor, so a provisioned user without it would be told they have no access
+     * for up to the cache TTL, on their very first sign-in.
+     *
+     * <p>Deliberately takes a userId rather than an email: SCIM has already resolved or created
+     * the person, and re-resolving by email here would reintroduce the ambiguity that
+     * findByEmailPreferringReal exists to settle.
+     */
+    public Mono<Void> provisionMember(UUID orgId, UUID userId, String role, String actor) {
+        return orgs.addMember(orgId, userId, role)
+            .flatMap(member -> grantOrgRole(orgId, userId, role, actor))
+            .doOnSuccess(ignored -> cacheInvalidation.evictAll(CacheName.PERMISSIONS))
+            .onErrorMap(DataIntegrityViolationException.class,
+                e -> new ConflictException("User is already a member of this org"))
+            .then();
+    }
+
     public Flux<OrgWithRole> listOrgs(UUID userId) {
         return orgs.findAllForUser(userId);
     }
