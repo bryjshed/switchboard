@@ -13,13 +13,19 @@ A monorepo. Everything below is one git repo, brought up together by the root `M
 `docker-compose.yml`.
 
 ```
+evaluation/ The flag evaluation core — bucketing, operators, precedence. Pure JDK, no dependencies.
 backend/    Spring Boot (WebFlux, R2DBC, Flyway) — DDD: domain / application / infrastructure / interfaces
 dashboard/  Web UI — React + Vite (the primary management surface)
-sdk/        Client libraries — sdk/typescript is an OpenFeature provider with local evaluation
+sdk/        Client libraries — sdk/typescript and sdk/java, both OpenFeature providers with local evaluation
 spec/       Normative evaluation spec + conformance vectors (the cross-language contract)
-scripts/    seed-local.mjs · smoke-test.mjs · token.sh · resolve-java.sh
-docs/       Architecture, governance, the AI layer, the backlog, market research
+scripts/    seed-local.mjs · smoke-test.mjs · load-test.mjs · load-volume.mjs · token.sh · resolve-java.sh
+docs/       Architecture, governance, the AI layer, performance, the backlog, market research
 ```
+
+**`evaluation/`, `backend/` and `sdk/java/` are one Maven reactor**, aggregated by the root
+`pom.xml`. The server and the Java SDK compile against the same evaluator rather than each
+carrying their own, which is what makes it impossible for them to disagree about bucketing or
+precedence — see [DECISIONS.md](DECISIONS.md#the-evaluation-core).
 
 There was an Expo mobile companion; it was deleted on 2026-08-24 and is in git history if it is
 ever wanted back. See [DECISIONS.md](DECISIONS.md#product-scope).
@@ -50,17 +56,27 @@ user, auto-provisioning. Every check script uses them.
 
 ```bash
 make test    # unit + integration (Testcontainers), including the concurrency race tests
-make smoke   # ~35 API cases end to end, negative paths included
+make smoke   # 51 API cases end to end, negative paths included
 make check   # compile + checkstyle
 ```
 
 Per component:
 
 ```bash
-cd backend        && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
+# From the REPO ROOT for anything JVM: evaluation/, backend/ and sdk/java/ are one reactor.
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify                    # all three
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl backend -am verify    # backend + what it needs
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl evaluation verify     # the core + its vectors
+
 cd dashboard      && npm run check && npm run build
 cd sdk/typescript && npx vitest run
+cd mcp            && npm run check
 ```
+
+**`cd backend && ./mvnw verify` no longer works on a clean checkout**, and the error will not
+tell you why: a single-module build resolves `switchboard-evaluation` from your local repository
+rather than from the reactor, so it fails with a missing artifact. Build from the root, or run
+`make core` once to install the module.
 
 **Java 25 is required and the shell default may not be it.** Prefix every Maven call with
 `JAVA_HOME=$(/usr/libexec/java_home -v 25)`.
@@ -71,7 +87,7 @@ Seven scripts run against a **running** stack and are the real regression net �
 drift that unit tests cannot:
 
 ```bash
-node scripts/smoke-test.mjs                    # 34  · repo root
+node scripts/smoke-test.mjs                    # 51  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
 node dashboard/scripts/service-check.mjs       # 67
 node dashboard/scripts/ai-check.mjs            # 54
@@ -80,7 +96,21 @@ node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC prov
 node mcp/scripts/live-check.mjs                # 19  · every MCP tool against a real stack
 ```
 
-**Two of them import from `dist/` rather than from source** — the SDK's and the MCP server's —
+The Java SDK's live check is a JUnit test rather than a script, because driving a JVM SDK from
+node would prove nothing about the JVM SDK. It self-skips without a key:
+
+```bash
+SWITCHBOARD_SDK_KEY=sb_srv_production_... \
+  JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl sdk/java -am test -Dtest=LiveCheckIT \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+It asserts the SDK's **in-process** answers equal the **server's** for the same flags and
+contexts — two entirely different code paths, which is what makes the agreement worth
+asserting. It is also what caught the SDK rejecting every real bootstrap payload over a
+wire-format detail that no hand-written fixture happened to contain.
+
+**Two of the scripts import from `dist/` rather than from source** — the SDK's and the MCP server's —
 because the point of a live check is to exercise what actually ships. On a clean checkout, run
 `npm run build` in those two packages first; without it they fail with `ERR_MODULE_NOT_FOUND`,
 which says nothing about the stack they were meant to be checking.
