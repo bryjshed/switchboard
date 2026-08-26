@@ -1697,6 +1697,87 @@ paths:
                 items:
                   $ref: '#/components/schemas/WebhookDeliveryResponse'
 
+  /api/orgs/{orgId}/audit/export:
+    get:
+      # Its own tag so the generated interface is separate and left unimplemented, exactly as
+      # StreamApi is - see AuditExportController for why the binding is hand-written.
+      tags: [AuditExport]
+      operationId: exportOrgAudit
+      description: >-
+        Streams every audit entry for the org, oldest first, as NDJSON (default) or CSV.
+
+
+        HAND-WRITTEN BINDING, like /api/stream and the OFREP endpoints: a generated method is
+        fixed to one response type and this answers one operation in two formats, streamed. The
+        path and parameters are declared here; only the binding is manual.
+
+
+        NDJSON - one object per line - rather than a JSON array, because an array obliges the
+        consumer to hold the whole export in memory to parse it, which defeats the point. The org
+        that most needs an export is the one whose audit table will not fit in a response body.
+
+
+        Deliberately not paginated: an export is asked for once and expected to be complete, so a
+        cursor would only add a way to miss rows between pages.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ndjson, csv]
+            default: ndjson
+        - name: since
+          in: query
+          required: false
+          description: ISO-8601 instant. An unparseable value is a 400, never a silent full export.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Streamed audit rows.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+            text/csv:
+              schema:
+                type: string
+        '400':
+          description: Malformed `since`
+        '403':
+          description: Requires VIEW_AUDIT in the org
+
+  /api/jobs/audit-retention:
+    post:
+      tags: [Jobs]
+      operationId: runAuditRetention
+      description: >-
+        Prunes audit entries older than `switchboard.audit.retention-months`.
+
+
+        DISABLED BY DEFAULT (0 = keep forever), which is the opposite of event retention. Event
+        rows are telemetry and expiring them is housekeeping; audit rows are the record a
+        compliance review or a post-mortem needs, so deleting them is an act that should have an
+        owner rather than a default nobody chose.
+
+
+        Deletes in bounded batches - the table is not partitioned, so unlike the event roll this
+        is a row-wise DELETE whose cost scales with the rows removed.
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Retention result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+        '403':
+          description: Missing or wrong X-Job-Token
+
   /api/jobs/rollout-scan:
     post:
       tags: [Jobs]

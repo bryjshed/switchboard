@@ -419,8 +419,32 @@ and no `ping`/test-delivery button. **S**
 - **SSO/SAML + SCIM** · **M** — every vendor gates this behind a paid tier, which is what
   makes it the reliable enterprise upsell. Firebase already supports SAML/OIDC, so the
   identity half is mostly configuration; SCIM provisioning is the real work.
-- **Audit export / streaming + configurable retention** · **S** — audit rows accumulate
-  forever today with no export.
+- ~~**Audit export / streaming + configurable retention**~~ · **Landed 2026-08-25.**
+  `GET /api/orgs/{orgId}/audit/export` streams every row as NDJSON (default) or CSV, oldest
+  first, with an optional `since`. `switchboard.audit.retention-months` prunes in batches, via
+  `POST /api/jobs/audit-retention`.
+
+  Three decisions worth knowing:
+
+  - **Audit retention defaults to OFF (0 = keep forever), the opposite of event retention.**
+    Event rows are telemetry — high-volume, individually meaningless — so expiring them after
+    three months is housekeeping. Audit rows are the record a compliance review or a post-mortem
+    needs, and a product that silently deleted them because three months was a convenient default
+    would be destroying the record its own governance features exist to produce. An operator who
+    needs a window sets one deliberately.
+  - **NDJSON, not a JSON array.** An array obliges the consumer to hold the whole export in
+    memory to parse it, which defeats the point: the org that most needs an export is the one
+    whose audit table will not fit in a response body. Nothing collects the `Flux`.
+  - **Deliberately not paginated.** An export is asked for once and expected to be complete, so a
+    cursor would only add a way to miss rows between pages.
+
+  Pruning is batched because `audit_entries` is **not** partitioned — unlike the event tables,
+  where retention is an O(1) partition drop (measured at 259 ms for 91 MB), this is a row-wise
+  `DELETE` whose cost scales with rows removed.
+
+  Verified: 9 integration tests and 7 assertions in `smoke-test.mjs` (44 → 51), which parse the
+  export line by line rather than as a whole body — a check that parsed the whole body would be
+  asserting the opposite of the property NDJSON exists for.
 
 ### Experimentation as a product · effort **M–L**
 The rollout monitor hard-codes two metric keys (`error`, `conversion`). There is no metric

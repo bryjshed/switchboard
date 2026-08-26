@@ -932,6 +932,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description Streams every audit entry for the org, oldest first, as NDJSON (default) or CSV.
+         *
+         *     HAND-WRITTEN BINDING, like /api/stream and the OFREP endpoints: a generated method is fixed to one response type and this answers one operation in two formats, streamed. The path and parameters are declared here; only the binding is manual.
+         *
+         *     NDJSON - one object per line - rather than a JSON array, because an array obliges the consumer to hold the whole export in memory to parse it, which defeats the point. The org that most needs an export is the one whose audit table will not fit in a response body.
+         *
+         *     Deliberately not paginated: an export is asked for once and expected to be complete, so a cursor would only add a way to miss rows between pages.
+         */
+        get: operations["exportOrgAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/audit-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description Prunes audit entries older than `switchboard.audit.retention-months`.
+         *
+         *     DISABLED BY DEFAULT (0 = keep forever), which is the opposite of event retention. Event rows are telemetry and expiring them is housekeeping; audit rows are the record a compliance review or a post-mortem needs, so deleting them is an act that should have an owner rather than a default nobody chose.
+         *
+         *     Deletes in bounded batches - the table is not partitioned, so unlike the event roll this is a row-wise DELETE whose cost scales with the rows removed.
+         */
+        post: operations["runAuditRetention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/rollout-scan": {
         parameters: {
             query?: never;
@@ -3993,6 +4041,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WebhookDeliveryResponse"][];
                 };
+            };
+        };
+    };
+    exportOrgAudit: {
+        parameters: {
+            query?: {
+                format?: "ndjson" | "csv";
+                /** @description ISO-8601 instant. An unparseable value is a 400, never a silent full export. */
+                since?: string;
+            };
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Streamed audit rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": string;
+                    "text/csv": string;
+                };
+            };
+            /** @description Malformed `since` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Requires VIEW_AUDIT in the org */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    runAuditRetention: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Job-Token": components["parameters"]["JobToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retention result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunResponse"];
+                };
+            };
+            /** @description Missing or wrong X-Job-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

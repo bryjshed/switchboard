@@ -469,6 +469,48 @@ ever matters, wants an index or a narrower projection.
 
 ---
 
+## Audit export and retention
+
+**Audit retention defaults to OFF (`switchboard.audit.retention-months=0`, keep forever), which
+is deliberately the opposite of `switchboard.events.retention-months=3`.** Event rows are
+telemetry: high-volume, individually meaningless, and expiring them is housekeeping. Audit rows
+are low-volume, individually meaningful, and frequently the thing a compliance review or an
+incident post-mortem actually needs. A product that silently deleted them after three months
+because that was a convenient default would be destroying the record its own governance features
+exist to produce. Setting a window should be an act with an owner, not a default nobody chose.
+
+**Audit pruning deletes in bounded batches; event retention drops partitions.** They look like
+the same job and are not. `eval_events` and `metric_events` are partitioned, so retention is an
+unlink — measured at 259 ms for an 828k-row, 91 MB partition, flat in row count.
+`audit_entries` is not partitioned, so pruning is a row-wise `DELETE` whose cost scales with the
+rows removed; one unbounded statement over a long-neglected table would hold locks and bloat the
+WAL for as long as it ran. Whatever a run does not reach, the next run reaches.
+
+**The export is NDJSON, not a JSON array.** An array obliges the consumer to hold the entire
+export in memory to parse it, which defeats the purpose — the org that most needs an export is
+precisely the one whose audit table will not fit in a response body. One object per line streams
+end to end, and nothing in the controller collects the `Flux`.
+
+**The export is deliberately not paginated, and is ordered oldest-first.** Not paginated because
+an export is asked for once and expected to be complete, so a cursor would only add a way to
+miss rows between pages. Oldest-first is the opposite of the paged feed and is the useful order
+for appending to a file or replaying into a warehouse; it also makes a re-export a superset with
+a stable prefix.
+
+**An unparseable `since` is a 400, never a silent full export.** Quietly exporting everything
+when the caller asked for a window is how somebody ends up with a download they did not ask for.
+
+**CSV values are RFC 4180 quoted because `reason` is free text a user typed.** A comma shifts
+every later column; an embedded newline corrupts every later *row*. Both are pinned by a test
+that writes all three hazardous characters through the API.
+
+**The export controller is hand-written rather than implementing its generated interface**, and
+is tagged separately in the OpenAPI document so the generated interface is left unimplemented —
+exactly as `StreamApi` is. A generated method is fixed to one response type; this answers one
+operation as either NDJSON or CSV, streamed. The path and parameters stay in the spec.
+
+---
+
 ## Webhooks
 
 **Deliveries are a transactional outbox.** The `webhook_deliveries` row is inserted in the SAME

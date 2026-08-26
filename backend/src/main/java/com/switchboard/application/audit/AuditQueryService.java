@@ -48,6 +48,40 @@ public class AuditQueryService {
             .flatMap(role -> query("a.org_id = :scopeId", orgId, null, null, after, limit));
     }
 
+    /**
+     * Every audit row for one org, oldest first, as a stream.
+     *
+     * <p>Deliberately NOT paginated and NOT cached. An export is asked for once, is expected to
+     * be complete, and is consumed by a script rather than a page - so a cursor would only give
+     * the caller a way to miss rows between pages, and caching a full-table read would be a way
+     * to blow the heap on something read once.
+     *
+     * <p>Oldest first is the opposite of the paged feed, and on purpose: an export is appended to
+     * a file or replayed into a warehouse, where chronological order is the useful one. It also
+     * means a re-export after new activity is a superset with a stable prefix.
+     *
+     * <p>The {@code Flux} is not collected anywhere - the controller writes each row as it
+     * arrives - so memory is bounded by the buffer, not by the size of the table. That is the
+     * whole reason this is a stream: the org that most needs an export is the one whose audit
+     * table is too big to serialise into one response body.
+     */
+    public reactor.core.publisher.Flux<AuditEntry> exportOrg(UUID orgId, UUID userId, Instant since) {
+        return access.requireOrgPermission(orgId, userId, Permission.VIEW_AUDIT)
+            .flatMapMany(role -> db.sql("""
+                    SELECT a.*, e.key AS env_key
+                    FROM audit_entries a
+                    LEFT JOIN environments e ON e.id = a.environment_id
+                    WHERE a.org_id = :orgId AND (:since IS NULL OR a.created_at >= :since)
+                    ORDER BY a.created_at, a.id
+                    """)
+                .bind("orgId", orgId)
+                .bind("since", since == null
+                    ? io.r2dbc.spi.Parameters.in(Instant.class)
+                    : since)
+                .map(AuditQueryService::map)
+                .all());
+    }
+
     private Mono<AuditPage> query(
         String scopePredicate, UUID scopeId, UUID envId, String flagKey, Cursor after, int limit) {
 

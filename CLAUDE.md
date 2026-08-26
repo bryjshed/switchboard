@@ -146,7 +146,7 @@ Seven live scripts run against a **running** stack and are the real regression n
 catch contract drift that unit tests cannot:
 
 ```bash
-node scripts/smoke-test.mjs                    # 44  · repo root
+node scripts/smoke-test.mjs                    # 51  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
 node dashboard/scripts/service-check.mjs       # 67
 node dashboard/scripts/ai-check.mjs            # 54

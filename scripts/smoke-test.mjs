@@ -168,6 +168,39 @@ async function main() {
   r = await req('POST', '/api/events/metrics', { token: sdkKey, body: { events: [ { contextKey: 'user-1', metricKey: 'error', value: 1, occurredAt: new Date().toISOString() } ] } });
   check('metric events ingest (202)', r.status === 202);
 
+  // --- Audit export ---
+  // Parsed line-by-line on purpose: NDJSON's whole value is that a consumer never has to hold
+  // the export in memory, and a check that JSON.parse'd the entire body would be quietly
+  // asserting the opposite property from the one the format exists for.
+  const exportRes = await fetch(`${BASE}/api/orgs/${orgId}/audit/export`, {
+    headers: { Authorization: `Bearer ${dev(OWNER)}` },
+  });
+  check('audit export streams NDJSON (200)', exportRes.status === 200
+    && (exportRes.headers.get('content-type') ?? '').includes('application/x-ndjson'));
+
+  const exportLines = (await exportRes.text()).split('\n').filter((l) => l.trim());
+  const exportedActions = [];
+  let everyLineParsed = exportLines.length > 0;
+  for (const line of exportLines) {
+    try { exportedActions.push(JSON.parse(line).action); } catch { everyLineParsed = false; }
+  }
+  check('every export line parses as JSON on its own', everyLineParsed);
+  check('export carries the actions the audit feed showed',
+    ['CREATE', 'UPDATE', 'ROLLBACK'].every((a) => exportedActions.includes(a)), exportedActions.join(','));
+
+  const csvRes = await fetch(`${BASE}/api/orgs/${orgId}/audit/export?format=csv`, {
+    headers: { Authorization: `Bearer ${dev(OWNER)}` },
+  });
+  const csvBody = await csvRes.text();
+  check('csv export has a fixed header row', csvBody.split('\n')[0].startsWith('id,createdAt,orgId'));
+  check('csv export is an attachment', (csvRes.headers.get('content-disposition') ?? '').includes('attachment'));
+
+  r = await req('GET', `/api/orgs/${orgId}/audit/export?since=not-a-date`, { token: dev(OWNER) });
+  check('400 unparseable since (never a silent full export)', r.status === 400);
+
+  r = await req('GET', `/api/orgs/${orgId}/audit/export`, { token: dev(STRANGER) });
+  check('403 another org cannot export your audit', r.status === 403);
+
   // --- Signed webhooks ---
   // Verifying the signature HERE, in Node, is the point: the server signs in Java, and a
   // receiver is whatever language the customer writes. A Java-only test would prove the
