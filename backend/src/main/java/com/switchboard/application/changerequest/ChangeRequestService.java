@@ -3,6 +3,10 @@ package com.switchboard.application.changerequest;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.ListCacheInvalidator;
+import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.application.flag.EnvConfigResult;
 import com.switchboard.application.flag.FlagTargetingService;
 import com.switchboard.application.flag.WriteTarget;
@@ -67,6 +71,8 @@ public class ChangeRequestService {
     private final FlagRepository flags;
     private final OrgAccessService access;
     private final AuditWriter audit;
+    private final ListCacheInvalidator listCaches;
+    private final SwitchboardCache<String, ChangeRequestPage> pageCache;
     private final TransactionalOperator tx;
     private final ObjectMapper json;
 
@@ -78,6 +84,8 @@ public class ChangeRequestService {
         FlagRepository flags,
         OrgAccessService access,
         AuditWriter audit,
+        ListCacheInvalidator listCaches,
+        CacheRegistry caches,
         TransactionalOperator tx,
         ObjectMapper json) {
         this.requests = requests;
@@ -86,6 +94,8 @@ public class ChangeRequestService {
         this.flags = flags;
         this.access = access;
         this.audit = audit;
+        this.listCaches = listCaches;
+        this.pageCache = caches.cache(CacheName.CHANGE_REQUEST_LIST);
         this.tx = tx;
         this.json = json;
     }
@@ -203,7 +213,8 @@ public class ChangeRequestService {
                         diff(fields))
                     .thenReturn(saved);
             })
-            .as(tx::transactional);
+            .as(tx::transactional)
+            .doOnNext(ignored -> listCaches.changeRequestsChanged());
     }
 
     // ---------------------------------------------------------------- AI proposals
@@ -306,8 +317,19 @@ public class ChangeRequestService {
         return resolveEnvId(projectId, envKey)
             .flatMap(env -> requireReadAccess(projectId, userId, env.id())
                 .then(resolveFlagId(projectId, flagKey))
-                .flatMap(flag -> requests.list(
-                    projectId, env.id(), flag.id(), status, cursor, capped)));
+                // Access is re-checked above on every call; the cached page is a function of
+                // the scope and filters only, never of the caller.
+                .flatMap(flag -> pageCache.get(
+                    pageKey(projectId, env.id(), flag.id(), status, cursor, capped),
+                    ignored -> requests.list(
+                        projectId, env.id(), flag.id(), status, cursor, capped))));
+    }
+
+    private static String pageKey(UUID projectId, UUID envId, UUID flagId,
+        ChangeRequestStatus status, String cursor, int limit) {
+        return projectId + "\u0000" + envId + "\u0000" + flagId + "\u0000"
+            + (status == null ? "-" : status.name()) + "\u0000"
+            + (cursor == null || cursor.isEmpty() ? "-" : cursor) + "\u0000" + limit;
     }
 
     /**

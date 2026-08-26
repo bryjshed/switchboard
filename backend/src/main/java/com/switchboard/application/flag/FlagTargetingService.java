@@ -3,6 +3,7 @@ package com.switchboard.application.flag;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.cache.ListCacheInvalidator;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
@@ -55,6 +56,7 @@ public class FlagTargetingService {
     private final AuditWriter audit;
     private final FlagChangePublisher publisher;
     private final WebhookDispatcher dispatcher;
+    private final ListCacheInvalidator listCaches;
     private final TransactionalOperator tx;
     private final ObjectMapper json;
 
@@ -67,6 +69,7 @@ public class FlagTargetingService {
         AuditWriter audit,
         FlagChangePublisher publisher,
         WebhookDispatcher dispatcher,
+        ListCacheInvalidator listCaches,
         TransactionalOperator tx,
         ObjectMapper json) {
         this.flags = flags;
@@ -76,6 +79,7 @@ public class FlagTargetingService {
         this.audit = audit;
         this.publisher = publisher;
         this.dispatcher = dispatcher;
+        this.listCaches = listCaches;
         this.tx = tx;
         this.json = json;
     }
@@ -293,6 +297,7 @@ public class FlagTargetingService {
                 // neither can fail it, and an unreachable receiver is retried by the sweep.
                 .doOnNext(write -> {
                     publisher.publish(write.environmentId(), write.flagKey(), write.stateVersion());
+                    listCaches.flagsChanged();
                     dispatcher.deliverNow(write.deliveries());
                 })
                 .map(CommittedWrite::result));

@@ -101,6 +101,30 @@ that touch Postgres on **every** request, and they are an order of magnitude wor
 everything else. That is the caching seam working: the paths that go through it are fast, and
 the ones that do not are where the remaining time is.
 
+### The flag list, before and after caching
+
+That measurement is what justified putting the flag list behind the seam. Re-measured
+afterwards on the same rig, same load shape:
+
+| `GET /projects/{id}/flags` | p50 | p99 | cache |
+|---|---|---|---|
+| uncached | 2.87 ms | **73.82 ms** | — |
+| cached, run 1 | 0.70 ms | 4.79 ms | 19,970 hits / 1 miss |
+| cached, run 2 | 0.73 ms | 5.05 ms | — |
+
+**~4× at p50 and ~15× at p99**, moving it from the slowest path in the product to the middle of
+the pack.
+
+**The first re-measurement said the opposite, and that is worth recording.** It reported p99
+131 ms — *worse* than uncached — which would have been a reason to revert. It was contamination:
+an unrelated JVM from another project was using a full core and macOS `mediaanalysisd` another
+1.4, on a 10-core box already running the server and three load generators. The harness said so
+itself — peak in-flight jumped from ~13 to 142 and generator lag went 4.25 ms above its measured
+floor — and a control scenario whose code had not changed (`bootstrap-full`, 48 kB) still came
+back at its earlier number, which is what isolated the cause. Two clean re-runs then agreed with
+each other. The rule this illustrates: on a shared laptop, a single run is a hypothesis, not a
+result.
+
 Cache hit rates over the run were effectively 100% (`env_snapshot`, `sdk_key`,
 `permissions`, `user_identity` — one miss each at first touch, then hits). The caches added on
 2026-08-25 were sized by argument; this is the first evidence they hold up under load.

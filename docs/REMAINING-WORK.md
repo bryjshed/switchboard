@@ -188,16 +188,39 @@ Needs either a short-TTL cache or incremental rollups. **M**
 unknown flag key or an invalid SDK key hit the database every time. Besides the waste, a scanner spraying bad keys turns into unbounded database load —
 this is a denial-of-service vector as much as a performance one. **S**
 
-**Dashboard list queries** — flags, audit, change requests — are **still uncached**, and
-deliberately last: they are human-paced, and a stale flag list is a worse trade than a fast one.
-The only item in this subsection not done. **S**
+~~**Dashboard list queries** — flags, audit, change requests — are **still uncached**.~~
+**Flags and change requests: done 2026-08-25. Audit: deliberately NOT cached — see below.**
 
-**Measured 2026-08-25, and it moves this item up.** `GET /projects/{id}/flags` is the slowest
-path in the product: p50 2.87 ms, **p99 73.8 ms**, against 4–8 ms at p99 for everything served
-through the cache seam — an order of magnitude, and it is the page every session opens on. The
-"human-paced" argument for deferring it stands; the "it is probably fine" half of it does not.
-See [PERFORMANCE.md](PERFORMANCE.md#latency). The TTL still has to be justified rather than
-picked: staleness here is a flag list that disagrees with what is live.
+The original argument for deferring these was that they are human-paced, and that a stale flag
+list is a worse trade than a fast one. The first half was right and the second half was the
+wrong frame, because it assumes staleness is the price of caching. It is not, if invalidation
+is exact:
+
+**The TTL is a backstop, not a staleness budget.** Every write that could change a flag list
+clears it — locally and across instances over the existing `NOTIFY` channel — so the answer to
+"how stale can the flag list be" is *it cannot be*. Five minutes is about surviving a dropped
+notification, not about how much staleness a reader should tolerate. `ListCacheIT` writes
+something and asserts the very next read reflects it, for creates, archives, renames and
+targeting writes.
+
+**The rename case is the one that would have been missed.** A PATCH of a flag's name or tags
+writes an audit row and bumps no state version, so it fires no `flag_change` notification. A
+design that hung list invalidation off that existing signal — the obvious design — would have
+served a stale name for the full TTL, and looked correct in every test that did not wait five
+minutes.
+
+**Measured, before and after:** p50 2.87 ms → 0.72 ms, p99 **73.8 ms → ~5 ms**, at 19,970 cache
+hits to 1 miss. See [PERFORMANCE.md](PERFORMANCE.md#the-flag-list-before-and-after-caching),
+which also records that the first re-measurement claimed the cache made things *worse* and how
+that turned out to be an unrelated process eating two cores.
+
+**Audit is deliberately left uncached, and this is a reversal of the plan above.** Counting the
+call sites is what settled it: audit rows are written from **18 places** and the list is read
+from one. A cache invalidated by essentially every write in the product has a hit rate bounded
+by its own invalidation rate, so there is little to win — and 18 invalidation points is 18
+chances to miss one, where the failure mode is a silently stale *audit trail*. That is the one
+list where staleness does not read as "slow page", it reads as "the audit log is broken". The
+right fix for audit performance is an index or a narrower projection, not a cache.
 
 ### The architecture — as built, and where it departed from this plan
 

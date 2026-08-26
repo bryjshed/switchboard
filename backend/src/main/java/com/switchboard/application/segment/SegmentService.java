@@ -1,6 +1,7 @@
 package com.switchboard.application.segment;
 
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.cache.ListCacheInvalidator;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
@@ -30,6 +31,7 @@ public class SegmentService {
     private final OrgAccessService access;
     private final AuditWriter audit;
     private final FlagChangePublisher publisher;
+    private final ListCacheInvalidator listCaches;
     private final TransactionalOperator tx;
 
     @SuppressWarnings("checkstyle:ParameterNumber")
@@ -40,6 +42,7 @@ public class SegmentService {
         OrgAccessService access,
         AuditWriter audit,
         FlagChangePublisher publisher,
+        ListCacheInvalidator listCaches,
         TransactionalOperator tx) {
         this.segments = segments;
         this.flags = flags;
@@ -47,6 +50,7 @@ public class SegmentService {
         this.access = access;
         this.audit = audit;
         this.publisher = publisher;
+        this.listCaches = listCaches;
         this.tx = tx;
     }
 
@@ -122,6 +126,7 @@ public class SegmentService {
             .concatMap(env -> flags.bumpStateVersion(env.id())
                 .map(stateVersion -> Tuples.of(env.id(), stateVersion)))
             .doOnNext(envAndVersion -> publisher.publish(envAndVersion.getT1(), "", envAndVersion.getT2()))
+            .doOnNext(ignored -> listCaches.flagsChanged())
             .then();
     }
 }

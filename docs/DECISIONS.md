@@ -427,6 +427,48 @@ target `switchboard_load` on the same Postgres instance.
 
 ---
 
+## Dashboard list caching
+
+**Invalidation is exact; the TTL is only a backstop.** The flag and change-request list caches
+are cleared by every write that could change them, so a stale list is not something a reader is
+expected to tolerate for the length of the TTL — it should never be served at all. Five minutes
+is therefore about surviving a dropped `NOTIFY`, not a judgement about acceptable staleness.
+Read `ListCacheInvalidator` before changing any of this; the rule it exists to hold is below.
+
+**Eviction happens AFTER the transaction commits, never inside it.** Evicting inside opens a
+race with a window wide enough to hit: the evict runs, a concurrent reader misses and re-loads,
+the reader caches pre-commit data, and the commit then lands with no further eviction — leaving
+a cache stale indefinitely with no error and nothing in the log. This is why invalidation is
+not simply called from `AuditWriter`, which would otherwise be the one place every audited
+action passes through.
+
+**A rename must evict, and would have been missed.** A PATCH of a flag's name or tags writes an
+audit row and bumps no state version, so it fires no `flag_change` notification. Hanging list
+invalidation off that existing signal is the obvious design and is wrong: it would serve a stale
+name for the whole TTL and look correct in any test that did not wait five minutes. Pinned by
+`ListCacheIT.aRenameIsVisibleImmediatelyEvenThoughItBumpsNoStateVersion`.
+
+**The lists are cleared wholesale rather than evicted by key.** A page is keyed by its filters
+and cursor, so one flag changing invalidates an unknowable set of keys — every page whose filter
+that flag matched, which cannot be computed without running the queries. Blunt is correct;
+enumerating would be guesswork. Affordable because the writes are human-paced.
+
+**The cached page is not keyed by user, and that is safe only because of ordering.** Access is
+checked *before* the cached value is handed over, and the underlying query takes no user, so
+every project member gets the same page. Moving the permission check inside the loader would
+cache the first caller's entitlement along with the data — the same class of bug as a
+`stateVersion` ETag on a per-context body.
+
+**The audit list is deliberately NOT cached**, reversing the plan that grouped it with the other
+two. Audit rows are written from 18 call sites and the list is read from one: a cache
+invalidated by essentially every write in the product has a hit rate bounded by its own
+invalidation rate, so there is little to win, and 18 invalidation points is 18 chances to miss
+one. The failure mode there is a silently stale audit trail, which is the one kind of staleness
+that reads as "the audit log is broken" rather than "the page is slow". Audit performance, if it
+ever matters, wants an index or a narrower projection.
+
+---
+
 ## Webhooks
 
 **Deliveries are a transactional outbox.** The `webhook_deliveries` row is inserted in the SAME

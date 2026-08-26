@@ -1,6 +1,7 @@
 package com.switchboard.application.changerequest;
 
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.cache.ListCacheInvalidator;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.changerequest.ChangeRequest;
@@ -42,6 +43,7 @@ public class ChangeRequestReviewService {
     private final ChangeRequestApplier applier;
     private final OrgAccessService access;
     private final AuditWriter audit;
+    private final ListCacheInvalidator listCaches;
     private final TransactionalOperator tx;
 
     public ChangeRequestReviewService(
@@ -49,11 +51,13 @@ public class ChangeRequestReviewService {
         ChangeRequestApplier applier,
         OrgAccessService access,
         AuditWriter audit,
+        ListCacheInvalidator listCaches,
         TransactionalOperator tx) {
         this.requests = requests;
         this.applier = applier;
         this.access = access;
         this.audit = audit;
+        this.listCaches = listCaches;
         this.tx = tx;
     }
 
@@ -80,7 +84,8 @@ public class ChangeRequestReviewService {
                     .then(audit.insert(
                         locked.orgId(), locked.projectId(), locked.environmentId(), locked.flagKey(),
                         "CHANGE_REQUEST_DECLINE", user.email(), comment, null, null, null)))
-                .as(tx::transactional))
+                .as(tx::transactional)
+                .doOnNext(ignored -> listCaches.changeRequestsChanged()))
             .then(Mono.defer(() -> load(changeRequestId)));
     }
 
@@ -97,7 +102,8 @@ public class ChangeRequestReviewService {
                     return requirePending(locked).then(requests.casStatus(
                         changeRequestId, ChangeRequestStatus.PENDING, ChangeRequestStatus.WITHDRAWN));
                 })
-                .as(tx::transactional))
+                .as(tx::transactional)
+                .doOnNext(ignored -> listCaches.changeRequestsChanged()))
             .then(Mono.defer(() -> load(changeRequestId)));
     }
 
@@ -133,7 +139,8 @@ public class ChangeRequestReviewService {
                         locked.id(), ChangeRequestStatus.PENDING, ChangeRequestStatus.APPROVED)
                         .map(rows -> rows == 1)
                     : Mono.just(false)))
-            .as(tx::transactional);
+            .as(tx::transactional)
+            .doOnNext(ignored -> listCaches.changeRequestsChanged());
     }
 
     /**
