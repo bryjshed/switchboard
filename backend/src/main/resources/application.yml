@@ -81,6 +81,13 @@ switchboard:
   #
   # Lowering this is destructive and immediate: the next roll drops the partitions it excludes.
   # There is no soft delete and no archive step.
+  # Audit retention is OFF by default, which is deliberately the opposite of events below.
+  # Event rows are telemetry - high-volume, individually meaningless - so expiring them is
+  # housekeeping. Audit rows are the record a compliance review or an incident post-mortem
+  # needs, so deleting them should be an act with an owner rather than a default nobody chose.
+  # 0 = keep forever. Set a window only if a policy requires one; it is a row-wise DELETE.
+  audit:
+    retention-months: ${AUDIT_RETENTION_MONTHS:0}
   events:
     retention-months: ${EVENT_RETENTION_MONTHS:3}
     partition-months-ahead: ${EVENT_PARTITION_MONTHS_AHEAD:2}

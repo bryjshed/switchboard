@@ -1,64 +1,55 @@
 package com.switchboard.application.ai;
 
-import com.switchboard.application.settings.SettingsService;
-import java.time.Duration;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import com.switchboard.application.webhook.WebhookDispatcher;
+import com.switchboard.application.webhook.WebhookEvent;
+import com.switchboard.domain.webhook.WebhookEventType;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
-import org.springframework.web.reactive.function.client.WebClient;
 
 /**
- * Best-effort outbound notification for monitor findings. A webhook that is
- * unset, slow, or broken must never fail a scan, so every error is logged and
- * swallowed here rather than propagated.
+ * Outbound notification for monitor findings.
+ *
+ * <p>This used to be the whole webhook story: one unsigned URL per org in {@code app_settings},
+ * no retries, no filtering, and only ever rollout findings. It is now a thin adapter onto the
+ * general {@link WebhookDispatcher}, so a finding is signed, retried and filterable exactly
+ * like a flag change - and there is one delivery path to reason about rather than two.
+ * V8 migrates any URL configured under the old setting into a real webhook row, so orgs that
+ * had one keep receiving notifications.
+ *
+ * <p>It is kept as its own type rather than inlined at the three call sites because the
+ * monitor should not have to know how an event is shaped, and because a webhook that is
+ * unset, slow, or broken must never fail a scan - that guarantee lives here.
  */
 @Component
 public class NotificationWebhook {
 
-    private static final Logger log = LoggerFactory.getLogger(NotificationWebhook.class);
-    private static final Duration TIMEOUT = Duration.ofSeconds(5);
+    private final WebhookDispatcher dispatcher;
 
-    private final SettingsService settings;
-    private final WebClient webClient;
-
-    public NotificationWebhook(SettingsService settings) {
-        this.settings = settings;
-        this.webClient = WebClient.create();
+    public NotificationWebhook(WebhookDispatcher dispatcher) {
+        this.dispatcher = dispatcher;
     }
 
-    public Mono<Void> notify(UUID orgId, String type, String flagKey, String envKey, String summary) {
-        return settings.get("org." + orgId + ".notifications.webhook")
-            .filter(url -> !url.isBlank())
-            .flatMap(url -> post(url, payload(type, flagKey, envKey, summary)))
-            .onErrorResume(e -> {
-                log.warn("Notification webhook failed for org {}: {}", orgId, e.toString());
-                return Mono.empty();
-            })
+    /**
+     * Raises a {@code rollout.finding}. Errors are swallowed: by the time this runs the
+     * finding is already persisted, so failing the scan would lose the scan rather than save
+     * the notification.
+     */
+    @SuppressWarnings("checkstyle:ParameterNumber")
+    public Mono<Void> notify(UUID orgId, UUID projectId, UUID environmentId,
+        String kind, String flagKey, String envKey, String summary) {
+
+        WebhookEvent event = WebhookEvent.of(
+            WebhookEventType.ROLLOUT_FINDING, orgId, projectId, environmentId,
+            null, envKey, flagKey, null, "switchboard-monitor",
+            // The kind (anomaly / optimization / srm) rides in the summary rather than
+            // becoming its own event type: all three are the monitor saying "look at this",
+            // and a consumer that wants to split them has the text and the finding record.
+            kind + ": " + summary);
+
+        return dispatcher.enqueue(event)
+            .doOnNext(dispatcher::deliverNow)
+            .onErrorResume(e -> Mono.empty())
             .then();
-    }
-
-    private Mono<Void> post(String url, Map<String, Object> payload) {
-        return webClient.post()
-            .uri(url)
-            .bodyValue(payload)
-            .retrieve()
-            .toBodilessEntity()
-            .timeout(TIMEOUT)
-            .retryWhen(Retry.max(1))
-            .then();
-    }
-
-    private static Map<String, Object> payload(String type, String flagKey, String envKey, String summary) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("type", type);
-        body.put("flagKey", flagKey);
-        body.put("envKey", envKey);
-        body.put("summary", summary);
-        return body;
     }
 }

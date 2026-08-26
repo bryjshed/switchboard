@@ -2,6 +2,8 @@ package com.switchboard.interfaces.rest;
 
 import com.switchboard.application.ai.JobResult;
 import com.switchboard.application.ai.PartitionMaintenanceService;
+import com.switchboard.application.audit.AuditRetentionService;
+import com.switchboard.application.webhook.WebhookDispatcher;
 import com.switchboard.application.ai.RolloutMonitorService;
 import com.switchboard.application.ai.StaleFlagService;
 import com.switchboard.domain.common.ForbiddenException;
@@ -29,16 +31,22 @@ public class JobsController implements JobsApi {
     private final RolloutMonitorService monitor;
     private final StaleFlagService staleFlags;
     private final PartitionMaintenanceService partitions;
+    private final WebhookDispatcher webhooks;
+    private final AuditRetentionService auditRetention;
 
     public JobsController(
         @Value("${switchboard.jobs.token:}") String jobToken,
         RolloutMonitorService monitor,
         StaleFlagService staleFlags,
-        PartitionMaintenanceService partitions) {
+        PartitionMaintenanceService partitions,
+        WebhookDispatcher webhooks,
+        AuditRetentionService auditRetention) {
         this.jobToken = jobToken;
         this.monitor = monitor;
         this.staleFlags = staleFlags;
         this.partitions = partitions;
+        this.webhooks = webhooks;
+        this.auditRetention = auditRetention;
     }
 
     @Override
@@ -57,6 +65,21 @@ public class JobsController implements JobsApi {
     public Mono<ResponseEntity<JobRunResponse>> runPartitionRoll(
         String xJobToken, ServerWebExchange exchange) {
         return authorize(xJobToken).then(Mono.defer(partitions::run)).map(JobsController::toResponse);
+    }
+
+    @Override
+    public Mono<ResponseEntity<JobRunResponse>> runAuditRetention(
+        String xJobToken, ServerWebExchange exchange) {
+        return authorize(xJobToken).then(Mono.defer(auditRetention::run)).map(JobsController::toResponse);
+    }
+
+    @Override
+    public Mono<ResponseEntity<JobRunResponse>> runWebhookSweep(
+        String xJobToken, ServerWebExchange exchange) {
+        return authorize(xJobToken)
+            .then(Mono.defer(webhooks::sweep))
+            .map(attempted -> toResponse(new JobResult("webhook-sweep", attempted, 0,
+                "attempted=" + attempted + " (deliveries due for retry)")));
     }
 
     private Mono<Void> authorize(String presented) {

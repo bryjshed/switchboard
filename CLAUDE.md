@@ -12,17 +12,20 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 111 integration |
+| `evaluation/` | **The flag evaluation core.** Pure Java, zero dependencies. Shared by the backend and every JVM SDK. | 528 (508 conformance + 20 unit) |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 114 unit + 111 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 337 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
+| `sdk/java/` | OpenFeature provider with local evaluation, over `evaluation/` | 509 + live check |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
-| `spec/` | Normative evaluation spec + 507 conformance vectors | executed by backend and SDK |
+| `spec/` | Normative evaluation spec + 507 conformance vectors | executed by `evaluation/` and the SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
 
 **Two contracts, both enforced rather than described.** `backend/src/main/resources/openapi/switchboard-api.yaml`
 generates the server interfaces and the clients mirror it. `spec/evaluation.md` plus
-`spec/conformance/` define evaluation *behaviour*, and both the Java server and the
-TypeScript SDK execute those vectors as tests.
+`spec/conformance/` define evaluation *behaviour*, and both the `evaluation/` module (which
+the server and every JVM SDK compile against) and the TypeScript SDK execute those vectors
+as tests.
 
 ## Running it
 
@@ -74,6 +77,14 @@ port. That listener is unauthenticated by design: keep it off the public interfa
 
 ## Conventions
 
+**The evaluation core lives in `evaluation/`, not in `backend/`.** Bucketing, the sixteen
+operators, semver, the restricted regex and precedence were extracted so the server and a JVM
+SDK cannot drift apart — there is one implementation, not two kept honest by tests. It has
+**zero compile dependencies** and that is a hard rule: an SDK dropped into someone else's
+application must not drag a dependency tree with it. Do not add Spring, Jackson or a logging
+facade to it. `com.switchboard.domain.flag` is deliberately split across the two modules (value
+types here, repositories and view types in the backend); see `docs/DECISIONS.md`.
+
 **Backend.** `domain/` is pure Java — no Spring, no vendor names, no JWT libraries; a
 violation there is a design defect, not a style one. `application/` composes ports and uses
 `TransactionalOperator`. `infrastructure/` holds `DatabaseClient` adapters. `interfaces/rest`
@@ -123,8 +134,9 @@ locally.
 ## Verifying
 
 ```bash
-cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
-cd backend    && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
+# From the REPO ROOT -- evaluation/ and backend/ are one reactor build now.
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -q compile checkstyle:check
 cd dashboard  && npm run check && npm run build
 cd sdk/typescript && npx vitest run
 cd mcp        && npm run check
@@ -134,7 +146,7 @@ Seven live scripts run against a **running** stack and are the real regression n
 catch contract drift that unit tests cannot:
 
 ```bash
-node scripts/smoke-test.mjs                    # 34  · repo root
+node scripts/smoke-test.mjs                    # 51  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
 node dashboard/scripts/service-check.mjs       # 67
 node dashboard/scripts/ai-check.mjs            # 54
@@ -142,6 +154,20 @@ node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
 node mcp/scripts/live-check.mjs                # 19
 ```
+
+The Java SDK's live check is a JUnit test rather than a script, because driving a JVM SDK from
+node would prove nothing about the JVM SDK. It self-skips without a key:
+
+```bash
+SWITCHBOARD_SDK_KEY=$(grep -oE 'sb_srv_production_[a-z0-9]+' <(make seed)) \
+  JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl sdk/java -am test -Dtest=LiveCheckIT
+```
+
+It asserts the SDK's **in-process** answers equal the **server's** answers for the same flags
+and contexts. That is the check that found the SDK rejecting every real bootstrap payload,
+because a live server serialises a single-variation serve as `{"rollout": [], "variationId": …}`
+— present but empty — while every hand-written fixture omitted the field. No unit test could
+have caught it.
 
 **Two of them import from `dist/`, not from source** — `sdk/typescript` and `mcp` — because a
 live check should exercise what ships. On a clean checkout they need `npm run build` in that
@@ -156,16 +182,44 @@ job configures the second OIDC provider up front so auth-check's OIDC leg actual
 real. If you change a check script, a port, or a seed default, that workflow is the other
 place it has to be true.
 
+### Performance harnesses
+
+Not part of the pass/fail net — they measure rather than assert, and they are **not** in CI.
+
+```bash
+node scripts/load-test.mjs   --base http://localhost:28090 --flags 50 --rate 500 --workers 3
+node scripts/load-volume.mjs --db switchboard_load --events 2000000 --job-token <token>
+```
+
+Numbers, method and caveats live in `docs/PERFORMANCE.md`. Four things will bite you here:
+
+- **Benchmark `java -jar`, not `make backend`.** `spring-boot:run` passes
+  `-XX:TieredStopAtLevel=1`, which caps the JIT at C1 — the server works fine and is
+  permanently slower than a deployment, so dev-loop numbers are not production numbers.
+- **Run against a separate database.** These generate millions of event rows; in the dev
+  database they outlive the run and skew everything measured afterwards. Both scripts default
+  to `switchboard_load`.
+- **Turn the rate limiter off** (`--switchboard.ratelimit.enabled=false`). The default is
+  6,000/min = **100 req/s per credential**, so a load test against one SDK key measures the
+  limiter, not the server.
+- **The monitor measures from the allocation epoch**, so `load-volume.mjs` backdates
+  `flag_env_config_versions.created_at`. Without that the scan reports `itemsScanned=0`
+  against completely full tables.
+
 ### Tight loops
 
 Do not run the full suite to check one thing. These are verified working:
 
 ```bash
 # one unit test class (fast, no container)
-cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw test -Dtest=FlagEvaluatorTest -Dcheckstyle.skip
+# one unit test class in the evaluation core (fast, no container, no Spring)
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl evaluation test -Dtest=FlagEvaluatorTest -Dcheckstyle.skip
+
+# one unit test class in the backend
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl backend -am test -Dtest=FlagTargetingServiceTest -Dcheckstyle.skip
 
 # one integration test class (starts Testcontainers, ~10s)
-cd backend && JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw verify -Dit.test=EvalApiIT -Dsurefire.skip=true -Dcheckstyle.skip
+JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl backend -am verify -Dit.test=EvalApiIT -Dsurefire.skip=true -Dcheckstyle.skip
 
 cd dashboard && npx vitest run src/lib/__tests__/rollout.test.ts
 cd sdk/typescript && npx vitest run test/conformance.test.ts

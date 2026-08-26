@@ -3,6 +3,10 @@ package com.switchboard.application.flag;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.cache.CacheName;
+import com.switchboard.application.cache.CacheRegistry;
+import com.switchboard.application.cache.ListCacheInvalidator;
+import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
@@ -44,6 +48,8 @@ public class FlagService {
     private final OrgAccessService access;
     private final AuditWriter audit;
     private final FlagChangePublisher publisher;
+    private final ListCacheInvalidator listCaches;
+    private final SwitchboardCache<String, FlagPage> pageCache;
     private final TransactionalOperator tx;
     private final ObjectMapper json;
 
@@ -54,6 +60,8 @@ public class FlagService {
         OrgAccessService access,
         AuditWriter audit,
         FlagChangePublisher publisher,
+        ListCacheInvalidator listCaches,
+        CacheRegistry caches,
         TransactionalOperator tx,
         ObjectMapper json) {
         this.flags = flags;
@@ -61,6 +69,8 @@ public class FlagService {
         this.access = access;
         this.audit = audit;
         this.publisher = publisher;
+        this.listCaches = listCaches;
+        this.pageCache = caches.cache(CacheName.FLAG_LIST);
         this.tx = tx;
         this.json = json;
     }
@@ -95,7 +105,8 @@ public class FlagService {
                             .thenReturn(bumped)))
                     .as(tx::transactional))
                 .doOnNext(bumped -> bumped.forEach(
-                    envAndVersion -> publisher.publish(envAndVersion.getT1(), "", envAndVersion.getT2()))))
+                    envAndVersion -> publisher.publish(envAndVersion.getT1(), "", envAndVersion.getT2())))
+                .doOnNext(ignored -> listCaches.flagsChanged()))
             .onErrorMap(DataIntegrityViolationException.class,
                 e -> new ConflictException("A flag with that key already exists in this project"))
             .then(Mono.defer(() -> flags.findDetail(projectId, key)));
@@ -118,14 +129,40 @@ public class FlagService {
             .switchIfEmpty(Mono.error(new NotFoundException("Flag not found")));
     }
 
+    /**
+     * A page of the flag list, read through {@link CacheName#FLAG_LIST}.
+     *
+     * <p>The access check stays OUTSIDE the cached load and runs on every call. That ordering
+     * is the whole safety argument: the cached value is a function of (project, filters,
+     * cursor, limit) and of nothing about the caller, so it is safe to share between users -
+     * but only because standing is re-checked before it is handed over. Moving the permission
+     * check inside the loader would cache the first caller's entitlement along with the data.
+     */
     public Mono<FlagPage> list(UUID projectId, UUID userId, String query, String tag, String cursor, int limit) {
         String afterKey = decodeCursor(cursor);
         return access.requireProjectMember(projectId, userId)
-            .thenMany(Flux.defer(() -> flags.list(projectId, emptyToNull(query), emptyToNull(tag), afterKey, limit)))
-            .collectList()
-            .map(items -> new FlagPage(
-                items,
-                items.size() == limit ? encodeCursor(items.get(items.size() - 1).key()) : null));
+            .then(pageCache.get(
+                pageKey(projectId, query, tag, afterKey, limit),
+                ignored -> Flux.defer(() ->
+                        flags.list(projectId, emptyToNull(query), emptyToNull(tag), afterKey, limit))
+                    .collectList()
+                    .map(items -> new FlagPage(
+                        items,
+                        items.size() == limit ? encodeCursor(items.get(items.size() - 1).key()) : null))));
+    }
+
+    /**
+     * Every input that changes the result, and nothing else. Null-safe and unambiguous: the
+     * separator cannot appear in a flag key or tag, so ("a", null) and (null, "a") cannot
+     * collide into one entry - a collision here would serve one project's flags to another.
+     */
+    private static String pageKey(UUID projectId, String query, String tag, String afterKey, int limit) {
+        return projectId + "\u0000" + nullSafe(query) + "\u0000" + nullSafe(tag)
+            + "\u0000" + nullSafe(afterKey) + "\u0000" + limit;
+    }
+
+    private static String nullSafe(String value) {
+        return value == null || value.isEmpty() ? "-" : value;
     }
 
     /** PATCH semantics: null name/description and empty tags/addVariations leave the field unchanged. */
@@ -161,7 +198,12 @@ public class FlagService {
                                 projectAccess.orgId(), projectId, null, key, "UPDATE", email,
                                 null, null, null, diff(Map.of("flagFieldsChanged", true)))
                             .thenReturn(saved))
-                        .as(tx::transactional);
+                        .as(tx::transactional)
+                        // A rename or retag changes the list and bumps no state version, so
+                        // it evicts here explicitly - the flag_change NOTIFY never fires for
+                        // it, and hanging invalidation off that alone would serve a stale
+                        // name until the TTL expired.
+                        .doOnNext(ignored -> listCaches.flagsChanged());
                 }))
             .then(Mono.defer(() -> flags.findDetail(projectId, key)));
     }
@@ -182,7 +224,8 @@ public class FlagService {
                     .thenReturn(bumped))
                 .as(tx::transactional)
                 .doOnNext(bumped -> bumped.forEach(
-                    envAndVersion -> publisher.publish(envAndVersion.getT1(), "", envAndVersion.getT2()))))
+                    envAndVersion -> publisher.publish(envAndVersion.getT1(), "", envAndVersion.getT2())))
+                .doOnNext(ignored -> listCaches.flagsChanged()))
             .then();
     }
 

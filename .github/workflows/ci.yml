@@ -53,13 +53,13 @@ jobs:
       # after the whole test suite has run, which is twenty-odd wasted minutes for a
       # misplaced brace.
       - name: Checkstyle
-        working-directory: backend
         run: ./mvnw -B -q compile checkstyle:check
 
       # Testcontainers works on GitHub runners without configuration -- the Docker socket is
       # present and Ryuk can bind it.
+      # From the repo root: switchboard-evaluation is a sibling module the backend now
+      # compiles against, and a single-module build would not build it.
       - name: Verify
-        working-directory: backend
         run: ./mvnw -B verify
 
       - name: Publish test report
@@ -162,8 +162,14 @@ jobs:
         run: node spec/tools/verify-bucket.mjs
 
       - name: Java runner
-        working-directory: backend
-        run: ./mvnw -B test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
+        run: ./mvnw -B -pl evaluation test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
+
+      # The same vectors again, but replayed as BOOTSTRAP PAYLOADS through the Java SDK's own
+      # JSON parsing. Not a duplicate of the line above: the SDK shares the evaluator, so the
+      # only thing this can catch - and the only place the SDK can still disagree with the
+      # server - is the wire-format mapping.
+      - name: Java SDK runner (vectors through the wire format)
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=ConformanceThroughSdkTest -Dcheckstyle.skip -Dsurefire.failIfNoSpecifiedTests=false
 
       - run: npm ci
         working-directory: sdk/typescript
@@ -191,9 +197,13 @@ jobs:
         run: docker compose up -d --wait
 
       # Compiles ahead of the start step so the wait below is startup time, not build time.
+      #
+      # `install`, not `package`: the start step below runs `spring-boot:run` from inside
+      # backend/, and a single-module build resolves the sibling switchboard-evaluation from
+      # the local repository rather than the reactor. `package` would leave it unresolvable
+      # and the backend would fail to start with a missing-artifact error.
       - name: Build the backend
-        working-directory: backend
-        run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip package
+        run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip install
 
       # Started exactly the way `make backend` starts it, and `spring-boot:run` rather than
       # `java -jar` is NOT interchangeable here.
@@ -234,8 +244,13 @@ jobs:
           done
           echo "::error::backend did not become healthy"; tail -100 /tmp/sb-boot.log; exit 1
 
+      # The seed prints each environment's SDK key exactly once, which is the only time it
+      # is ever visible. The Java SDK's live check needs the production one, so it is
+      # captured here rather than re-minted.
       - name: Seed
-        run: node scripts/seed-local.mjs
+        run: |
+          node scripts/seed-local.mjs | tee /tmp/seed.log
+          echo "SWITCHBOARD_SDK_KEY=$(grep -oE 'sb_srv_production_[a-z0-9]+' /tmp/seed.log | head -1)" >> "$GITHUB_ENV"
 
       # The sdk and mcp check scripts import from `dist/`, not from source -- deliberately, since
       # the point of a live check is to exercise what actually ships. So they need a build, not
@@ -251,7 +266,7 @@ jobs:
           npm ci --prefix mcp && npm run build --prefix mcp
 
       # Every one of the seven, each on its own line so the failing one is named in the UI.
-      - name: smoke-test (34)
+      - name: smoke-test (51)
         run: node scripts/smoke-test.mjs
       - name: sdk live-check (32)
         run: node sdk/typescript/scripts/live-check.mjs
@@ -265,6 +280,13 @@ jobs:
         run: node dashboard/scripts/auth-check.mjs
       - name: mcp live-check (19)
         run: node mcp/scripts/live-check.mjs
+
+      # The Java SDK evaluates locally, so this asserts its in-process answers equal the
+      # SERVER's answers for the same flags and contexts. Those run through entirely
+      # different code on each side, which is what makes the agreement worth asserting - and
+      # it is how the empty-rollout wire-format bug was found.
+      - name: java sdk live-check (local vs server agreement)
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=LiveCheckIT -Dcheckstyle.skip -Dsurefire.failIfNoSpecifiedTests=false
 
       # The backend log is the only place a 500 explains itself; without this a live failure
       # in CI is a status code and nothing else.
@@ -294,7 +316,7 @@ jobs:
 
       - name: Build images
         run: |
-          docker build -t switchboard-backend:ci backend
+          docker build -t switchboard-backend:ci -f backend/Dockerfile .
           docker build -t switchboard-dashboard:ci dashboard
 
       # The production compose file, brought up for real. This is what catches the class of

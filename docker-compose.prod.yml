@@ -45,7 +45,10 @@ services:
 
   backend:
     build:
-      context: ./backend
+      # Root context: the backend compiles against the sibling evaluation/ module, so a
+      # backend-only context cannot resolve it.
+      context: .
+      dockerfile: backend/Dockerfile
     image: switchboard-backend:${SWITCHBOARD_IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:

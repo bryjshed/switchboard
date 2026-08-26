@@ -238,17 +238,131 @@ covers it without a second protocol implementation.
 
 ---
 
+## The evaluation core
+
+**Flag evaluation lives in its own module (`evaluation/`), not in the backend.** Extracted
+2026-08-25, ahead of a Java SDK. The alternative was a second Java implementation of MD5
+bucketing, sixteen operators, semver ordering and the restricted regex subset — which is
+precisely the drift `spec/evaluation.md` and the conformance vectors exist to detect. Detecting
+drift at test time is strictly worse than making it impossible: one implementation cannot
+disagree with itself. The vectors still run, and now they run *once*, in the module both
+consumers compile against.
+
+**It has zero compile dependencies, and that is a hard rule rather than a nice property.** Not
+Spring, not Jackson, not SLF4J. This module is what an SDK drops into someone else's
+application, and a flag SDK that drags a dependency tree in with it is a flag SDK people route
+around. Jackson is test-scoped, for reading the vector files. Anything that needs a dependency
+belongs on the other side of the seam.
+
+**`com.switchboard.domain.flag` is deliberately split across two modules.** The evaluation
+module owns the value types the evaluator closes over (`Flag`, `Rule`, `Clause`, `ClauseOp`,
+`TargetingConfig`, `Variation`, `WeightedVariation`, `IndividualTarget`, `RolloutOrVariation`,
+`FlagKind`, `Segment`, `SegmentRule`); the backend keeps the repositories and the view/query
+types (`FlagRepository`, `FlagDetail`, `FlagListItem`, …). Split packages are legal on the
+classpath and both consumers use the classpath, so this works today.
+
+The alternative was renaming the packages, which would have rewritten **178 import lines across
+42 files** in the backend for no behavioural gain, and — worse — forced the server's hot path to
+either adopt new type names everywhere or map domain types to evaluation types on every
+evaluation. Keeping the names meant the extraction changed **zero** lines of backend source.
+
+The cost is real and bounded: a split package cannot be used on the JPMS module path. Nothing
+here declares `module-info.java`, the backend is an application rather than a library, and the
+SDK depends on `switchboard-evaluation` alone — so the split is never observable to a consumer.
+If someone ever needs the module path, the fix is the package rename that was skipped, and it is
+mechanical.
+
+**The backend image builds from the repository root.** It used to be self-contained under
+`backend/`, and stopped being so the moment the evaluator became a sibling module: a
+backend-only context cannot resolve `switchboard-evaluation`. The Dockerfile also copies
+`sdk/java/pom.xml` with no sources, because Maven refuses to read the reactor at all unless
+every module the aggregator declares exists — even when `-pl` selects a subset. CI missed this
+locally because nothing here builds the production image by hand; the `containers` job caught it.
+
+**The root `pom.xml` aggregates but does not parent.** The backend inherits from
+`spring-boot-starter-parent` for dependency management, and the evaluation module must inherit
+nothing at all — an SDK consumer should not be handed Spring's BOM through a parent POM.
+
+**`cd backend && ./mvnw verify` is no longer the command; build from the repo root.** A
+single-module build resolves `switchboard-evaluation` from the local repository rather than the
+reactor, so it silently uses whatever was installed last, or fails outright on a clean checkout.
+`make backend` therefore installs the core first (`make core`), and CI's `live` job uses
+`install` rather than `package` for the same reason. This is the one ergonomic regression the
+extraction caused, and it is written down here because the failure — a missing artifact — says
+nothing about why.
+
+---
+
+## The Java SDK
+
+**It does local evaluation, because remote evaluation already exists for free.** OFREP gives
+Java an OpenFeature provider with no Switchboard-specific code, so a native SDK that merely
+wrapped `POST /api/eval` would duplicate something free. What OFREP cannot do is evaluate in
+process — no I/O per flag check, keeps working through a Switchboard outage, context attributes
+never leave the box. That is the entire justification for the SDK, and it is why there is no
+remote-evaluation mode: it would be the part OFREP already does better.
+
+**It contains no evaluation logic.** Bucketing, operators, semver, the regex subset and the
+precedence ladder come from `switchboard-evaluation`. The SDK's own code is the mapping from
+the bootstrap wire format into that evaluator, plus transport and lifecycle. When reading this
+SDK looking for "how does bucketing work here", the answer is that it does not work here.
+
+**The conformance vectors are replayed through the wire format, not against the evaluator.**
+Running them against `FlagEvaluator` in the SDK's suite would assert that a shared class equals
+itself and pass no matter how broken the SDK was. `ConformanceThroughSdkTest` feeds each vector
+in as a bootstrap payload through `BootstrapCodec`, which is the only place a Java SDK can still
+disagree with the server. All 474 evaluation vectors run that way.
+
+**An empty `rollout` array is a variation serve, not a rollout.** A live server serialises a
+single-variation serve as `{"rollout": [], "variationId": "..."}` — the field present but empty
+— while `RolloutOrVariation` requires exactly one of the two. Treating "present" as "is a
+rollout" made **every real bootstrap payload unparseable** while every hand-written test fixture,
+which omits the field entirely, parsed perfectly. Do not "simplify" that emptiness check away.
+
+The general lesson is the one worth keeping: this class of bug is invisible to unit tests
+written against fixtures the same author invented, and it is exactly what the live checks exist
+for. It was found within minutes of pointing `LiveCheckIT` at a seeded stack.
+
+**`failFastOnStart` defaults to false.** A flag SDK that refuses to start because Switchboard is
+briefly unreachable has converted a degraded dependency into an outage of the application that
+depends on it. The client starts, serves callers' defaults, retries in the background, and
+reports `isReady() == false` so a health check sees the truth.
+
+**A blank targeting key becomes a null context rather than an exception.** `EvalContext` refuses
+a blank key by construction, which is right for the server — it validates at the API boundary
+and a missing key there is a bad request. Inside an SDK it is a landmine: OpenFeature routinely
+hands over a context with no targeting key, and converting eagerly threw straight through the
+caller's flag check. The provider maps blank to null and the client reports `INVALID_CONTEXT`
+while still serving the default. `EvalContexts.of("")` still throws, deliberately — a caller
+writing that by hand has a bug, and failing at the call site names it.
+
+**A rule using an unknown operator is dropped, not approximated.** A newer server can ship an
+operator a deployed SDK has never heard of. Clauses are ANDed, so a rule that cannot be fully
+understood can never be safely said to match; dropping it is the same outcome and is honest
+about it. Segment rules are ORed, so dropping one narrows membership — also the conservative
+direction.
+
+---
+
 ## Implementation
 
 **The dashboard does not use React Query.** Pages use `useState` + `useEffect` + async
 `load()`. This matches the conventions of the author's other admin dashboard; consistency
 across the two was worth more than the library. Do not introduce it for one page.
 
-**Caching goes through Spring's cache abstraction**, Caffeine now and Redis later by
-configuration. Redis is deliberately *not* on the near-term list: Caffeine is correct for one
-instance and `NOTIFY` already invalidates every instance, so correctness does not require a
-shared store. Build the seam, choose the provider when the deployment shape justifies it.
-Full design in [REMAINING-WORK.md](REMAINING-WORK.md).
+**Caching goes through the `CacheRegistry` / `SwitchboardCache` seam, which uses no proxies
+at all** — Caffeine now and Redis later by configuration. This entry used to say "Spring's
+cache abstraction"; that was the plan and it was **reversed during implementation**, because
+Spring's abstraction is synchronous and `@Cacheable` on a `Mono`-returning method caches the
+cold publisher rather than the value — it appears to work while doing nothing. The intent
+survived intact (one seam, provider by `switchboard.cache.provider`, TTLs declared centrally,
+a typed facade); only the mechanism changed. Names are a `CacheName` enum so a typo is a
+compile error, and keys are Strings so they survive the `NOTIFY` invalidation channel.
+
+Redis is deliberately *not* on the near-term list: Caffeine is correct for one instance and
+`NOTIFY` already invalidates every instance, so correctness does not require a shared store.
+Build the seam, choose the provider when the deployment shape justifies it. Full design in
+[REMAINING-WORK.md](REMAINING-WORK.md).
 
 **Change propagation uses Postgres `NOTIFY`, not Redis pub/sub or a broker.** One fewer piece
 of infrastructure for a self-hoster to run, and Postgres is already a hard dependency.
@@ -282,6 +396,166 @@ by their own hour put conversions in buckets with no denominator, so every rate 
 `DynamicPropertiesContextCustomizer`'s identity is the set of annotated methods — the same
 inherited method for every subclass — so without it all test classes share one cached context
 and therefore one database, silently defeating fresh-database-per-class.
+
+---
+
+## Performance measurement
+
+**The load harness is open-loop by default, and that is not a style preference.** A closed-loop
+generator stops sending while the server is stalled, so the stall never enters the sample — it
+measures service time and calls it latency. Requests are scheduled at a fixed arrival rate and
+timed from when they were *due*. Closed-loop mode still exists, but only as a saturation probe,
+and its percentiles are labelled service time. Do not "simplify" the harness back to
+concurrency-only; that would silently delete the tail.
+
+**The generator measures its own noise floor rather than assuming it is zero.** The dispatcher
+wakes on a 1 ms timer, so queue delay and event-loop lag both have a floor near a millisecond
+against an infinitely fast server. The first version of the harness compared lag against zero
+and reported that every run above 500/s was "generator-bound" — the warning fired on the
+instrument, not the server. A calibration pass now runs the identical dispatch loop against a
+transport that resolves on the microtask queue, and warnings are raised against that measured
+floor. An instrument that cannot state its own error cannot support a published percentile.
+
+**Benchmark the packaged jar, never `make backend`.** `mvnw spring-boot:run` passes
+`-XX:TieredStopAtLevel=1`, capping the JIT at C1. That is right for a dev loop and wrong for a
+measurement, and it is invisible — the server works perfectly, just permanently slower than a
+deployment. `java -jar` is also the shape CI's `containers` job runs.
+
+**Reported throughput is a floor, not a ceiling.** The 28k eval/s figure was taken with the
+generator and the JVM sharing ten cores, and the harness reported itself lag-bound at that
+rate. Quoting it as the server's maximum would be exactly the kind of number
+[competitive-gaps.md](competitive-gaps.md#latency) criticises the rest of the market for. It is
+recorded as "at least this, on this rig".
+
+**Load runs use their own database, not the dev one.** Millions of generated event rows in the
+development database would outlive the run and quietly change every later measurement — and
+`CLAUDE.md` already notes that dev-database accumulation is a recurring nuisance. The harnesses
+target `switchboard_load` on the same Postgres instance.
+
+---
+
+## Dashboard list caching
+
+**Invalidation is exact; the TTL is only a backstop.** The flag and change-request list caches
+are cleared by every write that could change them, so a stale list is not something a reader is
+expected to tolerate for the length of the TTL — it should never be served at all. Five minutes
+is therefore about surviving a dropped `NOTIFY`, not a judgement about acceptable staleness.
+Read `ListCacheInvalidator` before changing any of this; the rule it exists to hold is below.
+
+**Eviction happens AFTER the transaction commits, never inside it.** Evicting inside opens a
+race with a window wide enough to hit: the evict runs, a concurrent reader misses and re-loads,
+the reader caches pre-commit data, and the commit then lands with no further eviction — leaving
+a cache stale indefinitely with no error and nothing in the log. This is why invalidation is
+not simply called from `AuditWriter`, which would otherwise be the one place every audited
+action passes through.
+
+**A rename must evict, and would have been missed.** A PATCH of a flag's name or tags writes an
+audit row and bumps no state version, so it fires no `flag_change` notification. Hanging list
+invalidation off that existing signal is the obvious design and is wrong: it would serve a stale
+name for the whole TTL and look correct in any test that did not wait five minutes. Pinned by
+`ListCacheIT.aRenameIsVisibleImmediatelyEvenThoughItBumpsNoStateVersion`.
+
+**The lists are cleared wholesale rather than evicted by key.** A page is keyed by its filters
+and cursor, so one flag changing invalidates an unknowable set of keys — every page whose filter
+that flag matched, which cannot be computed without running the queries. Blunt is correct;
+enumerating would be guesswork. Affordable because the writes are human-paced.
+
+**The cached page is not keyed by user, and that is safe only because of ordering.** Access is
+checked *before* the cached value is handed over, and the underlying query takes no user, so
+every project member gets the same page. Moving the permission check inside the loader would
+cache the first caller's entitlement along with the data — the same class of bug as a
+`stateVersion` ETag on a per-context body.
+
+**The audit list is deliberately NOT cached**, reversing the plan that grouped it with the other
+two. Audit rows are written from 18 call sites and the list is read from one: a cache
+invalidated by essentially every write in the product has a hit rate bounded by its own
+invalidation rate, so there is little to win, and 18 invalidation points is 18 chances to miss
+one. The failure mode there is a silently stale audit trail, which is the one kind of staleness
+that reads as "the audit log is broken" rather than "the page is slow". Audit performance, if it
+ever matters, wants an index or a narrower projection.
+
+---
+
+## Audit export and retention
+
+**Audit retention defaults to OFF (`switchboard.audit.retention-months=0`, keep forever), which
+is deliberately the opposite of `switchboard.events.retention-months=3`.** Event rows are
+telemetry: high-volume, individually meaningless, and expiring them is housekeeping. Audit rows
+are low-volume, individually meaningful, and frequently the thing a compliance review or an
+incident post-mortem actually needs. A product that silently deleted them after three months
+because that was a convenient default would be destroying the record its own governance features
+exist to produce. Setting a window should be an act with an owner, not a default nobody chose.
+
+**Audit pruning deletes in bounded batches; event retention drops partitions.** They look like
+the same job and are not. `eval_events` and `metric_events` are partitioned, so retention is an
+unlink — measured at 259 ms for an 828k-row, 91 MB partition, flat in row count.
+`audit_entries` is not partitioned, so pruning is a row-wise `DELETE` whose cost scales with the
+rows removed; one unbounded statement over a long-neglected table would hold locks and bloat the
+WAL for as long as it ran. Whatever a run does not reach, the next run reaches.
+
+**The export is NDJSON, not a JSON array.** An array obliges the consumer to hold the entire
+export in memory to parse it, which defeats the purpose — the org that most needs an export is
+precisely the one whose audit table will not fit in a response body. One object per line streams
+end to end, and nothing in the controller collects the `Flux`.
+
+**The export is deliberately not paginated, and is ordered oldest-first.** Not paginated because
+an export is asked for once and expected to be complete, so a cursor would only add a way to
+miss rows between pages. Oldest-first is the opposite of the paged feed and is the useful order
+for appending to a file or replaying into a warehouse; it also makes a re-export a superset with
+a stable prefix.
+
+**An unparseable `since` is a 400, never a silent full export.** Quietly exporting everything
+when the caller asked for a window is how somebody ends up with a download they did not ask for.
+
+**CSV values are RFC 4180 quoted because `reason` is free text a user typed.** A comma shifts
+every later column; an embedded newline corrupts every later *row*. Both are pinned by a test
+that writes all three hazardous characters through the API.
+
+**The export controller is hand-written rather than implementing its generated interface**, and
+is tagged separately in the OpenAPI document so the generated interface is left unimplemented —
+exactly as `StreamApi` is. A generated method is fixed to one response type; this answers one
+operation as either NDJSON or CSV, streamed. The path and parameters stay in the spec.
+
+---
+
+## Webhooks
+
+**Deliveries are a transactional outbox.** The `webhook_deliveries` row is inserted in the SAME
+transaction as the flag write that caused it; delivery is attempted after commit. Enqueueing
+after commit instead is simpler and loses events whenever the process dies in that window —
+which is precisely the moment an operator most wants to know what changed. The cost is one
+INSERT per matching webhook inside a flag mutation, and flag mutations are human-paced.
+
+**The signature's timestamp is inside the MAC, not merely alongside it.** Signing the body alone
+produces a token that stays valid forever: anyone who observes one delivery can replay it
+indefinitely, and a replayed "kill switch released" is a real incident rather than a curiosity.
+The header is Stripe's shape (`t=…,v1=…`) because that is the one receivers already have library
+code for, and `v1` is a version prefix so a future scheme can be sent alongside during a
+migration rather than breaking every consumer at once.
+
+**An empty event-type filter means every event, not none.** The opposite reading would make a
+newly created webhook silently deliver nothing, which reads as a broken integration rather than
+as a filter nobody set. Resource filters (project, environment) only ever narrow.
+
+**A 4xx from a receiver is retried, not abandoned.** A receiver answering 404 or 401 is usually
+mid-deploy or mid-rotation rather than permanently wrong, and the six-attempt ceiling already
+bounds the cost of being wrong about that.
+
+**URL validation is validation, not an SSRF control**, and the distinction is easy to mistake.
+Blocking private address ranges would break every self-hosted deployment whose receiver is on
+the same network — which is most of them — and would not work anyway, since a DNS name resolving
+to a private address passes any check made here. A deployment that needs egress restrictions
+imposes them at the network layer, where they can actually be enforced.
+
+**The signing secret is stored as issued, unlike an SDK key or a PAT.** Those are one-way hashes
+because the server only ever needs to *check* them. HMAC needs the key itself, so there is no
+digest that would do. It is returned once, at creation, and never listed.
+
+**The old `org.<id>.notifications.webhook` setting was migrated, not dropped.** V8 turns any
+configured URL into a real webhook row subscribed to `rollout.finding`, so an org that relied on
+it keeps receiving notifications — now signed and retried. Existing receivers start getting a
+signature header they were not previously sent, which is additive: an unverified receiver
+ignores it.
 
 ---
 

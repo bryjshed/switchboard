@@ -28,6 +28,16 @@
     </properties>
 
     <dependencies>
+        <!--
+          The flag evaluation core, shared with every JVM SDK. Extracted so the server and an
+          SDK cannot disagree about bucketing, operators or precedence - see
+          docs/DECISIONS.md. JDK-only, so it adds nothing to the runtime here.
+        -->
+        <dependency>
+            <groupId>com.switchboard</groupId>
+            <artifactId>switchboard-evaluation</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
@@ -237,7 +247,7 @@
                     </dependency>
                 </dependencies>
                 <configuration>
-                    <configLocation>config/checkstyle/checkstyle.xml</configLocation>
+                    <configLocation>../config/checkstyle/checkstyle.xml</configLocation>
                     <includeTestSourceDirectory>true</includeTestSourceDirectory>
                     <failOnViolation>true</failOnViolation>
                     <sourceDirectories>

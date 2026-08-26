@@ -62,7 +62,33 @@ public enum CacheName {
      * <p>A minute is plenty: the underlying data is telemetry that arrives continuously, so no
      * human reading a chart can tell the difference.
      */
-    ROLLOUT_STATS(Tier.LOCAL, Duration.ofMinutes(1), 2_000, Duration.ZERO);
+    ROLLOUT_STATS(Tier.LOCAL, Duration.ofMinutes(1), 2_000, Duration.ZERO),
+
+    /**
+     * (project, filters, cursor, limit) -> a page of the flag list. The page every dashboard
+     * session opens on, and - measured, not guessed - the slowest path in the product: p50
+     * 2.87 ms and <b>p99 73.8 ms</b> against 4-8 ms at p99 for everything served through this
+     * seam. See {@code docs/PERFORMANCE.md}.
+     *
+     * <p><b>The TTL is a backstop, not the correctness mechanism.</b> This entry is cleared by
+     * every write that could change a flag list, locally and across instances, so a stale list
+     * is not something a reader is expected to tolerate for the length of the TTL - it should
+     * never be served at all. Five minutes is therefore about surviving a dropped {@code
+     * NOTIFY}, not about how much staleness is acceptable; the answer to that is none.
+     *
+     * <p>The cached value is deliberately NOT keyed by user: access is checked before the read
+     * and the query itself takes no user, so every project member gets the same page. Caching
+     * a user-varying payload under a user-independent key is the same class of bug as a
+     * stateVersion ETag on a per-context body - see DECISIONS.md.
+     */
+    FLAG_LIST(Tier.LOCAL, Duration.ofMinutes(5), 5_000, Duration.ZERO),
+
+    /**
+     * (project, env, flag, status, cursor, limit) -> a page of change requests. Cleared on
+     * every lifecycle transition, because a reviewer looking at a queue that still shows an
+     * already-approved request will approve it twice.
+     */
+    CHANGE_REQUEST_LIST(Tier.LOCAL, Duration.ofMinutes(5), 5_000, Duration.ZERO);
 
     /** Whether a cache may live in a shared store when one is configured. */
     public enum Tier {

@@ -14,28 +14,49 @@ human edit does, so nothing happens that you cannot see or undo.
 flowchart LR
     subgraph apps["Your applications"]
         sdk["TypeScript SDK<br/>evaluates in-process"]
+        jsdk["Java SDK<br/>evaluates in-process"]
         ofrep["OpenFeature providers<br/>Go · Python · .NET · Java · JS"]
         http["Any HTTP client"]
     end
 
     subgraph sb["Switchboard"]
         be["Backend<br/>Spring Boot · WebFlux"]
+        cache["In-process caches<br/>evicted by NOTIFY"]
         db[("PostgreSQL")]
     end
 
     dash["Web dashboard"]
+    hook["Your webhook receiver"]
 
     sdk -->|"bootstrap once, then SSE"| be
+    jsdk -->|"bootstrap once, then SSE"| be
     ofrep -->|"OFREP"| be
     http -->|"REST evaluation"| be
     dash --> be
-    be --- db
+    be -->|"reads"| cache
+    cache -.->|"miss"| db
+    be -->|"writes"| db
+    be -->|"signed webhooks"| hook
 ```
 
 Every surface speaks to the same REST API, so nothing can do something another cannot.
 Changes propagate through Postgres `NOTIFY`, which means a second backend instance learns
 about a flag change the same way the first one does — there is no Redis or message broker
 in the picture.
+
+**That same channel is what makes the caches safe.** Reads are served from in-process caches
+and a write evicts them everywhere, so the TTLs are a backstop against a dropped notification
+rather than a budget for how stale an answer may be. A shared cache would add a network hop to
+the hottest read in the product and buy nothing — which is why there is still no Redis here.
+The one thing that would genuinely want one is the rate limiter, and only above a single
+instance; [DEPLOYMENT.md](docs/DEPLOYMENT.md#scaling-past-one-node) says so in order.
+
+**The Java SDK and the server run the same evaluator.** Bucketing, the operators, semver and
+precedence live in one JDK-only module both compile against, so there is no second
+implementation to drift from the first. Java appears twice above on purpose: OFREP gives you a
+provider for free and evaluates remotely, while the native SDK evaluates in-process — no I/O per
+flag check, and it keeps working through a Switchboard outage.
+[`sdk/java/README.md`](sdk/java/README.md) says which to pick.
 
 ## Quick start
 
@@ -75,6 +96,7 @@ const { value, reason } = await res.json();   // e.g. { value: "true", reason: "
 | [The AI layer](docs/ai-layer.md) | Healing, optimizing, and the statistics underneath — including why the scan interval does not affect the error rate |
 | [Development](docs/development.md) | Layout, running each piece, and how to verify a change |
 | [Deployment](docs/DEPLOYMENT.md) | Containers, configuration, migrations, retention, and the honest answer about when Redis becomes necessary |
+| [Performance](docs/PERFORMANCE.md) | Measured p50/p95/p99, the rig, and the instrument's own error — written to be falsifiable rather than quoted |
 
 Reference: [DECISIONS.md](docs/DECISIONS.md) records the choices that look wrong until you know why —
 read it before "fixing" something that seems obviously broken.
@@ -103,6 +125,17 @@ anytime-valid sequential test, and the result is an ordinary flag change. The sc
 often as you like — that is a property of the statistic, not a hope. See
 [the AI layer](docs/ai-layer.md).
 
+**Reads are fast because they are cached, and correct because eviction is exact.** Evaluation,
+the bootstrap payload, SDK-key resolution, permissions and the dashboard's flag list are all
+served from memory; every write that could change one clears it across every instance. Measured,
+not asserted: sub-millisecond at p50 on every cache-served path, and the flag list went from a
+p99 of 73.8 ms to about 5 ms when it joined them. [PERFORMANCE.md](docs/PERFORMANCE.md) states
+the rig and the caveats, including where the numbers stop being trustworthy.
+
+**Changes can leave the building.** Signed webhooks (HMAC-SHA256, filtered by event type,
+project or environment, retried with backoff) carry flag updates, kill switches, rollbacks and
+monitor findings to whatever you point them at. Audit exports stream as NDJSON or CSV.
+
 **Gating an AI agent is the same primitive.** Use the run id as the context key, put the agent name
 and version in attributes, and a prompt revision becomes a multivariate flag that the monitor can
 roll back or ramp on its own.
@@ -111,12 +144,17 @@ roll back or ramp on its own.
 
 ```bash
 make test    # unit + integration (Testcontainers), including the concurrency race tests
-make smoke   # ~35 API cases end to end, negative paths included
+             # runs from the repo root: evaluation/ and backend/ are one reactor build
+make smoke   # 51 API cases end to end, negative paths included
 make check   # compile + checkstyle
 ```
 
 `make smoke` is the fastest honest answer to "is it working". Seven live-check scripts against a
-running stack are the real regression net — see [Development](docs/development.md#the-live-checks).
+running stack are the real regression net — see [Development](docs/development.md#the-live-checks) —
+plus the Java SDK's, which is a JUnit test rather than a script because driving a JVM SDK from
+node would prove nothing about the JVM SDK. It asserts the SDK's in-process answers equal the
+server's for the same flags and contexts, and it is what caught the SDK rejecting every real
+bootstrap payload over a wire-format detail no hand-written fixture contained.
 
 All of it runs in [CI](.github/workflows/ci.yml) on every pull request, the live checks included:
 they bring up a real stack, seed it, and run all seven. Contract drift is exactly what unit tests

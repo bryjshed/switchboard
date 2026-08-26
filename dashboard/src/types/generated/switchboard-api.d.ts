@@ -881,6 +881,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/webhooks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listWebhooks"];
+        put?: never;
+        /** @description Creates a signed webhook. The signing SECRET is returned only here and never again - the server must keep the plaintext, unlike an SDK key or a PAT, because HMAC needs the key itself rather than a digest. */
+        post: operations["createWebhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/webhooks/{webhookId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["deleteWebhook"];
+        options?: never;
+        head?: never;
+        /** @description Partial update; an omitted field is left alone. */
+        patch: operations["updateWebhook"];
+        trace?: never;
+    };
+    "/api/webhooks/{webhookId}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Recent delivery attempts - the answer to "did my endpoint actually receive it". Retries share an eventId with the original, so a receiver can dedupe across them. */
+        get: operations["listWebhookDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description Streams every audit entry for the org, oldest first, as NDJSON (default) or CSV.
+         *
+         *     HAND-WRITTEN BINDING, like /api/stream and the OFREP endpoints: a generated method is fixed to one response type and this answers one operation in two formats, streamed. The path and parameters are declared here; only the binding is manual.
+         *
+         *     NDJSON - one object per line - rather than a JSON array, because an array obliges the consumer to hold the whole export in memory to parse it, which defeats the point. The org that most needs an export is the one whose audit table will not fit in a response body.
+         *
+         *     Deliberately not paginated: an export is asked for once and expected to be complete, so a cursor would only add a way to miss rows between pages.
+         */
+        get: operations["exportOrgAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/audit-retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description Prunes audit entries older than `switchboard.audit.retention-months`.
+         *
+         *     DISABLED BY DEFAULT (0 = keep forever), which is the opposite of event retention. Event rows are telemetry and expiring them is housekeeping; audit rows are the record a compliance review or a post-mortem needs, so deleting them is an act that should have an owner rather than a default nobody chose.
+         *
+         *     Deletes in bounded batches - the table is not partitioned, so unlike the event roll this is a row-wise DELETE whose cost scales with the rows removed.
+         */
+        post: operations["runAuditRetention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/rollout-scan": {
         parameters: {
             query?: never;
@@ -907,6 +1006,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["runStaleFlagScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/jobs/webhook-sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Retries webhook deliveries that are due. Idempotent and bounded by a batch size, so overlapping triggers are safe. An in-process timer also runs this every 30s; the endpoint exists for deployments that scale to zero, where no timer can fire. */
+        post: operations["runWebhookSweep"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1808,10 +1924,91 @@ export interface components {
         ChangeRequestDecisionRequest: {
             comment?: string;
         };
+        /**
+         * @description What a webhook can be told about. Kill switches and rollbacks are their own types rather than collapsing into flag.updated, because operators routinely alert on those two alone - a kill switch is an incident signal, an ordinary ramp is not.
+         *
+         *     An AI apply and an approved change request both surface as flag.updated: what changed is the same thing, and who authorised it is already in the audit trail.
+         * @enum {string}
+         */
+        WebhookEventType: "flag.updated" | "flag.kill_switch" | "flag.rollback" | "rollout.finding";
+        WebhookCreateRequest: {
+            /** @description Absolute http(s) URL. */
+            url: string;
+            description?: string;
+            /** @description EMPTY means every type, not none. A newly created webhook that delivered nothing would read as a broken integration rather than as a filter nobody set. */
+            eventTypes?: components["schemas"]["WebhookEventType"][];
+            /**
+             * Format: uuid
+             * @description Narrows to one project. Omit for every project in the org.
+             */
+            projectId?: string;
+            /**
+             * Format: uuid
+             * @description Narrows to one environment. Omit for every environment.
+             */
+            environmentId?: string;
+        };
+        WebhookUpdateRequest: {
+            url?: string;
+            description?: string;
+            eventTypes?: components["schemas"]["WebhookEventType"][];
+            /** Format: uuid */
+            projectId?: string;
+            /** Format: uuid */
+            environmentId?: string;
+            enabled?: boolean;
+        };
+        WebhookResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            orgId: string;
+            url: string;
+            description?: string;
+            eventTypes: components["schemas"]["WebhookEventType"][];
+            /** Format: uuid */
+            projectId?: string;
+            /** Format: uuid */
+            environmentId?: string;
+            enabled: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        WebhookCreatedResponse: components["schemas"]["WebhookResponse"] & {
+            /** @description The HMAC-SHA256 signing secret, returned ONLY here. Sign-check incoming deliveries with it: the X-Switchboard-Signature header is "t=<unix>,v1=<hex>", and the signed material is "<t>.<raw body>" - the timestamp is INSIDE the MAC, so a captured delivery cannot be replayed forever. Compare in constant time. */
+            secret: string;
+        };
+        /** @enum {string} */
+        WebhookDeliveryStatus: "PENDING" | "DELIVERED" | "FAILED";
+        WebhookDeliveryResponse: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            webhookId: string;
+            /**
+             * Format: uuid
+             * @description Shared across retries and across webhooks, so a receiver can dedupe.
+             */
+            eventId: string;
+            eventType: components["schemas"]["WebhookEventType"];
+            status: components["schemas"]["WebhookDeliveryStatus"];
+            attempts: number;
+            responseStatus?: number;
+            error?: string;
+            /** Format: date-time */
+            nextAttemptAt?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deliveredAt?: string;
+        };
     };
     responses: never;
     parameters: {
         OrgId: string;
+        WebhookId: string;
         ProjectId: string;
         EnvId: string;
         FlagKey: string;
@@ -3708,6 +3905,215 @@ export interface operations {
             };
         };
     };
+    listWebhooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Webhooks for the org, without secrets. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookResponse"][];
+                };
+            };
+        };
+    };
+    createWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Created webhook, including its secret. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookCreatedResponse"];
+                };
+            };
+            /** @description Invalid url or unknown event type */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Requires MANAGE_SETTINGS in the org */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhookId: components["parameters"]["WebhookId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    updateWebhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                webhookId: components["parameters"]["WebhookId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated webhook, without its secret. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookResponse"];
+                };
+            };
+            /** @description No such webhook, or not yours */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listWebhookDeliveries: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                webhookId: components["parameters"]["WebhookId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Delivery attempts, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryResponse"][];
+                };
+            };
+        };
+    };
+    exportOrgAudit: {
+        parameters: {
+            query?: {
+                format?: "ndjson" | "csv";
+                /** @description ISO-8601 instant. An unparseable value is a 400, never a silent full export. */
+                since?: string;
+            };
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Streamed audit rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": string;
+                    "text/csv": string;
+                };
+            };
+            /** @description Malformed `since` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Requires VIEW_AUDIT in the org */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    runAuditRetention: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Job-Token": components["parameters"]["JobToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retention result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunResponse"];
+                };
+            };
+            /** @description Missing or wrong X-Job-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     runRolloutScan: {
         parameters: {
             query?: never;
@@ -3749,6 +4155,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["JobRunResponse"];
                 };
+            };
+        };
+    };
+    runWebhookSweep: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Job-Token": components["parameters"]["JobToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sweep result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobRunResponse"];
+                };
+            };
+            /** @description Missing or wrong X-Job-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Aggregator for the JVM half of the monorepo. It builds the modules; it is deliberately NOT
+  their parent, because backend inherits from spring-boot-starter-parent for dependency
+  management and switchboard-evaluation must inherit nothing at all (it has no dependencies
+  to manage, and an SDK consumer should not be handed Spring's BOM).
+
+  Build order matters and Maven works it out from the dependency: switchboard-evaluation is
+  built first, then backend compiles against it.
+
+      ./mvnw verify                     everything
+      ./mvnw -pl backend -am verify     backend and what it needs
+      ./mvnw -pl evaluation verify      just the evaluation core + conformance vectors
+
+  NOTE the change from `cd backend && ./mvnw verify`: that still works, but only once
+  switchboard-evaluation is in the local repository, because a single-module build will not
+  build a sibling. Run from the repo root instead, or install the core once with
+  `./mvnw -pl evaluation install`. CLAUDE.md carries the current commands.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.switchboard</groupId>
+    <artifactId>switchboard-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>switchboard</name>
+    <description>Switchboard - AI-powered feature flag platform</description>
+
+    <modules>
+        <module>evaluation</module>
+        <module>backend</module>
+        <module>sdk/java</module>
+    </modules>
+</project>

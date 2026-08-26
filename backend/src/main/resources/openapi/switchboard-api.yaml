@@ -1598,6 +1598,186 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /api/orgs/{orgId}/webhooks:
+    post:
+      tags: [Webhooks]
+      operationId: createWebhook
+      description: >-
+        Creates a signed webhook. The signing SECRET is returned only here and never again -
+        the server must keep the plaintext, unlike an SDK key or a PAT, because HMAC needs the
+        key itself rather than a digest.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookCreateRequest'
+      responses:
+        '201':
+          description: Created webhook, including its secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookCreatedResponse'
+        '400':
+          description: Invalid url or unknown event type
+        '403':
+          description: Requires MANAGE_SETTINGS in the org
+    get:
+      tags: [Webhooks]
+      operationId: listWebhooks
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Webhooks for the org, without secrets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookResponse'
+
+  /api/webhooks/{webhookId}:
+    patch:
+      tags: [Webhooks]
+      operationId: updateWebhook
+      description: Partial update; an omitted field is left alone.
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookUpdateRequest'
+      responses:
+        '200':
+          description: Updated webhook, without its secret.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookResponse'
+        '404':
+          description: No such webhook, or not yours
+    delete:
+      tags: [Webhooks]
+      operationId: deleteWebhook
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+      responses:
+        '204':
+          description: Deleted
+
+  /api/webhooks/{webhookId}/deliveries:
+    get:
+      tags: [Webhooks]
+      operationId: listWebhookDeliveries
+      description: >-
+        Recent delivery attempts - the answer to "did my endpoint actually receive it". Retries
+        share an eventId with the original, so a receiver can dedupe across them.
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            maximum: 50
+      responses:
+        '200':
+          description: Delivery attempts, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookDeliveryResponse'
+
+  /api/orgs/{orgId}/audit/export:
+    get:
+      # Its own tag so the generated interface is separate and left unimplemented, exactly as
+      # StreamApi is - see AuditExportController for why the binding is hand-written.
+      tags: [AuditExport]
+      operationId: exportOrgAudit
+      description: >-
+        Streams every audit entry for the org, oldest first, as NDJSON (default) or CSV.
+
+
+        HAND-WRITTEN BINDING, like /api/stream and the OFREP endpoints: a generated method is
+        fixed to one response type and this answers one operation in two formats, streamed. The
+        path and parameters are declared here; only the binding is manual.
+
+
+        NDJSON - one object per line - rather than a JSON array, because an array obliges the
+        consumer to hold the whole export in memory to parse it, which defeats the point. The org
+        that most needs an export is the one whose audit table will not fit in a response body.
+
+
+        Deliberately not paginated: an export is asked for once and expected to be complete, so a
+        cursor would only add a way to miss rows between pages.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ndjson, csv]
+            default: ndjson
+        - name: since
+          in: query
+          required: false
+          description: ISO-8601 instant. An unparseable value is a 400, never a silent full export.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Streamed audit rows.
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+            text/csv:
+              schema:
+                type: string
+        '400':
+          description: Malformed `since`
+        '403':
+          description: Requires VIEW_AUDIT in the org
+
+  /api/jobs/audit-retention:
+    post:
+      tags: [Jobs]
+      operationId: runAuditRetention
+      description: >-
+        Prunes audit entries older than `switchboard.audit.retention-months`.
+
+
+        DISABLED BY DEFAULT (0 = keep forever), which is the opposite of event retention. Event
+        rows are telemetry and expiring them is housekeeping; audit rows are the record a
+        compliance review or a post-mortem needs, so deleting them is an act that should have an
+        owner rather than a default nobody chose.
+
+
+        Deletes in bounded batches - the table is not partitioned, so unlike the event roll this
+        is a row-wise DELETE whose cost scales with the rows removed.
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Retention result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+        '403':
+          description: Missing or wrong X-Job-Token
+
   /api/jobs/rollout-scan:
     post:
       tags: [Jobs]
@@ -1627,6 +1807,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JobRunResponse'
+
+  /api/jobs/webhook-sweep:
+    post:
+      tags: [Jobs]
+      operationId: runWebhookSweep
+      description: >-
+        Retries webhook deliveries that are due. Idempotent and bounded by a batch size, so
+        overlapping triggers are safe. An in-process timer also runs this every 30s; the
+        endpoint exists for deployments that scale to zero, where no timer can fire.
+      parameters:
+        - $ref: '#/components/parameters/JobToken'
+      responses:
+        '200':
+          description: Sweep result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunResponse'
+        '403':
+          description: Missing or wrong X-Job-Token
 
   /api/jobs/partition-roll:
     post:
@@ -1671,6 +1871,13 @@ components:
   parameters:
     OrgId:
       name: orgId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WebhookId:
+      name: webhookId
       in: path
       required: true
       schema:
@@ -3582,3 +3789,150 @@ components:
       properties:
         comment:
           type: string
+
+    WebhookEventType:
+      type: string
+      description: >-
+        What a webhook can be told about. Kill switches and rollbacks are their own types
+        rather than collapsing into flag.updated, because operators routinely alert on those
+        two alone - a kill switch is an incident signal, an ordinary ramp is not.
+
+
+        An AI apply and an approved change request both surface as flag.updated: what changed
+        is the same thing, and who authorised it is already in the audit trail.
+      enum:
+        - flag.updated
+        - flag.kill_switch
+        - flag.rollback
+        - rollout.finding
+
+    WebhookCreateRequest:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: Absolute http(s) URL.
+        description:
+          type: string
+        eventTypes:
+          type: array
+          description: >-
+            EMPTY means every type, not none. A newly created webhook that delivered nothing
+            would read as a broken integration rather than as a filter nobody set.
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        projectId:
+          type: string
+          format: uuid
+          description: Narrows to one project. Omit for every project in the org.
+        environmentId:
+          type: string
+          format: uuid
+          description: Narrows to one environment. Omit for every environment.
+
+    WebhookUpdateRequest:
+      type: object
+      properties:
+        url:
+          type: string
+        description:
+          type: string
+        eventTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+
+    WebhookResponse:
+      type: object
+      required: [id, orgId, url, eventTypes, enabled, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        orgId:
+          type: string
+          format: uuid
+        url:
+          type: string
+        description:
+          type: string
+        eventTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WebhookEventType'
+        projectId:
+          type: string
+          format: uuid
+        environmentId:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    WebhookCreatedResponse:
+      allOf:
+        - $ref: '#/components/schemas/WebhookResponse'
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: >-
+                The HMAC-SHA256 signing secret, returned ONLY here. Sign-check incoming
+                deliveries with it: the X-Switchboard-Signature header is
+                "t=<unix>,v1=<hex>", and the signed material is "<t>.<raw body>" - the
+                timestamp is INSIDE the MAC, so a captured delivery cannot be replayed
+                forever. Compare in constant time.
+
+    WebhookDeliveryStatus:
+      type: string
+      enum: [PENDING, DELIVERED, FAILED]
+
+    WebhookDeliveryResponse:
+      type: object
+      required: [id, webhookId, eventId, eventType, status, attempts, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        webhookId:
+          type: string
+          format: uuid
+        eventId:
+          type: string
+          format: uuid
+          description: Shared across retries and across webhooks, so a receiver can dedupe.
+        eventType:
+          $ref: '#/components/schemas/WebhookEventType'
+        status:
+          $ref: '#/components/schemas/WebhookDeliveryStatus'
+        attempts:
+          type: integer
+        responseStatus:
+          type: integer
+        error:
+          type: string
+        nextAttemptAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        deliveredAt:
+          type: string
+          format: date-time

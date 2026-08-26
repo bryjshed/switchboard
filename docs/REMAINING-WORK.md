@@ -7,9 +7,9 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (337),
+**Status of the product today.** Evaluation core (528, shared by the server and the Java SDK), backend (114 unit + 111 integration), TypeScript SDK (562), Java SDK (509 + a live check), MCP server (7), web dashboard (337),
 an evaluation spec with 507 conformance vectors executed by both the server and
-the SDK, and seven live-check scripts against a running stack.
+the SDK, and seven live-check scripts against a running stack, plus the Java SDK's live check.
 
 **The Expo mobile companion was deleted on 2026-08-24** — see
 [DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost, and
@@ -188,9 +188,39 @@ Needs either a short-TTL cache or incremental rollups. **M**
 unknown flag key or an invalid SDK key hit the database every time. Besides the waste, a scanner spraying bad keys turns into unbounded database load —
 this is a denial-of-service vector as much as a performance one. **S**
 
-**Dashboard list queries** — flags, audit, change requests — are **still uncached**, and
-deliberately last: they are human-paced, and a stale flag list is a worse trade than a fast one.
-The only item in this subsection not done. **S**
+~~**Dashboard list queries** — flags, audit, change requests — are **still uncached**.~~
+**Flags and change requests: done 2026-08-25. Audit: deliberately NOT cached — see below.**
+
+The original argument for deferring these was that they are human-paced, and that a stale flag
+list is a worse trade than a fast one. The first half was right and the second half was the
+wrong frame, because it assumes staleness is the price of caching. It is not, if invalidation
+is exact:
+
+**The TTL is a backstop, not a staleness budget.** Every write that could change a flag list
+clears it — locally and across instances over the existing `NOTIFY` channel — so the answer to
+"how stale can the flag list be" is *it cannot be*. Five minutes is about surviving a dropped
+notification, not about how much staleness a reader should tolerate. `ListCacheIT` writes
+something and asserts the very next read reflects it, for creates, archives, renames and
+targeting writes.
+
+**The rename case is the one that would have been missed.** A PATCH of a flag's name or tags
+writes an audit row and bumps no state version, so it fires no `flag_change` notification. A
+design that hung list invalidation off that existing signal — the obvious design — would have
+served a stale name for the full TTL, and looked correct in every test that did not wait five
+minutes.
+
+**Measured, before and after:** p50 2.87 ms → 0.72 ms, p99 **73.8 ms → ~5 ms**, at 19,970 cache
+hits to 1 miss. See [PERFORMANCE.md](PERFORMANCE.md#the-flag-list-before-and-after-caching),
+which also records that the first re-measurement claimed the cache made things *worse* and how
+that turned out to be an unrelated process eating two cores.
+
+**Audit is deliberately left uncached, and this is a reversal of the plan above.** Counting the
+call sites is what settled it: audit rows are written from **18 places** and the list is read
+from one. A cache invalidated by essentially every write in the product has a hit rate bounded
+by its own invalidation rate, so there is little to win — and 18 invalidation points is 18
+chances to miss one, where the failure mode is a silently stale *audit trail*. That is the one
+list where staleness does not read as "slow page", it reads as "the audit log is broken". The
+right fix for audit performance is an index or a narrower projection, not a cache.
 
 ### The architecture — as built, and where it departed from this plan
 
@@ -351,9 +381,35 @@ permission bug to live, and it would only ever be exercised by whoever used a to
 RBAC that already exists is checked on every request. To narrow a token, create a user with a
 narrower role and mint it as them. Tokens are personal: somebody else's reads as 404, not 403.
 
-### Signed webhooks · effort **S**
-No general flag-change webhook exists (the AI layer has a narrow notification hook). Needs
-HMAC-SHA256 signing, resource filtering, and delivery retries. Everyone has this.
+### ~~Signed webhooks~~ · **Landed 2026-08-25**
+HMAC-SHA256 signing, resource filtering (by event type, project and environment), and delivery
+retries with exponential backoff. `V8` adds `webhooks` and `webhook_deliveries`.
+
+**Generalised rather than duplicated.** The AI layer's narrow notification hook — one unsigned
+URL per org in `app_settings`, no retries, findings only — is now a thin adapter onto the same
+dispatcher, and V8 migrates any configured URL into a real webhook row. There is one delivery
+path to reason about instead of two, and orgs that had a URL keep receiving notifications.
+
+Three things worth knowing before changing any of it:
+
+- **Deliveries are a transactional outbox.** The row is written in the *same transaction* as the
+  flag write, and delivery is attempted after commit. Enqueueing after commit instead would lose
+  events whenever the process died in the window between — which is exactly the moment somebody
+  most wants to know what changed.
+- **The timestamp is inside the signed material**, not merely sent alongside it. Signing the body
+  alone yields a token valid forever, and for a flag system a replayed "kill switch released" is
+  a real incident. Pinned by a test that re-dates a captured delivery and asserts it fails.
+- **An empty event-type filter means everything, not nothing.** The opposite reading would make
+  a newly created webhook deliver nothing, which reads as a broken integration rather than as a
+  filter nobody set.
+
+Verified: 17 unit tests, 9 integration tests against a real receiver, and 10 assertions in
+`smoke-test.mjs` — the last of which **verify the signature in Node**, because the server signs
+in Java and a receiver is whatever language the customer writes. A Java-only test would only
+prove the signer agrees with itself.
+
+Not built: a dashboard UI for managing them (the API is complete and the MCP server reaches it),
+and no `ping`/test-delivery button. **S**
 
 ---
 
@@ -363,8 +419,32 @@ HMAC-SHA256 signing, resource filtering, and delivery retries. Everyone has this
 - **SSO/SAML + SCIM** · **M** — every vendor gates this behind a paid tier, which is what
   makes it the reliable enterprise upsell. Firebase already supports SAML/OIDC, so the
   identity half is mostly configuration; SCIM provisioning is the real work.
-- **Audit export / streaming + configurable retention** · **S** — audit rows accumulate
-  forever today with no export.
+- ~~**Audit export / streaming + configurable retention**~~ · **Landed 2026-08-25.**
+  `GET /api/orgs/{orgId}/audit/export` streams every row as NDJSON (default) or CSV, oldest
+  first, with an optional `since`. `switchboard.audit.retention-months` prunes in batches, via
+  `POST /api/jobs/audit-retention`.
+
+  Three decisions worth knowing:
+
+  - **Audit retention defaults to OFF (0 = keep forever), the opposite of event retention.**
+    Event rows are telemetry — high-volume, individually meaningless — so expiring them after
+    three months is housekeeping. Audit rows are the record a compliance review or a post-mortem
+    needs, and a product that silently deleted them because three months was a convenient default
+    would be destroying the record its own governance features exist to produce. An operator who
+    needs a window sets one deliberately.
+  - **NDJSON, not a JSON array.** An array obliges the consumer to hold the whole export in
+    memory to parse it, which defeats the point: the org that most needs an export is the one
+    whose audit table will not fit in a response body. Nothing collects the `Flux`.
+  - **Deliberately not paginated.** An export is asked for once and expected to be complete, so a
+    cursor would only add a way to miss rows between pages.
+
+  Pruning is batched because `audit_entries` is **not** partitioned — unlike the event tables,
+  where retention is an O(1) partition drop (measured at 259 ms for 91 MB), this is a row-wise
+  `DELETE` whose cost scales with rows removed.
+
+  Verified: 9 integration tests and 7 assertions in `smoke-test.mjs` (44 → 51), which parse the
+  export line by line rather than as a whole body — a check that parsed the whole body would be
+  asserting the opposite of the property NDJSON exists for.
 
 ### Experimentation as a product · effort **M–L**
 The rollout monitor hard-codes two metric keys (`error`, `conversion`). There is no metric
@@ -439,7 +519,27 @@ What breaks at that scale is everything around them:
 OFREP already delivers Go, Python, .NET, Java and JavaScript providers with no
 Switchboard-specific code. Native SDKs with local evaluation are only needed where OFREP's
 remote-evaluation model is insufficient. The spec and conformance vectors mean each new
-implementation has an objective acceptance bar: **pass all 201 vectors**.
+implementation has an objective acceptance bar: **pass all 474 evaluation vectors**.
+
+**~~Java~~ · Landed 2026-08-25.** `sdk/java/` — an OpenFeature provider with local evaluation.
+It changed what the next SDK costs, because most of the work was not the SDK:
+
+- **The evaluator was extracted first** into `evaluation/`, a JDK-only module the server and the
+  SDK both compile against. The Java SDK therefore contains **no evaluation logic at all** — no
+  second implementation of bucketing or the sixteen operators to drift from the server's. Any
+  future JVM SDK (Kotlin, Scala, Android) inherits that for free.
+- **The vectors are replayed through the wire format**, not against the shared evaluator —
+  running them against `FlagEvaluator` here would assert a class equals itself. All 474 go
+  through `BootstrapCodec`, which is the only place a Java SDK can still disagree.
+- **`LiveCheckIT` asserts local answers equal the server's** on a running stack (27 comparisons
+  against the seeded environment). It found, within minutes, that the codec rejected *every real
+  bootstrap payload*: a live server serialises a single-variation serve as
+  `{"rollout": [], "variationId": …}` — present but empty — and every hand-written fixture
+  omitted the field. No unit test written against self-invented fixtures could have caught it.
+
+Remaining for parity with the TypeScript SDK: **telemetry** (eval/metric event batching, which
+is what feeds the healing and optimizing loops) and **local persistence** of the last-known
+payload. Both are additive. **S–M**
 
 ---
 
@@ -460,8 +560,30 @@ Most of this landed on 2026-08-25. What is left is the part that needs traffic r
   (`switchboard.events.retention-months`, default 3) rather than a constant, documented as
   destructive-on-lowering, and clamped at one month because the current month's partition is the
   one being written to. It still has not run against real volume — that is the part below.
-- **No load or performance testing.** Every latency claim in the docs is untested, retention
-  included. Worth knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
+- ~~**No load or performance testing.**~~ **Done 2026-08-25.** Two harnesses —
+  `scripts/load-test.mjs` (request rate) and `scripts/load-volume.mjs` (data size) — and
+  [PERFORMANCE.md](PERFORMANCE.md), which states the rig and the instrument's own error so the
+  numbers are falsifiable rather than merely quoted. Headline: every cache-served path is
+  **sub-millisecond at p50** and single-digit at p99; ≥28k eval/s sustained. Four things the
+  measurement changed:
+  - **The two uncached database paths are an order of magnitude slower than everything else** —
+    the dashboard flag list (p99 **73.8 ms**) and telemetry ingest (p99 **62.1 ms**) against
+    4–8 ms for everything served from the cache seam. That is the evidence §3's last open item
+    was missing.
+  - **Retention's partition-drop design is confirmed.** `DROP TABLE` on an 828k-row, 91 MB
+    partition took **259 ms** and beat a row-wise `DELETE` of *less* data by 4×; the whole
+    `partition-roll` job ran in 54 ms. Flat in row count, as claimed.
+  - **The rollout scan is the first wall.** The aggregation costs 2.0–5.6 s *per flag* at 2.4 M
+    events, and `RolloutMonitorService` iterates candidates with `concatMap` — serially. One
+    rollout measured **5,884 ms**; fifty would be ~5 minutes a scan. Not user-facing (it is
+    cached and backgrounded) but it arrives before anything else does.
+  - **Postgres' default `work_mem` (4 MB) roughly doubles that query** by spilling a 31 MB sort
+    to disk. Raising it is the cheapest performance win in the system and is a config change.
+
+  Two honest caveats, both in the document: the throughput figure is **rig-bound, not
+  server-bound** (the generator and the JVM shared 10 cores), and the rate limiter's default of
+  6,000/min is **100 req/s per credential** — a single SDK key shared by a server fleet hits
+  that long before it hits anything measured here.
 - **No monitoring or alerting.** `/actuator/prometheus` exposes the meters; nothing scrapes them
   and no alert is defined on them. Backup/restore is documented but has never been rehearsed. **M**
 - **Hosting.** The compose file is a single node by construction. The order in which that stops
@@ -505,15 +627,34 @@ the reasons held.
 
 ### What is actually next
 
-7. **Load and performance testing.** Now the largest untested claim in the repo, and it has been
-   promoted above the enterprise cluster on purpose: every latency number in the docs is
-   unmeasured, retention has never run against real volume, and the caches added in 3 were sized
-   by argument rather than by load. Worth knowing that no vendor publishes p50/p95/p99 for flag
-   delivery either — the bar is internal honesty, not a public benchmark. **M**
-8. **Signed webhooks.** The cheapest remaining thing everyone else has. **S**
-9. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
-10. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Deliberately deferred through the
-    contract churn in the client-keys and operators work; that churn has now settled, so the
-    reason for waiting is spent.
-11. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
+7. ~~**Load and performance testing.**~~ **Done 2026-08-25** — see §6 and
+   [PERFORMANCE.md](PERFORMANCE.md). Promoting it above the enterprise cluster was right for a
+   reason that only showed up afterwards: it produced the evidence for item 9 below (the
+   uncached dashboard list is the slowest path in the product by 10×), and it found the actual
+   scaling wall — the serial rollout scan — which was not on this list at all.
+8. ~~**Signed webhooks.**~~ **Done 2026-08-25** — see §4. Generalising the AI layer's hook
+   rather than adding a second delivery path was the right call and cost nothing extra: the
+   migration carries existing subscribers forward.
+9. ~~**Dashboard list caching.**~~ **Done 2026-08-25** — see §3. The item 7 measurements are what
+   moved this up: the flag list was the slowest path in the product, and it is now ~15× faster at
+   p99. Audit was dropped from it deliberately, with the reasoning recorded rather than the item
+   silently narrowed.
+10. ~~**Audit export + configurable retention.**~~ **Done 2026-08-25** — see §5.
+
+### What is actually next now
+
+11. **Java SDK follow-ons** — telemetry (event batching, which is what feeds the healing and
+    optimizing loops) and local persistence of the last-known payload, for parity with the
+    TypeScript SDK. Both additive. **S–M**
+12. **The rollout scan's serial aggregation**, which item 7 found and nothing had listed: 2.0–5.6 s
+    per flag at 2.4 M events, iterated with `concatMap`, so fifty live rollouts is ~5 minutes a
+    scan. Raising Postgres' `work_mem` roughly halves the query and is a config change; the real
+    fix is incremental rollups. **S** then **M**
+13. **A dashboard UI for webhooks.** The API and the MCP server reach them; the dashboard does
+    not. **S**
+14. **The enterprise cluster** (SSO/SAML, SCIM) once a buyer asks.
+15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
+    Deliberately deferred through the contract churn in the client-keys and operators work; that
+    churn has now settled, so the reason for waiting is spent.
+16. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
     first piece of it and was not planned as such.
