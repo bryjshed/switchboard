@@ -134,12 +134,21 @@ public class RolloutMonitorService {
         Instant now = Instant.now();
         return metrics.findRolloutCandidates()
             .filter(RolloutMonitorService::isLiveRollout)
-            .concatMap(candidate -> measure(candidate, now)
+            // flatMapSequential, NOT concatMap: measuring a candidate is one expensive
+            // aggregation over the partitioned event tables (2.0-5.6 s at 2.4M events - see
+            // docs/PERFORMANCE.md), and concatMap ran them strictly one after another, so a
+            // scan cost the SUM. flatMapSequential runs `scanConcurrency` at a time while
+            // still emitting IN ORDER, which matters because decide() indexes e-BH's
+            // survives[] back against family order and breaks ties on it: an unordered
+            // flatMap would leave the decisions identical but the reported ranks
+            // non-deterministic between runs. Concurrency is bounded because the work is
+            // database-bound, and an unbounded fan-out would simply move the queue.
+            .flatMapSequential(candidate -> measure(candidate, now)
                 .onErrorResume(e -> {
                     log.warn("Rollout scan failed for {}/{}: {}",
                         candidate.flag().key(), candidate.envKey(), e.toString());
                     return Mono.empty();
-                }))
+                }), properties.getScanConcurrency())
             .collectList()
             .flatMap(this::decide);
     }

@@ -646,10 +646,21 @@ the reasons held.
 11. **Java SDK follow-ons** — telemetry (event batching, which is what feeds the healing and
     optimizing loops) and local persistence of the last-known payload, for parity with the
     TypeScript SDK. Both additive. **S–M**
-12. **The rollout scan's serial aggregation**, which item 7 found and nothing had listed: 2.0–5.6 s
-    per flag at 2.4 M events, iterated with `concatMap`, so fifty live rollouts is ~5 minutes a
-    scan. Raising Postgres' `work_mem` roughly halves the query and is a config change; the real
-    fix is incremental rollups. **S** then **M**
+12. ~~**The rollout scan's serial aggregation**~~ **Done 2026-08-26.** Measured at eight flags
+    carrying ~500 k events each: **40.8 s → 19.2 s**, a 2.1× on the full scan, by measuring four
+    candidates at once instead of one. `flatMapSequential` rather than `flatMap` because
+    `decide()` breaks e-BH ties on family order, so an unordered merge would leave decisions
+    identical and reported ranks non-deterministic.
+
+    Two honest notes. **Eight concurrent measured worse than four** — the work is database-bound,
+    so past a handful more fan-out is contention; four also sits below the connection pool so a
+    scan cannot starve evaluation. And **raising `work_mem` shipped OFF**: it helped at 2 M
+    events for one flag (4.4 s → 3.6 s) and made the scan *slower* at 500 k per flag, where the
+    sort never spills. Since it is per sort node per connection it would multiply by the new
+    concurrency, so it is a knob an operator sets after measuring, not a default.
+
+    **Incremental rollups remain open** and are still the real fix: concurrency divides the
+    cost, rollups would change its order. **M**
 13. **A dashboard UI for webhooks.** The API and the MCP server reach them; the dashboard does
     not. **S**
 14. **The enterprise cluster** (SSO/SAML, SCIM) once a buyer asks.

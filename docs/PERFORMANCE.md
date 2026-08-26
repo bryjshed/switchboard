@@ -189,15 +189,44 @@ minutes of serial scanning. This is not a user-facing latency problem — the qu
 the 60-second `ROLLOUT_STATS` cache and the scan is a background job — but it is a wall, and
 it is the one that arrives first.
 
-Two things follow, in cost order:
+### What was done about it, and what the numbers actually said
 
-1. **Raise `work_mem` for the connection that runs this query.** The default 4 MB forces a
-   31 MB spill to disk that roughly doubles the cost. This is a configuration change and the
-   cheapest performance win available anywhere in the system.
-2. **Incremental rollups.** [REMAINING-WORK.md](REMAINING-WORK.md#3-caching) named these as the
-   alternative to a short-TTL cache and picked the cache, correctly, as the cheaper first move.
-   The cache fixes repeated reads; it does nothing for the scan, which needs a *fresh* number
-   every time by construction. Rollups are what the scan actually wants.
+Re-measured with **eight** rollout flags carrying ~500 k events each (4 M total), which is a
+more realistic shape than one flag with everything:
+
+| | full scan, best of 2 |
+|---|---|
+| serial (the old behaviour), `work_mem` 4 MB | 40,813 ms |
+| serial, `work_mem` 64 MB | **44,144 ms** |
+| **4 concurrent**, `work_mem` 64 MB | **19,241 ms** |
+| 8 concurrent, `work_mem` 64 MB | 21,798 ms |
+
+**Concurrency was the real win: 2.1×.** The scan measured candidates strictly one at a time, so
+it cost the *sum* of the aggregations. It now measures four at once — `flatMapSequential`, which
+runs concurrently while still emitting in order, because `decide()` indexes e-BH's `survives[]`
+back against family order and breaks ties on it.
+
+**Not 4×, and eight is worse than four.** The work is database-bound, so beyond a handful of
+concurrent aggregations Postgres is the constraint and more fan-out is just contention. Four
+also sits below the default connection-pool size, so a scan cannot starve evaluation of
+connections while it runs.
+
+**`work_mem` turned out not to be the easy win it looked like, and shipped OFF.** At 2 M events
+for a single flag it genuinely helped — 4.4 s to 3.6 s, because the ~31 MB sort stopped spilling
+to disk. At 500 k events per flag it made the scan measurably *slower*: at that size the sort
+never spills, so there was nothing to buy and only variance to measure. Since `work_mem` is per
+sort node per connection, a 64 MB default would multiply by the new concurrency and cost every
+deployment memory to benefit only some. It is therefore blank by default
+(`switchboard.rollout-monitor.aggregate-work-mem`) for an operator who has measured their own
+volume to set.
+
+That is the second time in this document a plausible optimisation measured the wrong way round.
+Both were caught the same way: by measuring after, not only before.
+
+**Still open: incremental rollups.** [REMAINING-WORK.md](REMAINING-WORK.md#3-caching) named these
+as the alternative to a short-TTL cache and picked the cache, correctly, as the cheaper first
+move. The cache fixes repeated reads; it does nothing for the scan, which needs a *fresh* number
+every time by construction. Concurrency divides the cost; rollups would change its order.
 
 Note also that the `mt` CTE filters `metric_events` by `environment_id` and `occurred_at` but
 **cannot filter by flag key** — a metric event does not carry one — so it reads every metric

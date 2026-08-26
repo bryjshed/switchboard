@@ -19,7 +19,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.r2dbc.core.DatabaseClient;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -131,23 +133,84 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
     private static final TypeReference<List<EnvRow>> ENVS_TYPE = new TypeReference<>() {
     };
 
+    /** A plain Postgres memory literal: digits plus an optional unit. Nothing else is allowed. */
+    private static final java.util.regex.Pattern WORK_MEM =
+        java.util.regex.Pattern.compile("(?i)^\\d+(kB|MB|GB)?$");
+
     private final DatabaseClient db;
     private final ObjectMapper json;
+    private final TransactionalOperator tx;
+    private final String aggregateWorkMem;
 
-    public RolloutMetricsRepositoryAdapter(DatabaseClient db, ObjectMapper json) {
+    public RolloutMetricsRepositoryAdapter(
+        DatabaseClient db,
+        ObjectMapper json,
+        TransactionalOperator tx,
+        @Value("${switchboard.rollout-monitor.aggregate-work-mem:}") String aggregateWorkMem) {
         this.db = db;
         this.json = json;
+        this.tx = tx;
+        // Interpolated into SQL below, so it is validated HERE, at startup, where a bad value is
+        // a failure to boot rather than a syntax error inside the monitor an hour later. It is
+        // configuration and never request data, but a value that reaches a SQL string unchecked
+        // is worth refusing on principle rather than on threat model.
+        if (!aggregateWorkMem.isBlank() && !WORK_MEM.matcher(aggregateWorkMem.trim()).matches()) {
+            throw new IllegalArgumentException(
+                "switchboard.rollout-monitor.aggregate-work-mem must look like '64MB', got: "
+                    + aggregateWorkMem);
+        }
+        this.aggregateWorkMem = aggregateWorkMem.trim();
+    }
+
+    /**
+     * Optionally runs one aggregation with a raised {@code work_mem}.
+     *
+     * <h2>Off by default, and the measurements are why</h2>
+     *
+     * <p>It looked like an easy win and is not a general one. At 2 M events for a single flag
+     * this query spills a ~31 MB sort to disk and raising {@code work_mem} cut it from 4.4 s to
+     * 3.6 s. At 500 k events per flag across eight flags it made a full scan measurably
+     * <em>slower</em> (44.1 s against 40.8 s) - because at that size the sort never spills, so
+     * there is nothing to buy and only variance to measure.
+     *
+     * <p>{@code work_mem} is per sort node per connection. With the scan running four
+     * candidates at once and this query carrying several sort nodes, a 64 MB default is a
+     * multi-hundred-megabyte peak on every deployment in exchange for a benefit only some of
+     * them can realise. So it ships blank - Postgres' own default applies - and an operator
+     * whose flags carry millions of events per epoch can set it deliberately, having measured.
+     *
+     * <p><b>When it IS set, {@code SET LOCAL} and the query must run on the same connection</b>,
+     * or the SET applies to a connection that returns to the pool and the query runs at the
+     * default anyway - a tuning change that looks applied and does nothing. The transaction is
+     * what guarantees it: R2DBC pins the connection to the reactive context for its life.
+     * {@code SET LOCAL} also reverts at commit, so an evaluation request that borrows the
+     * connection next does not inherit a large sort budget.
+     *
+     * <p>The value is interpolated rather than bound because Postgres does not accept a
+     * parameter in SET. It is configuration, never request data, and is rejected at startup if
+     * it is not a plain Postgres memory literal.
+     */
+    private <T> Flux<T> withRaisedWorkMem(Flux<T> query) {
+        if (aggregateWorkMem.isEmpty()) {
+            // No transaction either: wrapping a read in one to change nothing would cost a
+            // round trip per aggregation for no reason.
+            return query;
+        }
+        return db.sql("SET LOCAL work_mem = '" + aggregateWorkMem + "'")
+            .then()
+            .thenMany(query)
+            .as(tx::transactional);
     }
 
     @Override
     public Mono<List<VariantAggregate>> aggregate(UUID environmentId, String flagKey, Instant since) {
         String sql = AGGREGATE_SQL.formatted("timestamptz 'epoch'");
-        return db.sql(sql)
-            .bind("envId", environmentId)
-            .bind("flagKey", flagKey)
-            .bind("since", since)
-            .map(RolloutMetricsRepositoryAdapter::mapAggregate)
-            .all()
+        return withRaisedWorkMem(db.sql(sql)
+                .bind("envId", environmentId)
+                .bind("flagKey", flagKey)
+                .bind("since", since)
+                .map(RolloutMetricsRepositoryAdapter::mapAggregate)
+                .all())
             .collectList();
     }
 

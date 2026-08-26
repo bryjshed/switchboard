@@ -9,14 +9,22 @@ import type { AuthConfig } from '@/auth/config'
  */
 const loaded: string[] = []
 
+/**
+ * Both stubs include `init()` because {@link DashboardAuthProvider} declares it and `initAuth`
+ * calls it. Leaving it off made this file order-dependent: the `initAuth` tests re-mock the
+ * module with a fuller stub, and whether that second `vi.doMock` won the race against the one
+ * registered here decided whether `provider.init` existed. It passed in isolation and failed
+ * intermittently in a full run — a stub that does not satisfy the interface it stands in for
+ * is a bug in the stub, not flakiness.
+ */
 function stubProviderModules() {
   vi.doMock('@/auth/firebase/firebaseAuthProvider', () => {
     loaded.push('firebase')
-    return { createFirebaseAuthProvider: () => ({ kind: 'firebase' }) }
+    return { createFirebaseAuthProvider: () => ({ kind: 'firebase', init: () => Promise.resolve() }) }
   })
   vi.doMock('@/auth/oidc/oidcAuthProvider', () => {
     loaded.push('oidc')
-    return { createOidcAuthProvider: () => ({ kind: 'oidc' }) }
+    return { createOidcAuthProvider: () => ({ kind: 'oidc', init: () => Promise.resolve() }) }
   })
 }
 

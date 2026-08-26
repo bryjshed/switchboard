@@ -434,6 +434,37 @@ target `switchboard_load` on the same Postgres instance.
 
 ---
 
+## The rollout scan
+
+**Candidates are measured with `flatMapSequential`, not `flatMap` and not `concatMap`.** It was
+`concatMap` — strictly serial — so a scan cost the sum of its aggregations: 40.8 s for eight
+flags, and over fifteen minutes at 2 M events each. Concurrency of four takes that to 19.2 s.
+
+`flatMapSequential` rather than plain `flatMap` because it runs concurrently while still emitting
+**in order**, and order is load-bearing here: `decide()` indexes e-BH's `survives[]` array back
+against family position and breaks ties on it, so an unordered merge would leave every decision
+identical but the reported ranks non-deterministic between runs. That is the kind of difference
+nobody notices until they are comparing two findings and cannot explain why the numbers moved.
+
+**Four, and bounded.** Eight measured *worse* than four (21.8 s against 19.2 s): the work is
+database-bound, so past a handful of concurrent aggregations Postgres is the constraint and more
+fan-out only adds contention. Four also sits below the default connection-pool size of ten, so a
+scan cannot starve the evaluation hot path of connections while it runs.
+
+**Raising `work_mem` for the aggregation is available and OFF by default.** It looked like the
+cheapest win in the system and is not a general one. At 2 M events for one flag it helped — the
+~31 MB sort stopped spilling and the query went 4.4 s to 3.6 s. At 500 k events per flag it made
+the whole scan *slower* (44.1 s against 40.8 s), because at that size the sort never spills and
+there is nothing to buy. `work_mem` is per sort node per connection, so a raised default would
+multiply by the scan concurrency and charge every deployment memory to benefit only some. Blank
+by default; set `switchboard.rollout-monitor.aggregate-work-mem` after measuring your own volume.
+
+When it *is* set, the `SET LOCAL` and the query must run on the same connection or the setting
+applies to a connection that returns to the pool and the query runs at the default anyway — a
+tuning change that looks applied and does nothing. The transaction is what pins them together.
+
+---
+
 ## Dashboard list caching
 
 **Invalidation is exact; the TTL is only a backstop.** The flag and change-request list caches
