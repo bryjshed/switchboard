@@ -53,13 +53,13 @@ jobs:
       # after the whole test suite has run, which is twenty-odd wasted minutes for a
       # misplaced brace.
       - name: Checkstyle
-        working-directory: backend
         run: ./mvnw -B -q compile checkstyle:check
 
       # Testcontainers works on GitHub runners without configuration -- the Docker socket is
       # present and Ryuk can bind it.
+      # From the repo root: switchboard-evaluation is a sibling module the backend now
+      # compiles against, and a single-module build would not build it.
       - name: Verify
-        working-directory: backend
         run: ./mvnw -B verify
 
       - name: Publish test report
@@ -162,8 +162,7 @@ jobs:
         run: node spec/tools/verify-bucket.mjs
 
       - name: Java runner
-        working-directory: backend
-        run: ./mvnw -B test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
+        run: ./mvnw -B -pl evaluation test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
 
       - run: npm ci
         working-directory: sdk/typescript
@@ -191,9 +190,13 @@ jobs:
         run: docker compose up -d --wait
 
       # Compiles ahead of the start step so the wait below is startup time, not build time.
+      #
+      # `install`, not `package`: the start step below runs `spring-boot:run` from inside
+      # backend/, and a single-module build resolves the sibling switchboard-evaluation from
+      # the local repository rather than the reactor. `package` would leave it unresolvable
+      # and the backend would fail to start with a missing-artifact error.
       - name: Build the backend
-        working-directory: backend
-        run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip package
+        run: ./mvnw -B -q -DskipTests -Dcheckstyle.skip install
 
       # Started exactly the way `make backend` starts it, and `spring-boot:run` rather than
       # `java -jar` is NOT interchangeable here.

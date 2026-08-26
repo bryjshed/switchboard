@@ -238,6 +238,54 @@ covers it without a second protocol implementation.
 
 ---
 
+## The evaluation core
+
+**Flag evaluation lives in its own module (`evaluation/`), not in the backend.** Extracted
+2026-08-25, ahead of a Java SDK. The alternative was a second Java implementation of MD5
+bucketing, sixteen operators, semver ordering and the restricted regex subset — which is
+precisely the drift `spec/evaluation.md` and the conformance vectors exist to detect. Detecting
+drift at test time is strictly worse than making it impossible: one implementation cannot
+disagree with itself. The vectors still run, and now they run *once*, in the module both
+consumers compile against.
+
+**It has zero compile dependencies, and that is a hard rule rather than a nice property.** Not
+Spring, not Jackson, not SLF4J. This module is what an SDK drops into someone else's
+application, and a flag SDK that drags a dependency tree in with it is a flag SDK people route
+around. Jackson is test-scoped, for reading the vector files. Anything that needs a dependency
+belongs on the other side of the seam.
+
+**`com.switchboard.domain.flag` is deliberately split across two modules.** The evaluation
+module owns the value types the evaluator closes over (`Flag`, `Rule`, `Clause`, `ClauseOp`,
+`TargetingConfig`, `Variation`, `WeightedVariation`, `IndividualTarget`, `RolloutOrVariation`,
+`FlagKind`, `Segment`, `SegmentRule`); the backend keeps the repositories and the view/query
+types (`FlagRepository`, `FlagDetail`, `FlagListItem`, …). Split packages are legal on the
+classpath and both consumers use the classpath, so this works today.
+
+The alternative was renaming the packages, which would have rewritten **178 import lines across
+42 files** in the backend for no behavioural gain, and — worse — forced the server's hot path to
+either adopt new type names everywhere or map domain types to evaluation types on every
+evaluation. Keeping the names meant the extraction changed **zero** lines of backend source.
+
+The cost is real and bounded: a split package cannot be used on the JPMS module path. Nothing
+here declares `module-info.java`, the backend is an application rather than a library, and the
+SDK depends on `switchboard-evaluation` alone — so the split is never observable to a consumer.
+If someone ever needs the module path, the fix is the package rename that was skipped, and it is
+mechanical.
+
+**The root `pom.xml` aggregates but does not parent.** The backend inherits from
+`spring-boot-starter-parent` for dependency management, and the evaluation module must inherit
+nothing at all — an SDK consumer should not be handed Spring's BOM through a parent POM.
+
+**`cd backend && ./mvnw verify` is no longer the command; build from the repo root.** A
+single-module build resolves `switchboard-evaluation` from the local repository rather than the
+reactor, so it silently uses whatever was installed last, or fails outright on a clean checkout.
+`make backend` therefore installs the core first (`make core`), and CI's `live` job uses
+`install` rather than `package` for the same reason. This is the one ergonomic regression the
+extraction caused, and it is written down here because the failure — a missing artifact — says
+nothing about why.
+
+---
+
 ## Implementation
 
 **The dashboard does not use React Query.** Pages use `useState` + `useEffect` + async
