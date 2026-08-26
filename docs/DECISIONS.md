@@ -216,6 +216,60 @@ be re-applied from, so nothing gets stuck.
 
 ---
 
+## SCIM provisioning
+
+**Users only. No `/Groups`.** Roles stay assigned in Switchboard. Mapping IdP groups onto role
+assignments collides with the rule that permissions are a **union** across org, project and
+environment scopes: removing someone from a group would have to work out which of their grants
+came from that group and which a human made deliberately, and getting that wrong either strips
+access someone still needs or leaves access they should have lost. That is a decision to make
+explicitly, not to infer.
+
+**No SAML, and SCIM changes nothing about that.** Enterprise SAML is still handled by delegating
+to an OIDC-capable IdP — see the Identity section below. SCIM is provisioning, not
+authentication, and the two are routinely confused when people say "SSO".
+
+**Deactivation is a column, never a delete.** SCIM's `DELETE` and its `active: false` PATCH both
+set `users.deactivated_at`. Audit entries name their actor and change requests name their
+approver; deleting the person who did those things would orphan the record of who authorised a
+production change — the opposite of what an org running SCIM for compliance reasons wants. A
+timestamp rather than a boolean, so "when did they lose access" has an answer.
+
+**A deactivated user authenticates with no authorities rather than failing to authenticate.**
+This is the idiomatic Spring Security expression of "we know exactly who this is and they may do
+nothing", and it yields the right status for free: every user-facing route requires `ROLE_USER`,
+so the authorization layer answers 403. The two alternatives are both worse — throwing from
+inside the authentication manager escapes the security chain's error mapping and surfaces as a
+**500** (which is what the first implementation did), and a 401 would invite a client to
+re-authenticate, which cannot help because the credential is fine and the account is not.
+
+**Deactivating evicts `USER_IDENTITY` and `PERMISSIONS`, and that eviction is the
+security-relevant half.** Identity resolution is cached for five minutes, so without it a person
+deprovisioned by their IdP would keep authenticating for up to five minutes after their employer
+believed access was revoked — precisely the window deprovisioning exists to close.
+
+**Provisioning an existing person ADOPTS them rather than creating a second account.** People
+sign in before anyone turns SCIM on; that is the normal order of events. A duplicate `userName`
+is a 409 only when the person is already a member of *this* org.
+
+**Authentication is a personal access token, not a new credential type.** DECISIONS.md already
+records that a second authorization vocabulary is a second place for a permission bug to live,
+and the existing advice for narrowing a token — create a user with a narrow role and mint it as
+them — is exactly right for a provisioning integration. The token's owner needs
+`MANAGE_MEMBERS`.
+
+**The base path carries the org (`/scim/v2/orgs/{orgId}`).** SCIM has no notion of one, and every
+IdP lets an administrator configure an arbitrary base URL, so this costs nothing and removes the
+alternative — inferring the org from the token — which is ambiguous the moment a provisioning
+user belongs to two.
+
+**SCIM is not in the OpenAPI document, and that is deliberate.** It is its own specification with
+its own envelope, media type, error shape and 1-based paging. Modelling it inside the document
+that describes *this* product would put a second, foreign contract in the middle of it. The
+contract implemented is RFC 7644; the reference is the RFC.
+
+---
+
 ## Identity
 
 **Identity is a row, not a column.** `user_identities` is `(user_id, issuer, subject)`,

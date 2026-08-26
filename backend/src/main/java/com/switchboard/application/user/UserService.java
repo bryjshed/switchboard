@@ -75,6 +75,11 @@ public class UserService {
             // behind a read-through. The cache only ever holds an identity that already resolved,
             // so the very next request after a provision is a miss that finds the new row.
             .switchIfEmpty(Mono.defer(() -> linkOrProvision(identity)));
+        // Deliberately does NOT refuse a deactivated user. This method resolves an identity to a
+        // person; whether that person may currently do anything is an authorization question,
+        // and answering it here made a deactivated account surface as a 500 - the exception was
+        // thrown inside the authentication manager, where the security chain has no error
+        // mapping for it. SwitchboardAuthenticationManager makes that decision instead.
     }
 
     private Mono<User> linkOrProvision(VerifiedIdentity identity) {

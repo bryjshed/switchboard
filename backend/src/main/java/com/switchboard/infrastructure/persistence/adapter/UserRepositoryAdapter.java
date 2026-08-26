@@ -28,7 +28,8 @@ public class UserRepositoryAdapter implements UserRepository {
             row.get("id", UUID.class),
             row.get("email", String.class),
             row.get("display_name", String.class),
-            Boolean.TRUE.equals(row.get("onboarding_completed", Boolean.class)));
+            Boolean.TRUE.equals(row.get("onboarding_completed", Boolean.class)),
+            row.get("deactivated_at", Instant.class) != null);
     }
 
     private static UserIdentity mapIdentity(Readable row) {

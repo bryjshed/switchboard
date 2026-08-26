@@ -10,5 +10,11 @@ public record User(
     UUID id,
     String email,
     String displayName,
-    boolean onboardingCompleted) {
+    boolean onboardingCompleted,
+    /**
+     * Deprovisioned, by SCIM or by hand. A deactivated user is refused at sign-in rather than
+     * deleted: audit entries name their actor and change requests name their approver, so
+     * removing the row would orphan the record of who authorised a production change.
+     */
+    boolean deactivated) {
 }

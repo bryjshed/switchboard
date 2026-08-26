@@ -663,7 +663,21 @@ the reasons held.
     cost, rollups would change its order. **M**
 13. **A dashboard UI for webhooks.** The API and the MCP server reach them; the dashboard does
     not. **S**
-14. **The enterprise cluster** (SSO/SAML, SCIM) once a buyer asks.
+14. ~~**The enterprise cluster** (SSO/SAML, SCIM).~~ **Done 2026-08-26** — with a narrower shape
+    than the line implied, because most of it was already answered. **SAML needed nothing**:
+    DECISIONS.md has recorded since the OIDC work that enterprise SAML is handled by delegating
+    to an OIDC-capable IdP, and Okta, Auth0 and Entra all do SAML and issue OIDC. So the actual
+    work was SCIM, and it is **users only** — `/Groups` would have to reconcile IdP group
+    membership against a permission model that unions across scopes, and getting that wrong
+    silently either strips or grants access.
+
+    The half worth reviewing is deprovisioning, not provisioning. `DELETE` and `active: false`
+    both deactivate rather than delete, because audit entries and change requests name their
+    actor. A deactivated user authenticates with **no authorities** rather than failing to
+    authenticate — throwing inside the authentication manager escapes the security chain's error
+    mapping and produced a 500, which is what the first version did. And deactivation evicts the
+    identity cache, without which a deprovisioned person keeps working for five more minutes.
+    12 integration tests, including that one. **Groups: S–M if a buyer asks.**
 15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
     Deliberately deferred through the contract churn in the client-keys and operators work; that
     churn has now settled, so the reason for waiting is spent.
