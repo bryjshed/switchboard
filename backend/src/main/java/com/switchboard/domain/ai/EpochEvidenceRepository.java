@@ -28,11 +28,18 @@ public interface EpochEvidenceRepository {
     Mono<Long> deleteObservedBefore(Instant before);
 
     /** Identifies one hypothesis within one epoch. */
+    /**
+     * @param direction part of the key, not decoration. Without it the degradation and
+     *     improvement hypotheses for one metric share a supremum, and the improvement one reads
+     *     back evidence the degradation accumulated - recommending a ramp of a broken variation.
+     *     See V11.
+     */
     record EpochEvidenceKey(
         UUID environmentId,
         String flagKey,
         Instant epochStartedAt,
         String metricKey,
-        UUID variationId) {
+        UUID variationId,
+        String direction) {
     }
 }

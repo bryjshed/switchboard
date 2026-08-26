@@ -681,5 +681,24 @@ the reasons held.
 15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
     Deliberately deferred through the contract churn in the client-keys and operators work; that
     churn has now settled, so the reason for waiting is spent.
-16. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
-    first piece of it and was not planned as such.
+16. ~~**Experimentation as a product**~~ — **first step done 2026-08-26: user-defined metrics.**
+    The monitor knew exactly two keys, `error` and `conversion`, hard-coded into the aggregation
+    as pivoted columns. A metric is now an entity with a **direction** (which way is good), its
+    own **tau**, and an **autoAct** switch for metrics worth watching but not worth acting on.
+
+    **It closed a blind spot nobody had written down.** Direction used to be implicit in which
+    key it was — `error` only ever tested for degradation, `conversion` only ever for
+    improvement — so *a variation that destroyed conversion was never healed*. Both questions are
+    now asked of every metric. The cost: four hypotheses per challenger instead of two, so each
+    e-BH family is larger and the correction stricter.
+
+    **And it exposed a real defect in the evidence table.** The running-supremum rows were keyed
+    without direction, which was safe only while the metric key implied it. Testing both
+    directions made them collide, so the improvement hypothesis read back the degradation's
+    accumulated e-value and would have recommended **ramping a broken variation** — with an
+    always-valid p-value attached. `RolloutScanIT` caught it by asserting that a rescan changes
+    nothing. Fixed in V11.
+
+    Still open for the rest of this section: an experiment entity, holdouts, layers and mutual
+    exclusion. The SRM gate from item 1 and metric definitions are the two pieces that exist.
+    **M–L**

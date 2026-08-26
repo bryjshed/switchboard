@@ -1697,6 +1697,79 @@ paths:
                 items:
                   $ref: '#/components/schemas/WebhookDeliveryResponse'
 
+  /api/projects/{projectId}/metrics:
+    get:
+      tags: [Metrics]
+      operationId: listMetricDefinitions
+      description: >-
+        The metrics the rollout monitor may act on for this project. Every project is seeded with
+        `error` and `conversion`, which are the two the monitor used to hard-code.
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Metric definitions, by key.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MetricDefinitionResponse'
+    post:
+      tags: [Metrics]
+      operationId: createMetricDefinition
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetricDefinitionCreateRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricDefinitionResponse'
+        '400':
+          description: Invalid key, direction or tau
+        '409':
+          description: That key is already defined for this project
+
+  /api/metrics/{metricId}:
+    patch:
+      tags: [Metrics]
+      operationId: updateMetricDefinition
+      description: Partial update. The KEY is immutable - events already carry it.
+      parameters:
+        - $ref: '#/components/parameters/MetricId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetricDefinitionUpdateRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricDefinitionResponse'
+    delete:
+      tags: [Metrics]
+      operationId: deleteMetricDefinition
+      description: >-
+        Stops the monitor acting on this metric. Events already recorded under the key are NOT
+        deleted - they are telemetry, and a metric may be redefined later.
+      parameters:
+        - $ref: '#/components/parameters/MetricId'
+      responses:
+        '204':
+          description: Deleted
+
   /api/orgs/{orgId}/audit/export:
     get:
       # Its own tag so the generated interface is separate and left unimplemented, exactly as
@@ -1878,6 +1951,13 @@ components:
         format: uuid
     WebhookId:
       name: webhookId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MetricId:
+      name: metricId
       in: path
       required: true
       schema:
@@ -3936,3 +4016,90 @@ components:
         deliveredAt:
           type: string
           format: date-time
+
+    MetricDirection:
+      type: string
+      description: >-
+        Which way is good. This is what lets the monitor tell a regression from an improvement,
+        which is the entire decision it makes.
+
+
+        Before metric definitions existed the answer was implicit in two hard-coded keys - `error`
+        could only ever degrade and `conversion` could only ever improve - and that implicitness
+        hid a real blind spot: a variation that DESTROYED conversion was never healed, because
+        conversion was only ever tested for improvement.
+      enum: [INCREASE_IS_BETTER, DECREASE_IS_BETTER]
+
+    MetricDefinitionResponse:
+      type: object
+      required: [id, projectId, key, name, direction, tau, autoAct, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Matches the metricKey your SDK reports on POST /api/events/metrics.
+        name:
+          type: string
+        description:
+          type: string
+        direction:
+          $ref: '#/components/schemas/MetricDirection'
+        tau:
+          type: number
+          description: >-
+            The absolute proportion difference worth reacting to, between 0 and 1 exclusive.
+
+
+            NEVER fit this to observed data. Deriving tau from the effect you are measuring makes
+            the constant a function of the sample and destroys the supermartingale property that
+            makes the monitor safe to run as often as it likes - see docs/DECISIONS.md.
+        autoAct:
+          type: boolean
+          description: >-
+            Whether the monitor may heal or ramp on this metric, or only report it. A team
+            measuring something noisy wants to see it without it moving traffic.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    MetricDefinitionCreateRequest:
+      type: object
+      required: [key, name, direction, tau]
+      properties:
+        key:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 100
+        description:
+          type: string
+        direction:
+          $ref: '#/components/schemas/MetricDirection'
+        tau:
+          type: number
+        autoAct:
+          type: boolean
+          default: true
+
+    MetricDefinitionUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        direction:
+          $ref: '#/components/schemas/MetricDirection'
+        tau:
+          type: number
+        autoAct:
+          type: boolean

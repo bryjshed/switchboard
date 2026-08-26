@@ -17,11 +17,11 @@ public class EpochEvidenceRepositoryAdapter implements EpochEvidenceRepository {
      */
     private static final String UPSERT_SQL = """
         INSERT INTO rollout_epoch_evidence (
-            environment_id, flag_key, epoch_started_at, metric_key, variation_id,
+            environment_id, flag_key, epoch_started_at, metric_key, variation_id, direction,
             baseline_variation_id, max_log_e, last_log_e, tau, observed_at)
-        VALUES (:envId, :flagKey, :epoch, :metricKey, :variationId,
+        VALUES (:envId, :flagKey, :epoch, :metricKey, :variationId, :direction,
                 :baselineId, :logE, :logE, :tau, now())
-        ON CONFLICT (environment_id, flag_key, epoch_started_at, metric_key, variation_id)
+        ON CONFLICT (environment_id, flag_key, epoch_started_at, metric_key, variation_id, direction)
         DO UPDATE SET
             max_log_e = GREATEST(rollout_epoch_evidence.max_log_e, EXCLUDED.max_log_e),
             last_log_e = EXCLUDED.last_log_e,
@@ -47,6 +47,7 @@ public class EpochEvidenceRepositoryAdapter implements EpochEvidenceRepository {
             .bind("epoch", key.epochStartedAt())
             .bind("metricKey", key.metricKey())
             .bind("variationId", key.variationId())
+            .bind("direction", key.direction())
             .bind("baselineId", baselineVariationId)
             .bind("logE", logEValue)
             .bind("tau", tau)

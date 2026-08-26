@@ -488,6 +488,55 @@ target `switchboard_load` on the same Postgres instance.
 
 ---
 
+## Metric definitions
+
+**A metric declares which way is good, and both questions are asked of it.** The monitor used to
+know exactly two keys, and the direction was implicit in which one it was: `error` was only ever
+tested for degradation, `conversion` only ever for improvement. That implicitness hid a real
+blind spot — **a variation that destroyed conversion was never healed**, because nothing ever
+asked whether conversion had regressed. Every defined metric is now tested in both directions.
+
+The consequence to know about: with two metrics that is four hypotheses per challenger where it
+was two, so each e-BH family is larger and the correction correspondingly stricter. That is the
+right trade; the alternative is not asking the question.
+
+**`tau` is per metric, and must never be fitted to data.** A 1% shift means something different
+for an error rate than for a refund rate, which is why it moved from two global constants onto
+the metric. The prohibition is unchanged and load-bearing: deriving tau from the effect being
+measured makes the constant a function of the sample and destroys the supermartingale property
+that makes repeated looks safe.
+
+**`autoAct` exists so a metric can be watched without moving traffic.** A team measuring
+something noisy wants to see it in the readout without it triggering rollbacks.
+
+**Epoch evidence is keyed by DIRECTION as well as metric, and V11 exists because of it.** The
+supremum table was keyed `(environment, flag, epoch, metric_key, variation)`, which was
+sufficient only while the metric key uniquely determined the direction. Once both directions are
+tested per metric they collide on that key and **share a running supremum**: the improvement
+hypothesis reads back the evidence the degradation accumulated, concludes it has crossed, and
+recommends *ramping a variation that is in fact broken* — reported with an always-valid p-value
+and an e-BH family size, which is what makes it dangerous rather than merely wrong. The finding
+dedupe key had the same hole and gained direction too.
+
+Caught by `RolloutScanIT`, which asserts a rescan is a no-op and instead saw a second finding.
+The existing test caught a new bug in code it was not written for, which is the argument for
+keeping assertions like "and doing it again changes nothing".
+
+**Metric keys are not a foreign key on `metric_events`.** Events arrive from SDKs before anyone
+defines a metric, and refusing telemetry for an undefined key would discard data that becomes
+meaningful the moment someone defines it. Deleting a definition likewise leaves its events.
+
+**New projects are seeded with the two built-ins.** V10 seeds every project that existed when it
+ran; without seeding at creation a project made afterwards would have no metrics, and the monitor
+would silently do nothing for it — indistinguishable from "no traffic yet".
+
+**`VariantStats` keeps its `errorRate` and `conversionRate` fields.** Generalising the domain did
+not have to break a client contract the dashboard reads, so it did not. Those two accessors name
+the built-in keys explicitly and are marked for display only; everything that makes a decision
+goes through the metric map.
+
+---
+
 ## The rollout scan
 
 **Candidates are measured with `flatMapSequential`, not `flatMap` and not `concatMap`.** It was
