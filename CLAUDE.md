@@ -12,10 +12,11 @@ reviewable diff. A monorepo.
 
 | Path | What | Tests |
 |---|---|---|
-| `evaluation/` | **The flag evaluation core.** Pure Java, zero dependencies. Shared by the backend and every JVM SDK. | 508 conformance + 20 unit |
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 642 unit + 111 integration |
+| `evaluation/` | **The flag evaluation core.** Pure Java, zero dependencies. Shared by the backend and every JVM SDK. | 528 (508 conformance + 20 unit) |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 114 unit + 111 integration |
 | `dashboard/` | React + Vite. **The primary UI.** | 337 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
+| `sdk/java/` | OpenFeature provider with local evaluation, over `evaluation/` | 509 + live check |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
 | `spec/` | Normative evaluation spec + 507 conformance vectors | executed by `evaluation/` and the SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
@@ -153,6 +154,20 @@ node dashboard/scripts/governance-check.mjs    # 38
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
 node mcp/scripts/live-check.mjs                # 19
 ```
+
+The Java SDK's live check is a JUnit test rather than a script, because driving a JVM SDK from
+node would prove nothing about the JVM SDK. It self-skips without a key:
+
+```bash
+SWITCHBOARD_SDK_KEY=$(grep -oE 'sb_srv_production_[a-z0-9]+' <(make seed)) \
+  JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl sdk/java -am test -Dtest=LiveCheckIT
+```
+
+It asserts the SDK's **in-process** answers equal the **server's** answers for the same flags
+and contexts. That is the check that found the SDK rejecting every real bootstrap payload,
+because a live server serialises a single-variation serve as `{"rollout": [], "variationId": …}`
+— present but empty — while every hand-written fixture omitted the field. No unit test could
+have caught it.
 
 **Two of them import from `dist/`, not from source** — `sdk/typescript` and `mcp` — because a
 live check should exercise what ships. On a clean checkout they need `npm run build` in that

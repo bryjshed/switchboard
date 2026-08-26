@@ -164,6 +164,13 @@ jobs:
       - name: Java runner
         run: ./mvnw -B -pl evaluation test -Dtest=ConformanceVectorTest -Dcheckstyle.skip
 
+      # The same vectors again, but replayed as BOOTSTRAP PAYLOADS through the Java SDK's own
+      # JSON parsing. Not a duplicate of the line above: the SDK shares the evaluator, so the
+      # only thing this can catch - and the only place the SDK can still disagree with the
+      # server - is the wire-format mapping.
+      - name: Java SDK runner (vectors through the wire format)
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=ConformanceThroughSdkTest -Dcheckstyle.skip
+
       - run: npm ci
         working-directory: sdk/typescript
       - name: TypeScript runner
@@ -237,8 +244,13 @@ jobs:
           done
           echo "::error::backend did not become healthy"; tail -100 /tmp/sb-boot.log; exit 1
 
+      # The seed prints each environment's SDK key exactly once, which is the only time it
+      # is ever visible. The Java SDK's live check needs the production one, so it is
+      # captured here rather than re-minted.
       - name: Seed
-        run: node scripts/seed-local.mjs
+        run: |
+          node scripts/seed-local.mjs | tee /tmp/seed.log
+          echo "SWITCHBOARD_SDK_KEY=$(grep -oE 'sb_srv_production_[a-z0-9]+' /tmp/seed.log | head -1)" >> "$GITHUB_ENV"
 
       # The sdk and mcp check scripts import from `dist/`, not from source -- deliberately, since
       # the point of a live check is to exercise what actually ships. So they need a build, not
@@ -268,6 +280,13 @@ jobs:
         run: node dashboard/scripts/auth-check.mjs
       - name: mcp live-check (19)
         run: node mcp/scripts/live-check.mjs
+
+      # The Java SDK evaluates locally, so this asserts its in-process answers equal the
+      # SERVER's answers for the same flags and contexts. Those run through entirely
+      # different code on each side, which is what makes the agreement worth asserting - and
+      # it is how the empty-rollout wire-format bug was found.
+      - name: java sdk live-check (local vs server agreement)
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=LiveCheckIT -Dcheckstyle.skip
 
       # The backend log is the only place a 500 explains itself; without this a live failure
       # in CI is a status code and nothing else.

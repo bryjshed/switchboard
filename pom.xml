@@ -32,5 +32,6 @@
     <modules>
         <module>evaluation</module>
         <module>backend</module>
+        <module>sdk/java</module>
     </modules>
 </project>

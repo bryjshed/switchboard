@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Backend (642 unit + 111 integration), TypeScript SDK (562), MCP server (7), web dashboard (337),
+**Status of the product today.** Evaluation core (528, shared by the server and the Java SDK), backend (114 unit + 111 integration), TypeScript SDK (562), Java SDK (509 + a live check), MCP server (7), web dashboard (337),
 an evaluation spec with 507 conformance vectors executed by both the server and
 the SDK, and seven live-check scripts against a running stack.
 
@@ -446,7 +446,27 @@ What breaks at that scale is everything around them:
 OFREP already delivers Go, Python, .NET, Java and JavaScript providers with no
 Switchboard-specific code. Native SDKs with local evaluation are only needed where OFREP's
 remote-evaluation model is insufficient. The spec and conformance vectors mean each new
-implementation has an objective acceptance bar: **pass all 201 vectors**.
+implementation has an objective acceptance bar: **pass all 474 evaluation vectors**.
+
+**~~Java~~ · Landed 2026-08-25.** `sdk/java/` — an OpenFeature provider with local evaluation.
+It changed what the next SDK costs, because most of the work was not the SDK:
+
+- **The evaluator was extracted first** into `evaluation/`, a JDK-only module the server and the
+  SDK both compile against. The Java SDK therefore contains **no evaluation logic at all** — no
+  second implementation of bucketing or the sixteen operators to drift from the server's. Any
+  future JVM SDK (Kotlin, Scala, Android) inherits that for free.
+- **The vectors are replayed through the wire format**, not against the shared evaluator —
+  running them against `FlagEvaluator` here would assert a class equals itself. All 474 go
+  through `BootstrapCodec`, which is the only place a Java SDK can still disagree.
+- **`LiveCheckIT` asserts local answers equal the server's** on a running stack (27 comparisons
+  against the seeded environment). It found, within minutes, that the codec rejected *every real
+  bootstrap payload*: a live server serialises a single-variation serve as
+  `{"rollout": [], "variationId": …}` — present but empty — and every hand-written fixture
+  omitted the field. No unit test written against self-invented fixtures could have caught it.
+
+Remaining for parity with the TypeScript SDK: **telemetry** (eval/metric event batching, which
+is what feeds the healing and optimizing loops) and **local persistence** of the last-known
+payload. Both are additive. **S–M**
 
 ---
 

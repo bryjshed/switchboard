@@ -286,6 +286,57 @@ nothing about why.
 
 ---
 
+## The Java SDK
+
+**It does local evaluation, because remote evaluation already exists for free.** OFREP gives
+Java an OpenFeature provider with no Switchboard-specific code, so a native SDK that merely
+wrapped `POST /api/eval` would duplicate something free. What OFREP cannot do is evaluate in
+process — no I/O per flag check, keeps working through a Switchboard outage, context attributes
+never leave the box. That is the entire justification for the SDK, and it is why there is no
+remote-evaluation mode: it would be the part OFREP already does better.
+
+**It contains no evaluation logic.** Bucketing, operators, semver, the regex subset and the
+precedence ladder come from `switchboard-evaluation`. The SDK's own code is the mapping from
+the bootstrap wire format into that evaluator, plus transport and lifecycle. When reading this
+SDK looking for "how does bucketing work here", the answer is that it does not work here.
+
+**The conformance vectors are replayed through the wire format, not against the evaluator.**
+Running them against `FlagEvaluator` in the SDK's suite would assert that a shared class equals
+itself and pass no matter how broken the SDK was. `ConformanceThroughSdkTest` feeds each vector
+in as a bootstrap payload through `BootstrapCodec`, which is the only place a Java SDK can still
+disagree with the server. All 474 evaluation vectors run that way.
+
+**An empty `rollout` array is a variation serve, not a rollout.** A live server serialises a
+single-variation serve as `{"rollout": [], "variationId": "..."}` — the field present but empty
+— while `RolloutOrVariation` requires exactly one of the two. Treating "present" as "is a
+rollout" made **every real bootstrap payload unparseable** while every hand-written test fixture,
+which omits the field entirely, parsed perfectly. Do not "simplify" that emptiness check away.
+
+The general lesson is the one worth keeping: this class of bug is invisible to unit tests
+written against fixtures the same author invented, and it is exactly what the live checks exist
+for. It was found within minutes of pointing `LiveCheckIT` at a seeded stack.
+
+**`failFastOnStart` defaults to false.** A flag SDK that refuses to start because Switchboard is
+briefly unreachable has converted a degraded dependency into an outage of the application that
+depends on it. The client starts, serves callers' defaults, retries in the background, and
+reports `isReady() == false` so a health check sees the truth.
+
+**A blank targeting key becomes a null context rather than an exception.** `EvalContext` refuses
+a blank key by construction, which is right for the server — it validates at the API boundary
+and a missing key there is a bad request. Inside an SDK it is a landmine: OpenFeature routinely
+hands over a context with no targeting key, and converting eagerly threw straight through the
+caller's flag check. The provider maps blank to null and the client reports `INVALID_CONTEXT`
+while still serving the default. `EvalContexts.of("")` still throws, deliberately — a caller
+writing that by hand has a bug, and failing at the call site names it.
+
+**A rule using an unknown operator is dropped, not approximated.** A newer server can ship an
+operator a deployed SDK has never heard of. Clauses are ANDed, so a rule that cannot be fully
+understood can never be safely said to match; dropping it is the same outcome and is honest
+about it. Segment rules are ORed, so dropping one narrows membership — also the conservative
+direction.
+
+---
+
 ## Implementation
 
 **The dashboard does not use React Query.** Pages use `useState` + `useEffect` + async
