@@ -22,6 +22,10 @@ import com.switchboard.domain.project.Environment;
 import com.switchboard.domain.project.EnvironmentRepository;
 import com.switchboard.domain.segment.Segment;
 import com.switchboard.domain.segment.SegmentRepository;
+import com.switchboard.application.webhook.WebhookDispatcher;
+import com.switchboard.application.webhook.WebhookEvent;
+import com.switchboard.domain.webhook.WebhookDelivery;
+import com.switchboard.domain.webhook.WebhookEventType;
 import com.switchboard.infrastructure.notify.FlagChangePublisher;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -50,6 +54,7 @@ public class FlagTargetingService {
     private final OrgAccessService access;
     private final AuditWriter audit;
     private final FlagChangePublisher publisher;
+    private final WebhookDispatcher dispatcher;
     private final TransactionalOperator tx;
     private final ObjectMapper json;
 
@@ -61,6 +66,7 @@ public class FlagTargetingService {
         OrgAccessService access,
         AuditWriter audit,
         FlagChangePublisher publisher,
+        WebhookDispatcher dispatcher,
         TransactionalOperator tx,
         ObjectMapper json) {
         this.flags = flags;
@@ -69,6 +75,7 @@ public class FlagTargetingService {
         this.access = access;
         this.audit = audit;
         this.publisher = publisher;
+        this.dispatcher = dispatcher;
         this.tx = tx;
         this.json = json;
     }
@@ -233,8 +240,12 @@ public class FlagTargetingService {
         Mono<CommittedWrite> apply(UUID orgId, Flag flag, Environment env, FlagEnvConfig lockedHead);
     }
 
-    /** Result of a committed head write plus what the after-commit NOTIFY needs. */
-    private record CommittedWrite(EnvConfigResult result, UUID environmentId, String flagKey, long stateVersion) {
+    /**
+     * Result of a committed head write plus what the after-commit side effects need: the
+     * NOTIFY, and the webhook deliveries that were enqueued in the same transaction.
+     */
+    private record CommittedWrite(EnvConfigResult result, UUID environmentId, String flagKey,
+        long stateVersion, List<WebhookDelivery> deliveries) {
     }
 
     private record Resolved(UUID orgId, Flag flag, Environment env) {
@@ -277,8 +288,13 @@ public class FlagTargetingService {
                 .switchIfEmpty(Mono.error(new NotFoundException("Flag has no config in this environment")))
                 .flatMap(head -> mutation.apply(resolved.orgId(), resolved.flag(), resolved.env(), head))
                 .as(tx::transactional)
-                // AFTER commit: evict local snapshot + pg_notify, fire-and-forget.
-                .doOnNext(write -> publisher.publish(write.environmentId(), write.flagKey(), write.stateVersion()))
+                // AFTER commit: evict local snapshot + pg_notify, then attempt webhook
+                // delivery. Both fire-and-forget - the write has already committed, so
+                // neither can fail it, and an unreachable receiver is retried by the sweep.
+                .doOnNext(write -> {
+                    publisher.publish(write.environmentId(), write.flagKey(), write.stateVersion());
+                    dispatcher.deliverNow(write.deliveries());
+                })
                 .map(CommittedWrite::result));
     }
 
@@ -305,8 +321,32 @@ public class FlagTargetingService {
             .then(audit.insert(orgId, projectId, env.id(), flag.key(), auditAction, email,
                 reason, versionFrom, newHead.version(), diffJson))
             .then(flags.bumpStateVersion(env.id()))
-            .map(stateVersion -> new CommittedWrite(
-                new EnvConfigResult(env.key(), newHead), env.id(), flag.key(), stateVersion));
+            // Still inside the transaction: a transactional outbox, so an event cannot be
+            // lost by the process dying between this commit and the notification being
+            // recorded - which is exactly when someone most wants to know what changed.
+            .flatMap(stateVersion -> dispatcher.enqueue(WebhookEvent.of(
+                    webhookEventType(auditAction), orgId, projectId, env.id(),
+                    null, env.key(), flag.key(), newHead.version(), email,
+                    auditAction + " on " + flag.key() + " in " + env.key()))
+                .map(deliveries -> new CommittedWrite(
+                    new EnvConfigResult(env.key(), newHead), env.id(), flag.key(),
+                    stateVersion, deliveries)));
+    }
+
+    /**
+     * Audit action to webhook event type. Kill switches and rollbacks get their own types
+     * rather than collapsing into flag.updated, because operators routinely want to alert on
+     * those two alone - a kill switch is an incident signal, an ordinary ramp is not.
+     *
+     * <p>An AI apply and an approved change request both surface as flag.updated: what
+     * changed is the same thing, and who authorised it is already in the audit trail.
+     */
+    private static WebhookEventType webhookEventType(String auditAction) {
+        return switch (auditAction) {
+            case "KILL_SWITCH_ON", "KILL_SWITCH_OFF" -> WebhookEventType.FLAG_KILL_SWITCH;
+            case "ROLLBACK" -> WebhookEventType.FLAG_ROLLBACK;
+            default -> WebhookEventType.FLAG_UPDATED;
+        };
     }
 
     private Mono<Environment> environmentByKey(UUID projectId, String envKey) {

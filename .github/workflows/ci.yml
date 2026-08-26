@@ -266,7 +266,7 @@ jobs:
           npm ci --prefix mcp && npm run build --prefix mcp
 
       # Every one of the seven, each on its own line so the failing one is named in the UI.
-      - name: smoke-test (34)
+      - name: smoke-test (44)
         run: node scripts/smoke-test.mjs
       - name: sdk live-check (32)
         run: node sdk/typescript/scripts/live-check.mjs

@@ -455,7 +455,8 @@ public class RolloutMonitorService {
                             : Mono.<Void>empty())
                         .thenReturn(1)))
             .flatMap(created -> webhook.notify(
-                    candidate.orgId(), "anomaly", candidate.flag().key(), candidate.envKey(), summary)
+                    candidate.orgId(), candidate.projectId(), candidate.environmentId(),
+                    "anomaly", candidate.flag().key(), candidate.envKey(), summary)
                 .thenReturn(created));
     }
 
@@ -531,8 +532,8 @@ public class RolloutMonitorService {
                         ? autoApply(candidate, saved, rationale).thenReturn(1)
                         : Mono.just(1)))
             .flatMap(created -> webhook.notify(
-                    candidate.orgId(), "optimization", candidate.flag().key(),
-                    candidate.envKey(), rationale)
+                    candidate.orgId(), candidate.projectId(), candidate.environmentId(),
+                    "optimization", candidate.flag().key(), candidate.envKey(), rationale)
                 .thenReturn(created));
     }
 
@@ -607,7 +608,8 @@ public class RolloutMonitorService {
                     AnomalyStatus.OPEN, null, null, AnomalyKind.SRM, statistics),
                 dedupeKey)
             .flatMap(saved -> webhook.notify(
-                    candidate.orgId(), "srm", candidate.flag().key(), candidate.envKey(), summary)
+                    candidate.orgId(), candidate.projectId(), candidate.environmentId(),
+                    "srm", candidate.flag().key(), candidate.envKey(), summary)
                 .thenReturn(1))
             .defaultIfEmpty(0);
     }

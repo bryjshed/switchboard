@@ -427,6 +427,47 @@ target `switchboard_load` on the same Postgres instance.
 
 ---
 
+## Webhooks
+
+**Deliveries are a transactional outbox.** The `webhook_deliveries` row is inserted in the SAME
+transaction as the flag write that caused it; delivery is attempted after commit. Enqueueing
+after commit instead is simpler and loses events whenever the process dies in that window —
+which is precisely the moment an operator most wants to know what changed. The cost is one
+INSERT per matching webhook inside a flag mutation, and flag mutations are human-paced.
+
+**The signature's timestamp is inside the MAC, not merely alongside it.** Signing the body alone
+produces a token that stays valid forever: anyone who observes one delivery can replay it
+indefinitely, and a replayed "kill switch released" is a real incident rather than a curiosity.
+The header is Stripe's shape (`t=…,v1=…`) because that is the one receivers already have library
+code for, and `v1` is a version prefix so a future scheme can be sent alongside during a
+migration rather than breaking every consumer at once.
+
+**An empty event-type filter means every event, not none.** The opposite reading would make a
+newly created webhook silently deliver nothing, which reads as a broken integration rather than
+as a filter nobody set. Resource filters (project, environment) only ever narrow.
+
+**A 4xx from a receiver is retried, not abandoned.** A receiver answering 404 or 401 is usually
+mid-deploy or mid-rotation rather than permanently wrong, and the six-attempt ceiling already
+bounds the cost of being wrong about that.
+
+**URL validation is validation, not an SSRF control**, and the distinction is easy to mistake.
+Blocking private address ranges would break every self-hosted deployment whose receiver is on
+the same network — which is most of them — and would not work anyway, since a DNS name resolving
+to a private address passes any check made here. A deployment that needs egress restrictions
+imposes them at the network layer, where they can actually be enforced.
+
+**The signing secret is stored as issued, unlike an SDK key or a PAT.** Those are one-way hashes
+because the server only ever needs to *check* them. HMAC needs the key itself, so there is no
+digest that would do. It is returned once, at creation, and never listed.
+
+**The old `org.<id>.notifications.webhook` setting was migrated, not dropped.** V8 turns any
+configured URL into a real webhook row subscribed to `rollout.finding`, so an org that relied on
+it keeps receiving notifications — now signed and retried. Existing receivers start getting a
+signature header they were not previously sent, which is additive: an unverified receiver
+ignores it.
+
+---
+
 ## Deployment
 
 **Dashboard configuration is resolved at runtime, not at build time.** Vite folds every

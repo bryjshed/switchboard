@@ -9,7 +9,7 @@ against the architecture as it stands.
 
 **Status of the product today.** Evaluation core (528, shared by the server and the Java SDK), backend (114 unit + 111 integration), TypeScript SDK (562), Java SDK (509 + a live check), MCP server (7), web dashboard (337),
 an evaluation spec with 507 conformance vectors executed by both the server and
-the SDK, and seven live-check scripts against a running stack.
+the SDK, and seven live-check scripts against a running stack, plus the Java SDK's live check.
 
 **The Expo mobile companion was deleted on 2026-08-24** — see
 [DECISIONS.md](DECISIONS.md#product-scope). Nothing below carries a mobile implementation cost, and
@@ -358,9 +358,35 @@ permission bug to live, and it would only ever be exercised by whoever used a to
 RBAC that already exists is checked on every request. To narrow a token, create a user with a
 narrower role and mint it as them. Tokens are personal: somebody else's reads as 404, not 403.
 
-### Signed webhooks · effort **S**
-No general flag-change webhook exists (the AI layer has a narrow notification hook). Needs
-HMAC-SHA256 signing, resource filtering, and delivery retries. Everyone has this.
+### ~~Signed webhooks~~ · **Landed 2026-08-25**
+HMAC-SHA256 signing, resource filtering (by event type, project and environment), and delivery
+retries with exponential backoff. `V8` adds `webhooks` and `webhook_deliveries`.
+
+**Generalised rather than duplicated.** The AI layer's narrow notification hook — one unsigned
+URL per org in `app_settings`, no retries, findings only — is now a thin adapter onto the same
+dispatcher, and V8 migrates any configured URL into a real webhook row. There is one delivery
+path to reason about instead of two, and orgs that had a URL keep receiving notifications.
+
+Three things worth knowing before changing any of it:
+
+- **Deliveries are a transactional outbox.** The row is written in the *same transaction* as the
+  flag write, and delivery is attempted after commit. Enqueueing after commit instead would lose
+  events whenever the process died in the window between — which is exactly the moment somebody
+  most wants to know what changed.
+- **The timestamp is inside the signed material**, not merely sent alongside it. Signing the body
+  alone yields a token valid forever, and for a flag system a replayed "kill switch released" is
+  a real incident. Pinned by a test that re-dates a captured delivery and asserts it fails.
+- **An empty event-type filter means everything, not nothing.** The opposite reading would make
+  a newly created webhook deliver nothing, which reads as a broken integration rather than as a
+  filter nobody set.
+
+Verified: 17 unit tests, 9 integration tests against a real receiver, and 10 assertions in
+`smoke-test.mjs` — the last of which **verify the signature in Node**, because the server signs
+in Java and a receiver is whatever language the customer writes. A Java-only test would only
+prove the signer agrees with itself.
+
+Not built: a dashboard UI for managing them (the API is complete and the MCP server reaches it),
+and no `ping`/test-delivery button. **S**
 
 ---
 
@@ -559,7 +585,9 @@ the reasons held.
    reason that only showed up afterwards: it produced the evidence for item 9 below (the
    uncached dashboard list is the slowest path in the product by 10×), and it found the actual
    scaling wall — the serial rollout scan — which was not on this list at all.
-8. **Signed webhooks.** The cheapest remaining thing everyone else has. **S**
+8. ~~**Signed webhooks.**~~ **Done 2026-08-25** — see §4. Generalising the AI layer's hook
+   rather than adding a second delivery path was the right call and cost nothing extra: the
+   migration carries existing subscribers forward.
 9. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
 10. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Deliberately deferred through the
     contract churn in the client-keys and operators work; that churn has now settled, so the
