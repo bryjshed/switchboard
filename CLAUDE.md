@@ -156,6 +156,30 @@ job configures the second OIDC provider up front so auth-check's OIDC leg actual
 real. If you change a check script, a port, or a seed default, that workflow is the other
 place it has to be true.
 
+### Performance harnesses
+
+Not part of the pass/fail net — they measure rather than assert, and they are **not** in CI.
+
+```bash
+node scripts/load-test.mjs   --base http://localhost:28090 --flags 50 --rate 500 --workers 3
+node scripts/load-volume.mjs --db switchboard_load --events 2000000 --job-token <token>
+```
+
+Numbers, method and caveats live in `docs/PERFORMANCE.md`. Four things will bite you here:
+
+- **Benchmark `java -jar`, not `make backend`.** `spring-boot:run` passes
+  `-XX:TieredStopAtLevel=1`, which caps the JIT at C1 — the server works fine and is
+  permanently slower than a deployment, so dev-loop numbers are not production numbers.
+- **Run against a separate database.** These generate millions of event rows; in the dev
+  database they outlive the run and skew everything measured afterwards. Both scripts default
+  to `switchboard_load`.
+- **Turn the rate limiter off** (`--switchboard.ratelimit.enabled=false`). The default is
+  6,000/min = **100 req/s per credential**, so a load test against one SDK key measures the
+  limiter, not the server.
+- **The monitor measures from the allocation epoch**, so `load-volume.mjs` backdates
+  `flag_env_config_versions.created_at`. Without that the scan reports `itemsScanned=0`
+  against completely full tables.
+
 ### Tight loops
 
 Do not run the full suite to check one thing. These are verified working:

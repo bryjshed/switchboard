@@ -244,11 +244,19 @@ covers it without a second protocol implementation.
 `load()`. This matches the conventions of the author's other admin dashboard; consistency
 across the two was worth more than the library. Do not introduce it for one page.
 
-**Caching goes through Spring's cache abstraction**, Caffeine now and Redis later by
-configuration. Redis is deliberately *not* on the near-term list: Caffeine is correct for one
-instance and `NOTIFY` already invalidates every instance, so correctness does not require a
-shared store. Build the seam, choose the provider when the deployment shape justifies it.
-Full design in [REMAINING-WORK.md](REMAINING-WORK.md).
+**Caching goes through the `CacheRegistry` / `SwitchboardCache` seam, which uses no proxies
+at all** — Caffeine now and Redis later by configuration. This entry used to say "Spring's
+cache abstraction"; that was the plan and it was **reversed during implementation**, because
+Spring's abstraction is synchronous and `@Cacheable` on a `Mono`-returning method caches the
+cold publisher rather than the value — it appears to work while doing nothing. The intent
+survived intact (one seam, provider by `switchboard.cache.provider`, TTLs declared centrally,
+a typed facade); only the mechanism changed. Names are a `CacheName` enum so a typo is a
+compile error, and keys are Strings so they survive the `NOTIFY` invalidation channel.
+
+Redis is deliberately *not* on the near-term list: Caffeine is correct for one instance and
+`NOTIFY` already invalidates every instance, so correctness does not require a shared store.
+Build the seam, choose the provider when the deployment shape justifies it. Full design in
+[REMAINING-WORK.md](REMAINING-WORK.md).
 
 **Change propagation uses Postgres `NOTIFY`, not Redis pub/sub or a broker.** One fewer piece
 of infrastructure for a self-hoster to run, and Postgres is already a hard dependency.
@@ -282,6 +290,41 @@ by their own hour put conversions in buckets with no denominator, so every rate 
 `DynamicPropertiesContextCustomizer`'s identity is the set of annotated methods — the same
 inherited method for every subclass — so without it all test classes share one cached context
 and therefore one database, silently defeating fresh-database-per-class.
+
+---
+
+## Performance measurement
+
+**The load harness is open-loop by default, and that is not a style preference.** A closed-loop
+generator stops sending while the server is stalled, so the stall never enters the sample — it
+measures service time and calls it latency. Requests are scheduled at a fixed arrival rate and
+timed from when they were *due*. Closed-loop mode still exists, but only as a saturation probe,
+and its percentiles are labelled service time. Do not "simplify" the harness back to
+concurrency-only; that would silently delete the tail.
+
+**The generator measures its own noise floor rather than assuming it is zero.** The dispatcher
+wakes on a 1 ms timer, so queue delay and event-loop lag both have a floor near a millisecond
+against an infinitely fast server. The first version of the harness compared lag against zero
+and reported that every run above 500/s was "generator-bound" — the warning fired on the
+instrument, not the server. A calibration pass now runs the identical dispatch loop against a
+transport that resolves on the microtask queue, and warnings are raised against that measured
+floor. An instrument that cannot state its own error cannot support a published percentile.
+
+**Benchmark the packaged jar, never `make backend`.** `mvnw spring-boot:run` passes
+`-XX:TieredStopAtLevel=1`, capping the JIT at C1. That is right for a dev loop and wrong for a
+measurement, and it is invisible — the server works perfectly, just permanently slower than a
+deployment. `java -jar` is also the shape CI's `containers` job runs.
+
+**Reported throughput is a floor, not a ceiling.** The 28k eval/s figure was taken with the
+generator and the JVM sharing ten cores, and the harness reported itself lag-bound at that
+rate. Quoting it as the server's maximum would be exactly the kind of number
+[competitive-gaps.md](competitive-gaps.md#latency) criticises the rest of the market for. It is
+recorded as "at least this, on this rig".
+
+**Load runs use their own database, not the dev one.** Millions of generated event rows in the
+development database would outlive the run and quietly change every later measurement — and
+`CLAUDE.md` already notes that dev-database accumulation is a recurring nuisance. The harnesses
+target `switchboard_load` on the same Postgres instance.
 
 ---
 

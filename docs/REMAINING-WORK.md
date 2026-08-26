@@ -192,6 +192,13 @@ this is a denial-of-service vector as much as a performance one. **S**
 deliberately last: they are human-paced, and a stale flag list is a worse trade than a fast one.
 The only item in this subsection not done. **S**
 
+**Measured 2026-08-25, and it moves this item up.** `GET /projects/{id}/flags` is the slowest
+path in the product: p50 2.87 ms, **p99 73.8 ms**, against 4–8 ms at p99 for everything served
+through the cache seam — an order of magnitude, and it is the page every session opens on. The
+"human-paced" argument for deferring it stands; the "it is probably fine" half of it does not.
+See [PERFORMANCE.md](PERFORMANCE.md#latency). The TTL still has to be justified rather than
+picked: staleness here is a flag list that disagrees with what is live.
+
 ### The architecture — as built, and where it departed from this plan
 
 **The original decision here was "go through Spring's cache abstraction". It was reversed
@@ -460,8 +467,30 @@ Most of this landed on 2026-08-25. What is left is the part that needs traffic r
   (`switchboard.events.retention-months`, default 3) rather than a constant, documented as
   destructive-on-lowering, and clamped at one month because the current month's partition is the
   one being written to. It still has not run against real volume — that is the part below.
-- **No load or performance testing.** Every latency claim in the docs is untested, retention
-  included. Worth knowing: no vendor publishes p50/p95/p99 for flag delivery either. **M**
+- ~~**No load or performance testing.**~~ **Done 2026-08-25.** Two harnesses —
+  `scripts/load-test.mjs` (request rate) and `scripts/load-volume.mjs` (data size) — and
+  [PERFORMANCE.md](PERFORMANCE.md), which states the rig and the instrument's own error so the
+  numbers are falsifiable rather than merely quoted. Headline: every cache-served path is
+  **sub-millisecond at p50** and single-digit at p99; ≥28k eval/s sustained. Four things the
+  measurement changed:
+  - **The two uncached database paths are an order of magnitude slower than everything else** —
+    the dashboard flag list (p99 **73.8 ms**) and telemetry ingest (p99 **62.1 ms**) against
+    4–8 ms for everything served from the cache seam. That is the evidence §3's last open item
+    was missing.
+  - **Retention's partition-drop design is confirmed.** `DROP TABLE` on an 828k-row, 91 MB
+    partition took **259 ms** and beat a row-wise `DELETE` of *less* data by 4×; the whole
+    `partition-roll` job ran in 54 ms. Flat in row count, as claimed.
+  - **The rollout scan is the first wall.** The aggregation costs 2.0–5.6 s *per flag* at 2.4 M
+    events, and `RolloutMonitorService` iterates candidates with `concatMap` — serially. One
+    rollout measured **5,884 ms**; fifty would be ~5 minutes a scan. Not user-facing (it is
+    cached and backgrounded) but it arrives before anything else does.
+  - **Postgres' default `work_mem` (4 MB) roughly doubles that query** by spilling a 31 MB sort
+    to disk. Raising it is the cheapest performance win in the system and is a config change.
+
+  Two honest caveats, both in the document: the throughput figure is **rig-bound, not
+  server-bound** (the generator and the JVM shared 10 cores), and the rate limiter's default of
+  6,000/min is **100 req/s per credential** — a single SDK key shared by a server fleet hits
+  that long before it hits anything measured here.
 - **No monitoring or alerting.** `/actuator/prometheus` exposes the meters; nothing scrapes them
   and no alert is defined on them. Backup/restore is documented but has never been rehearsed. **M**
 - **Hosting.** The compose file is a single node by construction. The order in which that stops
@@ -505,11 +534,11 @@ the reasons held.
 
 ### What is actually next
 
-7. **Load and performance testing.** Now the largest untested claim in the repo, and it has been
-   promoted above the enterprise cluster on purpose: every latency number in the docs is
-   unmeasured, retention has never run against real volume, and the caches added in 3 were sized
-   by argument rather than by load. Worth knowing that no vendor publishes p50/p95/p99 for flag
-   delivery either — the bar is internal honesty, not a public benchmark. **M**
+7. ~~**Load and performance testing.**~~ **Done 2026-08-25** — see §6 and
+   [PERFORMANCE.md](PERFORMANCE.md). Promoting it above the enterprise cluster was right for a
+   reason that only showed up afterwards: it produced the evidence for item 9 below (the
+   uncached dashboard list is the slowest path in the product by 10×), and it found the actual
+   scaling wall — the serial rollout scan — which was not on this list at all.
 8. **Signed webhooks.** The cheapest remaining thing everyone else has. **S**
 9. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
 10. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Deliberately deferred through the
