@@ -169,7 +169,7 @@ jobs:
       # only thing this can catch - and the only place the SDK can still disagree with the
       # server - is the wire-format mapping.
       - name: Java SDK runner (vectors through the wire format)
-        run: ./mvnw -B -pl sdk/java -am test -Dtest=ConformanceThroughSdkTest -Dcheckstyle.skip
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=ConformanceThroughSdkTest -Dcheckstyle.skip -Dsurefire.failIfNoSpecifiedTests=false
 
       - run: npm ci
         working-directory: sdk/typescript
@@ -286,7 +286,7 @@ jobs:
       # different code on each side, which is what makes the agreement worth asserting - and
       # it is how the empty-rollout wire-format bug was found.
       - name: java sdk live-check (local vs server agreement)
-        run: ./mvnw -B -pl sdk/java -am test -Dtest=LiveCheckIT -Dcheckstyle.skip
+        run: ./mvnw -B -pl sdk/java -am test -Dtest=LiveCheckIT -Dcheckstyle.skip -Dsurefire.failIfNoSpecifiedTests=false
 
       # The backend log is the only place a 500 explains itself; without this a live failure
       # in CI is a status code and nothing else.
@@ -316,7 +316,7 @@ jobs:
 
       - name: Build images
         run: |
-          docker build -t switchboard-backend:ci backend
+          docker build -t switchboard-backend:ci -f backend/Dockerfile .
           docker build -t switchboard-dashboard:ci dashboard
 
       # The production compose file, brought up for real. This is what catches the class of

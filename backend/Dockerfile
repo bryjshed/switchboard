@@ -3,9 +3,12 @@
 # Two stages: a JDK to build, a JRE to run. The runtime image has no Maven, no source and no
 # compiler -- a build toolchain in production is attack surface that earns nothing.
 #
-# Build from the REPOSITORY ROOT is not required; this file is self-contained under backend/:
+# BUILD FROM THE REPOSITORY ROOT. This used to be self-contained under backend/, and stopped
+# being so when the flag evaluation core was extracted into the sibling `evaluation/` module that
+# the backend now compiles against - a backend-only context cannot see it and the build fails
+# resolving com.switchboard:switchboard-evaluation.
 #
-#     docker build -t switchboard-backend backend
+#     docker build -t switchboard-backend -f backend/Dockerfile .
 #
 # NOTE what is deliberately absent: FIREBASE_AUTH_EMULATOR_HOST. Locally it is mandatory (see
 # CLAUDE.md -- without it the Admin SDK rejects every emulator login). In a production image it
@@ -19,9 +22,19 @@ FROM eclipse-temurin:25-jdk AS build
 
 WORKDIR /build
 
+# The root aggregator plus BOTH modules. Copying only backend/ is what broke when the evaluator
+# moved; the reactor needs the sibling to resolve the dependency from source rather than from a
+# repository that has never seen a published snapshot.
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-COPY src/ src/
+COPY evaluation/ evaluation/
+COPY backend/ backend/
+# The SDK's POM ONLY, with no sources. Maven insists every module the root aggregator declares
+# exists before it will read the reactor at all, even when -pl selects a subset - so omitting
+# this fails with "Child module /build/sdk/java does not exist". Copying just the POM satisfies
+# that without pulling SDK sources into the image build or letting an SDK edit invalidate the
+# backend's layer cache.
+COPY sdk/java/pom.xml sdk/java/
 
 # The BuildKit cache mount is what keeps the dependency download off the critical path, rather
 # than the usual `dependency:go-offline` layer trick -- that resolves an incomplete set for a
@@ -29,13 +42,14 @@ COPY src/ src/
 # much else. The mount survives across builds and is not baked into the image.
 # Tests are the CI job's business, not the image build's. Building the image is not the place to
 # discover a failing test, and Testcontainers cannot run here anyway.
-RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -DskipTests -Dcheckstyle.skip package
+# -pl backend -am: build the backend and the modules it needs, and nothing else.
+RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -q -pl backend -am -DskipTests -Dcheckstyle.skip package
 
 # Split the fat jar into layers that change at different rates: third-party dependencies almost
 # never, application classes on every commit. Without this every deploy re-pushes ~75 MB of
 # unchanged libraries.
 RUN mkdir -p /build/extracted \
-    && java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination /build/extracted
+    && java -Djarmode=tools -jar backend/target/*.jar extract --layers --launcher --destination /build/extracted
 
 # ---------------------------------------------------------------------------------------------
 # Stage 2 - runtime

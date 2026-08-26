@@ -90,6 +90,10 @@ The one exception is **`VITE_AUTH_PROVIDER`, which is a build argument**:
 
 ```bash
 docker build --build-arg VITE_AUTH_PROVIDER=oidc -t switchboard-dashboard:oidc dashboard
+
+# The BACKEND image builds from the REPOSITORY ROOT, not from backend/. It compiles against the
+# sibling evaluation/ module, which a backend-only context cannot see:
+docker build -t switchboard-backend -f backend/Dockerfile .
 ```
 
 `src/auth/index.ts` places its two dynamic imports either side of a literal comparison, so the

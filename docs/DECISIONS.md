@@ -272,6 +272,13 @@ SDK depends on `switchboard-evaluation` alone — so the split is never observab
 If someone ever needs the module path, the fix is the package rename that was skipped, and it is
 mechanical.
 
+**The backend image builds from the repository root.** It used to be self-contained under
+`backend/`, and stopped being so the moment the evaluator became a sibling module: a
+backend-only context cannot resolve `switchboard-evaluation`. The Dockerfile also copies
+`sdk/java/pom.xml` with no sources, because Maven refuses to read the reactor at all unless
+every module the aggregator declares exists — even when `-pl` selects a subset. CI missed this
+locally because nothing here builds the production image by hand; the `containers` job caught it.
+
 **The root `pom.xml` aggregates but does not parent.** The backend inherits from
 `spring-boot-starter-parent` for dependency management, and the evaluation module must inherit
 nothing at all — an SDK consumer should not be handed Spring's BOM through a parent POM.
