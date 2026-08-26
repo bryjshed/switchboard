@@ -510,6 +510,36 @@ target `switchboard_load` on the same Postgres instance.
 
 ---
 
+## Environments
+
+**Creating an environment backfills a configuration for every existing flag.** Creating a FLAG
+had always seeded a config in every existing environment; creating an environment did not do the
+reverse, so a new one began with no flag configurations at all. The symptom is worse than it
+sounds: every flag evaluated there to the caller's default with reason `SDK_DEFAULT`, which is
+**indistinguishable from a flag that does not exist**. Somebody adds `staging-eu`, points an SDK
+at it, and every flag in the product silently serves its fallback.
+
+Seeded exactly as flag creation seeds a new flag - disabled, serving the default variation,
+version 1 - through the shared `TargetingConfig.initialFor`, so the two paths cannot drift. All
+in one transaction: a half-backfilled environment, some flags configured and others silently
+serving defaults, is the one outcome worse than either extreme.
+
+**The flag list is drained before seeding starts, but not for the reason it first appeared.**
+The backfill was written that way after a hang that looked like connection starvation inside the
+transaction. It was not: the hang was a `NoSuchMethodError` for the newly added
+`TargetingConfig.initialFor`, because a single-module build had resolved `switchboard-evaluation`
+from `~/.m2` instead of the reactor - the trap documented under *Build* below, hit again by the
+person who wrote the warning. Streaming the flag list was then measured and works fine. The
+buffer stays because a write per row against an open result set on a pinned connection is driver
+behaviour rather than a guarantee, and a project's flag list is small - but it prevents nothing
+that was ever observed, and anyone removing it should not expect a deadlock.
+
+**There is still no rename, archive or delete**, so an environment created by mistake is
+permanent and appears in every environment picker from then on. The dashboard's create dialog
+says so rather than letting someone find out; see REMAINING-WORK §5.
+
+---
+
 ## Metric definitions
 
 **A metric declares which way is good, and both questions are asked of it.** The monitor used to

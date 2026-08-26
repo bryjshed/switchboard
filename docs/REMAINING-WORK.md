@@ -478,8 +478,21 @@ wants ten environments can have ten today.
 
 What breaks at that scale is everything around them:
 
-- **Environments can only be created and listed.** There is no rename, no delete, no
-  archive. One created by mistake, or one belonging to a decommissioned region, is permanent
+- ~~**Environments could not be created from the dashboard at all.**~~ **Fixed 2026-08-26.**
+  `POST /api/projects/{id}/environments` existed from the start and nothing in the dashboard
+  called it, so the only way to add a fourth environment was curl — a strange thing to be true
+  of a management dashboard. Settings → Environments now does it.
+
+  **It also uncovered a defect that would have bitten everyone who used the new button.**
+  Creating an environment inserted only the environment row: creating a *flag* seeded a config
+  in every existing environment, but not the reverse. So a new environment had no flag
+  configurations, and every flag evaluated there to the caller's default with reason
+  `SDK_DEFAULT` — indistinguishable from a flag that does not exist. Now backfilled in the same
+  transaction, seeded exactly as flag creation seeds a flag.
+
+- **There is still no rename, no delete, no archive.** An environment created by mistake is
+  permanent and will appear in every environment picker and on every flag detail page forever.
+  The create dialog warns about this rather than letting someone find out. **S** One created by mistake, or one belonging to a decommissioned region, is permanent
   and will appear in every environment picker and on every flag detail page forever. This is
   incomplete CRUD on a shipped feature and the sharpest edge here.
 - **Only three environments have a visual identity.** `envColors.ts` maps `dev`, `staging`

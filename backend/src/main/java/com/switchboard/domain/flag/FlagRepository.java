@@ -53,4 +53,13 @@ public interface FlagRepository {
 
     /** Head configs of every non-archived flag in the project (segment reference checks). */
     Flux<TargetingConfig> findHeadConfigsByProject(UUID projectId);
+
+    /**
+     * Every non-archived flag in the project, with its variations.
+     *
+     * <p>Exists for backfilling a newly created environment. Deliberately unpaginated: a
+     * partial backfill would leave some flags configured in the new environment and others
+     * silently evaluating to the caller's default, which is worse than either extreme.
+     */
+    Flux<Flag> findAllByProject(UUID projectId);
 }

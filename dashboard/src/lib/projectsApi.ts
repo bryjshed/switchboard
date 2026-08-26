@@ -1,5 +1,12 @@
 import { apiGet, apiPost } from './apiClient'
-import type { Project, SdkKey, SdkKeyCreateRequest, SdkKeyCreated } from '@/types/api'
+import type {
+  Environment,
+  EnvironmentCreateRequest,
+  Project,
+  SdkKey,
+  SdkKeyCreateRequest,
+  SdkKeyCreated,
+} from '@/types/api'
 import { apiDelete } from './apiClient'
 
 export function listProjects(orgId: string): Promise<Project[]> {
@@ -25,4 +32,23 @@ export function createSdkKey(envId: string, body: SdkKeyCreateRequest): Promise<
 
 export function revokeSdkKey(keyId: string): Promise<void> {
   return apiDelete(`/api/sdk-keys/${encodeURIComponent(keyId)}`)
+}
+
+/**
+ * Creates an environment.
+ *
+ * A project is seeded with dev / staging / production, but nothing limits it to those - the
+ * schema has no cap and neither does the API. This existed on the backend from the start and
+ * had no caller in the dashboard, so the only way to add a fourth environment was curl.
+ *
+ * Needs MANAGE_ENVIRONMENTS; the server refuses otherwise.
+ */
+export function createEnvironment(
+  projectId: string,
+  body: EnvironmentCreateRequest,
+): Promise<Environment> {
+  return apiPost<Environment>(
+    `/api/projects/${encodeURIComponent(projectId)}/environments`,
+    body,
+  )
 }

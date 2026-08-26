@@ -353,6 +353,18 @@ public class FlagRepositoryAdapter implements FlagRepository {
             .all();
     }
 
+    @Override
+    public Flux<Flag> findAllByProject(UUID projectId) {
+        return db.sql("""
+                SELECT * FROM flags
+                WHERE project_id = :projectId AND archived_at IS NULL
+                ORDER BY key
+                """)
+            .bind("projectId", projectId)
+            .map(this::mapFlag)
+            .all();
+    }
+
     // ---------------------------------------------------------------- mapping
 
     private Flag mapFlag(Readable row) {
