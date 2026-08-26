@@ -641,11 +641,11 @@ the reasons held.
    silently narrowed.
 10. ~~**Audit export + configurable retention.**~~ **Done 2026-08-25** — see §5.
 
-### What is actually next now
+### What was next, and is now done
 
 11. **Java SDK follow-ons** — telemetry (event batching, which is what feeds the healing and
     optimizing loops) and local persistence of the last-known payload, for parity with the
-    TypeScript SDK. Both additive. **S–M**
+    TypeScript SDK. Both additive. **S–M** — *the only item in this block still open.*
 12. ~~**The rollout scan's serial aggregation**~~ **Done 2026-08-26.** Measured at eight flags
     carrying ~500 k events each: **40.8 s → 19.2 s**, a 2.1× on the full scan, by measuring four
     candidates at once instead of one. `flatMapSequential` rather than `flatMap` because
@@ -732,3 +732,23 @@ the reasons held.
     Still open for the rest of this section: an experiment entity, holdouts, layers and mutual
     exclusion. The SRM gate from item 1 and metric definitions are the two pieces that exist.
     **M–L**
+
+### What is actually next now
+
+17. **Java SDK telemetry and local persistence** (item 11 above), the last of that block.
+    Telemetry matters more than it sounds: event batching is what feeds the healing and
+    optimizing loops, so a Java shop currently gets local evaluation but contributes nothing
+    back to the monitor. **S–M**
+18. **Incremental rollups for the rollout aggregation.** Item 12 divided the scan's cost by
+    measuring four candidates at once; rollups would change its order. Still the real fix, and
+    now the largest remaining scaling item. **M**
+19. **Experimentation past metric definitions** — an experiment entity, holdouts, layers,
+    mutual exclusion. Item 16 built the prerequisite. **M–L**
+20. **SCIM `/Groups`**, if a buyer asks. Users-only provisioning ships; group-to-role mapping
+    needs a decision about how it interacts with permissions unioning across scopes. **S–M**
+21. The **§5 long tail**: prompt registry, LLM metrics, prerequisite flags, scheduled changes,
+    bulk targeting/CSV, code-references scanner, Terraform provider, CLI, evaluation explainer,
+    OpenTelemetry, Slack app.
+
+Plus §1's two items, which still need a human rather than an agent: an `ANTHROPIC_API_KEY` (the
+prompt-to-diff-to-apply loop has never executed) and a visual pass in light and dark.
