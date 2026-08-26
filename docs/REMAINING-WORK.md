@@ -635,9 +635,26 @@ the reasons held.
 8. ~~**Signed webhooks.**~~ **Done 2026-08-25** — see §4. Generalising the AI layer's hook
    rather than adding a second delivery path was the right call and cost nothing extra: the
    migration carries existing subscribers forward.
-9. **Approvals-adjacent enterprise cluster** (SSO/SCIM, audit export) once a buyer asks.
-10. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.** Deliberately deferred through the
-    contract churn in the client-keys and operators work; that churn has now settled, so the
-    reason for waiting is spent.
-11. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
+9. ~~**Dashboard list caching.**~~ **Done 2026-08-25** — see §3. The item 7 measurements are what
+   moved this up: the flag list was the slowest path in the product, and it is now ~15× faster at
+   p99. Audit was dropped from it deliberately, with the reasoning recorded rather than the item
+   silently narrowed.
+10. ~~**Audit export + configurable retention.**~~ **Done 2026-08-25** — see §5.
+
+### What is actually next now
+
+11. **Java SDK follow-ons** — telemetry (event batching, which is what feeds the healing and
+    optimizing loops) and local persistence of the last-known payload, for parity with the
+    TypeScript SDK. Both additive. **S–M**
+12. **The rollout scan's serial aggregation**, which item 7 found and nothing had listed: 2.0–5.6 s
+    per flag at 2.4 M events, iterated with `concatMap`, so fifty live rollouts is ~5 minutes a
+    scan. Raising Postgres' `work_mem` roughly halves the query and is a config change; the real
+    fix is incremental rollups. **S** then **M**
+13. **A dashboard UI for webhooks.** The API and the MCP server reach them; the dashboard does
+    not. **S**
+14. **The enterprise cluster** (SSO/SAML, SCIM) once a buyer asks.
+15. **`AiProposal` / `ChangeRequest` convergence, steps 2–3.**
+    Deliberately deferred through the contract churn in the client-keys and operators work; that
+    churn has now settled, so the reason for waiting is spent.
+16. **Experimentation as a product**, if the market pull is real. The SRM gate built in 1 is the
     first piece of it and was not planned as such.
