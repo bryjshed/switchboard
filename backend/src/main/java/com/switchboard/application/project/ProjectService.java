@@ -1,8 +1,11 @@
 package com.switchboard.application.project;
 
+import com.switchboard.application.audit.AuditWriter;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
+import com.switchboard.domain.common.NotFoundException;
+import com.switchboard.domain.common.ValidationException;
 import com.switchboard.domain.project.Environment;
 import com.switchboard.domain.flag.Flag;
 import com.switchboard.domain.flag.FlagEnvConfig;
@@ -37,20 +40,24 @@ public class ProjectService {
     private final OrgAccessService access;
     private final MetricDefinitionRepository metrics;
     private final FlagRepository flags;
+    private final AuditWriter audit;
     private final TransactionalOperator tx;
 
+    @SuppressWarnings("checkstyle:ParameterNumber")
     public ProjectService(
         ProjectRepository projects,
         EnvironmentRepository environments,
         OrgAccessService access,
         TransactionalOperator tx,
         MetricDefinitionRepository metrics,
-        FlagRepository flags) {
+        FlagRepository flags,
+        AuditWriter audit) {
         this.projects = projects;
         this.environments = environments;
         this.access = access;
         this.metrics = metrics;
         this.flags = flags;
+        this.audit = audit;
         this.tx = tx;
     }
 
@@ -113,9 +120,10 @@ public class ProjectService {
      * <p>All in one transaction: a half-backfilled environment, where some flags are configured
      * and others silently serve defaults, is the one outcome worse than either extreme.
      */
-    public Mono<Environment> createEnvironment(UUID projectId, UUID userId, String key, String name) {
+    public Mono<Environment> createEnvironment(
+        UUID projectId, UUID userId, String email, String key, String name) {
         return access.requireProjectPermission(projectId, userId, Permission.MANAGE_ENVIRONMENTS)
-            .then(environments.create(projectId, key, name)
+            .flatMap(projectAccess -> environments.create(projectId, key, name)
                 // The flag list is drained before any seeding starts. Streaming it does work -
                 // that was measured, not assumed - but it means issuing a write per row against
                 // an open result set on the one connection the transaction has pinned, which is
@@ -126,11 +134,75 @@ public class ProjectService {
                     .collectList()
                     .flatMapMany(reactor.core.publisher.Flux::fromIterable)
                     .concatMap(flag -> seedFlag(flag, env.id()))
-                    .then()
+                    .then(audit.insert(projectAccess.orgId(), projectId, env.id(), null,
+                        "ENVIRONMENT_CREATE", email, env.key(), null, null, null))
                     .thenReturn(env))
                 .as(tx::transactional))
+            // The key stays reserved by an ARCHIVED environment too, so the likeliest cause of
+            // this 409 for anyone using the new lifecycle is a key they retired earlier.
             .onErrorMap(DataIntegrityViolationException.class,
-                e -> new ConflictException("An environment with that key already exists in this project"));
+                e -> new ConflictException("An environment with that key already exists in this "
+                    + "project, possibly an archived one - restore it instead of recreating it"));
+    }
+
+    /**
+     * Renames an environment, or archives and restores it.
+     *
+     * <p><b>The key is not renameable and that is deliberate.</b> It is what SDK keys, saved
+     * dashboard links, the OFREP surface and every audit row already recorded refer to; changing
+     * it would silently repoint all of them. The same rule the metric definitions follow - the
+     * display name is cosmetic, the key is an identifier that other people's data already holds.
+     *
+     * <p><b>Archiving does not stop evaluation.</b> An environment with live SDK keys must not go
+     * dark because somebody tidied the dashboard, so archiving hides it and freezes it against
+     * ordinary config writes while it keeps serving whatever is still pointed at it. The kill
+     * switch stays available for exactly that reason; see {@code FlagTargetingService}.
+     */
+    public Mono<Environment> updateEnvironment(
+        UUID environmentId, UUID userId, String email, String name, Boolean archived) {
+        return access.requireEnvironmentPermission(environmentId, userId, Permission.MANAGE_ENVIRONMENTS)
+            .flatMap(envAccess -> environments.findById(environmentId)
+                .switchIfEmpty(Mono.error(new NotFoundException("Environment not found")))
+                .flatMap(env -> {
+                    Mono<Environment> updated = Mono.just(env);
+                    if (name != null && !name.equals(env.name())) {
+                        updated = updated.then(environments.rename(environmentId, name))
+                            .flatMap(renamed -> audit.insert(
+                                    envAccess.orgId(), envAccess.projectId(), environmentId, null,
+                                    "ENVIRONMENT_RENAME", email,
+                                    env.name() + " -> " + name, null, null, null)
+                                .thenReturn(renamed));
+                    }
+                    if (archived == null || archived == env.archived()) {
+                        return updated;
+                    }
+                    return updated.then(archived
+                        ? archive(env, envAccess.orgId(), envAccess.projectId(), email)
+                        : restore(env, envAccess.orgId(), envAccess.projectId(), email));
+                })
+                .as(tx::transactional));
+    }
+
+    private Mono<Environment> archive(Environment env, UUID orgId, UUID projectId, String email) {
+        // A project with no active environments has nowhere to serve from and no way back
+        // through the UI, since the environment picker would be empty. Refusing the last one is
+        // cheaper than explaining the state it would leave behind.
+        return environments.countActive(projectId)
+            .flatMap(active -> active <= 1
+                ? Mono.error(new ValidationException(
+                    "This is the project's only active environment; create another before "
+                        + "archiving this one"))
+                : environments.setArchived(env.id(), true))
+            .flatMap(archived -> audit.insert(orgId, projectId, env.id(), null,
+                    "ENVIRONMENT_ARCHIVE", email, env.key(), null, null, null)
+                .thenReturn(archived));
+    }
+
+    private Mono<Environment> restore(Environment env, UUID orgId, UUID projectId, String email) {
+        return environments.setArchived(env.id(), false)
+            .flatMap(restored -> audit.insert(orgId, projectId, env.id(), null,
+                    "ENVIRONMENT_RESTORE", email, env.key(), null, null, null)
+                .thenReturn(restored));
     }
 
     /** One flag's v1 config in a brand-new environment: head, immutable snapshot, cursor bump. */

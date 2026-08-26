@@ -534,9 +534,38 @@ buffer stays because a write per row against an open result set on a pinned conn
 behaviour rather than a guarantee, and a project's flag list is small - but it prevents nothing
 that was ever observed, and anyone removing it should not expect a deadlock.
 
-**There is still no rename, archive or delete**, so an environment created by mistake is
-permanent and appears in every environment picker from then on. The dashboard's create dialog
-says so rather than letting someone find out; see REMAINING-WORK §5.
+**Environments are archived, never deleted.** Eight tables reference an environment, and two of
+them - `flag_env_config_versions` and the audit trail beside it - are the immutable history the
+whole product rests on. A hard delete would either destroy that record or orphan it, so there
+isn't one. Archiving is reversible; deleting the evidence of what an environment served would not
+be.
+
+**Archiving does NOT stop evaluation, and that is the surprising half.** An archived environment
+is hidden from every picker and frozen against ordinary config writes, but SDK keys pointed at it
+keep evaluating exactly as before. The alternative - archive as an off switch - means tidying the
+dashboard can take down an environment somebody's production traffic is still reading, silently,
+with no error anywhere. Archiving is a statement about the dashboard, not about traffic. Revoking
+the SDK keys is the separate, explicit act that stops it serving, and both the archive dialog and
+the archived list say so.
+
+**Which is exactly why the kill switch still works on an archived environment.** It is still
+serving, so it must still be stoppable. `FlagTargetingService.refuseIfArchived` lets
+`FLAG_KILL` through and refuses everything else - the same reasoning that already lets the kill
+switch bypass approval. An emergency path with preconditions is not an emergency path.
+
+**The key cannot be renamed; the display name can.** The key is what SDK keys, saved dashboard
+links, the OFREP surface and every audit row already written refer to. The same rule metric
+definitions follow. An archived environment also keeps its key reserved, so recreating it is a
+409 that points at restore rather than silently splitting that key's history across two rows.
+
+**The last active environment cannot be archived.** A project with an empty environment picker
+has no way back through the UI, and explaining that state costs more than refusing it.
+
+**Archived environments are still returned by every listing endpoint**, and still get a config
+seeded when a new flag is created. Both are deliberate: the dashboard needs them in order to
+offer a restore, and skipping the seeding would mean restoring an environment where every flag
+created in the meantime evaluates to `SDK_DEFAULT` - the exact defect the creation backfill
+fixed. The API reports what exists; the client decides what to show.
 
 ---
 

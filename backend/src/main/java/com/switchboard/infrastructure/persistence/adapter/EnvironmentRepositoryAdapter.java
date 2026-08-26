@@ -33,7 +33,8 @@ public class EnvironmentRepositoryAdapter implements EnvironmentRepository {
                 Boolean.TRUE.equals(row.get("allow_self_approval", Boolean.class)),
                 Boolean.TRUE.equals(row.get("require_approval_for_kill", Boolean.class)),
                 Boolean.TRUE.equals(row.get("allow_automation_bypass", Boolean.class))),
-            row.get("created_at", Instant.class));
+            row.get("created_at", Instant.class),
+            row.get("archived_at", Instant.class));
     }
 
     @Override
@@ -43,6 +44,34 @@ public class EnvironmentRepositoryAdapter implements EnvironmentRepository {
             .bind("key", key)
             .bind("name", name)
             .map(EnvironmentRepositoryAdapter::map)
+            .one();
+    }
+
+    @Override
+    public Mono<Environment> rename(UUID environmentId, String name) {
+        return db.sql("UPDATE environments SET name = :name WHERE id = :id RETURNING *")
+            .bind("id", environmentId)
+            .bind("name", name)
+            .map(EnvironmentRepositoryAdapter::map)
+            .one();
+    }
+
+    @Override
+    public Mono<Environment> setArchived(UUID environmentId, boolean archived) {
+        return db.sql("UPDATE environments SET archived_at = "
+                + (archived ? "now()" : "NULL")
+                + " WHERE id = :id RETURNING *")
+            .bind("id", environmentId)
+            .map(EnvironmentRepositoryAdapter::map)
+            .one();
+    }
+
+    @Override
+    public Mono<Long> countActive(UUID projectId) {
+        return db.sql("SELECT count(*) FROM environments "
+                + "WHERE project_id = :projectId AND archived_at IS NULL")
+            .bind("projectId", projectId)
+            .map(row -> row.get(0, Long.class))
             .one();
     }
 

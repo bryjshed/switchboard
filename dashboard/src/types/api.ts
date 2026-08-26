@@ -22,6 +22,7 @@ export type OrgSettingsUpdateRequest = Schemas['OrgSettingsUpdateRequest']
 export type Project = Schemas['ProjectResponse']
 export type Environment = Schemas['EnvironmentResponse']
 export type EnvironmentCreateRequest = Schemas['EnvironmentCreateRequest']
+export type EnvironmentUpdateRequest = Schemas['EnvironmentUpdateRequest']
 
 export type SdkKey = Schemas['SdkKeyResponse']
 export type SdkKeyCreated = Schemas['SdkKeyCreatedResponse']

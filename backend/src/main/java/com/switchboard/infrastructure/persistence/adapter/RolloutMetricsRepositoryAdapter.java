@@ -294,7 +294,10 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
                        ep.epoch_started_at
                 FROM flag_env_configs c
                 JOIN flags f ON f.id = c.flag_id AND f.archived_at IS NULL
-                JOIN environments e ON e.id = c.environment_id
+                -- An archived environment is frozen against ordinary config writes, so the
+                -- monitor could detect a bad rollout there and then fail to act on it. Not a
+                -- candidate.
+                JOIN environments e ON e.id = c.environment_id AND e.archived_at IS NULL
                 JOIN projects p ON p.id = f.project_id
                 LEFT JOIN epoch ep ON ep.flag_id = c.flag_id AND ep.environment_id = c.environment_id
                 """)
@@ -312,7 +315,7 @@ public class RolloutMetricsRepositoryAdapter implements RolloutMetricsRepository
                 FROM flags f
                 JOIN projects p ON p.id = f.project_id
                 JOIN flag_env_configs c ON c.flag_id = f.id
-                JOIN environments e ON e.id = c.environment_id
+                JOIN environments e ON e.id = c.environment_id AND e.archived_at IS NULL
                 WHERE f.archived_at IS NULL
                 GROUP BY p.org_id, p.id, f.key, f.name
                 """)

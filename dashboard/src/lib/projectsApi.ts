@@ -1,7 +1,8 @@
-import { apiGet, apiPost } from './apiClient'
+import { apiGet, apiPatch, apiPost } from './apiClient'
 import type {
   Environment,
   EnvironmentCreateRequest,
+  EnvironmentUpdateRequest,
   Project,
   SdkKey,
   SdkKeyCreateRequest,
@@ -51,4 +52,19 @@ export function createEnvironment(
     `/api/projects/${encodeURIComponent(projectId)}/environments`,
     body,
   )
+}
+
+/**
+ * Renames an environment, or archives / restores it.
+ *
+ * The key is deliberately not changeable - SDK keys, saved links and every audit row already
+ * recorded refer to it. Archiving hides an environment and freezes it against config edits, but
+ * it KEEPS SERVING: anything still holding one of its SDK keys evaluates as before, and the kill
+ * switch still works. That is why this is an archive and not a delete.
+ */
+export function updateEnvironment(
+  envId: string,
+  body: EnvironmentUpdateRequest,
+): Promise<Environment> {
+  return apiPatch<Environment>(`/api/environments/${encodeURIComponent(envId)}`, body)
 }

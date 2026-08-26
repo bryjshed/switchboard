@@ -132,9 +132,12 @@ export function SettingsPage() {
             <EnvironmentsTab
               projectId={project.id}
               projectName={project.name}
-              environments={environments}
+              // project.environments rather than the workspace's list: that one has archived
+              // environments filtered out for the picker, and this screen is where they are
+              // restored from.
+              environments={project.environments}
               canManage={canManageEnvironments}
-              onCreated={refresh}
+              onChanged={refresh}
             />
           ) : (
             <p className="text-sm text-muted-foreground">No project selected.</p>

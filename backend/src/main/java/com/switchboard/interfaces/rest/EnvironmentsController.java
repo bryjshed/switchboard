@@ -6,6 +6,7 @@ import com.switchboard.interfaces.rest.api.EnvironmentsApi;
 import com.switchboard.interfaces.rest.mapper.TopologyMappers;
 import com.switchboard.interfaces.rest.model.EnvironmentCreateRequest;
 import com.switchboard.interfaces.rest.model.EnvironmentResponse;
+import com.switchboard.interfaces.rest.model.EnvironmentUpdateRequest;
 import com.switchboard.interfaces.rest.model.SdkKeyCreateRequest;
 import com.switchboard.interfaces.rest.model.SdkKeyCreatedResponse;
 import com.switchboard.interfaces.rest.model.SdkKeyResponse;
@@ -36,7 +37,8 @@ public class EnvironmentsController implements EnvironmentsApi {
         return Principals.currentUser()
             .zipWith(environmentCreateRequest)
             .flatMap(t -> projectService.createEnvironment(
-                projectId, t.getT1().userId(), t.getT2().getKey(), t.getT2().getName()))
+                projectId, t.getT1().userId(), t.getT1().email(),
+                t.getT2().getKey(), t.getT2().getName()))
             .map(env -> ResponseEntity.status(HttpStatus.CREATED)
                 .body(TopologyMappers.toEnvironmentResponse(env)));
     }
@@ -48,6 +50,17 @@ public class EnvironmentsController implements EnvironmentsApi {
             .map(user -> ResponseEntity.ok(
                 projectService.listEnvironments(projectId, user.userId())
                     .map(TopologyMappers::toEnvironmentResponse)));
+    }
+
+    @Override
+    public Mono<ResponseEntity<EnvironmentResponse>> updateEnvironment(
+        UUID envId, Mono<EnvironmentUpdateRequest> environmentUpdateRequest, ServerWebExchange exchange) {
+        return Principals.currentUser()
+            .zipWith(environmentUpdateRequest)
+            .flatMap(t -> projectService.updateEnvironment(
+                envId, t.getT1().userId(), t.getT1().email(),
+                t.getT2().getName(), t.getT2().getArchived()))
+            .map(env -> ResponseEntity.ok(TopologyMappers.toEnvironmentResponse(env)));
     }
 
     @Override
