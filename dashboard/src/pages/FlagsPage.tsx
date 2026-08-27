@@ -119,7 +119,13 @@ export function FlagsPage() {
   // Column order for the per-environment chips: the project's environments, canonically
   // ordered, so every row lines up even when a flag lacks a summary for one of them.
   const envKeys = useMemo(
-    () => (project ? sortEnvKeys(project.environments, (e) => e.key).map((e) => e.key) : []),
+    () =>
+      project
+        ? sortEnvKeys(
+            project.environments.filter((e) => !e.archivedAt),
+            (e) => e.key,
+          ).map((e) => e.key)
+        : [],
     [project],
   )
 

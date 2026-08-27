@@ -320,6 +320,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/EnvironmentResponse'
 
+  /api/environments/{envId}:
+    patch:
+      tags: [Environments]
+      operationId: updateEnvironment
+      summary: Rename an environment, or archive/restore it
+      description: >-
+        The key is immutable - SDK keys, saved links and every audit row already recorded refer
+        to it. Archiving hides the environment and freezes it against ordinary config writes, but
+        it KEEPS SERVING: SDK keys pointed at it still evaluate, and the kill switch still works.
+        The project's last active environment cannot be archived.
+      parameters:
+        - $ref: '#/components/parameters/EnvId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentUpdateRequest'
+      responses:
+        '200':
+          description: Updated environment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentResponse'
+        '409':
+          description: Archiving the project's last active environment
+        '404':
+          description: No such environment
+
   /api/environments/{envId}/sdk-keys:
     post:
       tags: [Environments]
@@ -2216,6 +2246,28 @@ components:
           format: int64
         approvals:
           $ref: '#/components/schemas/ApprovalSettingsResponse'
+        archivedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Set when the environment has been archived. Archived environments are still returned
+            by every listing endpoint on purpose - they still own their flag configs, their
+            history and any SDK keys still pointed at them, and the dashboard needs them to offer
+            a restore. Clients decide what to show; the API reports what exists.
+
+    EnvironmentUpdateRequest:
+      type: object
+      description: Every field optional; omitted fields are left alone.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: Display name. The key cannot be changed.
+        archived:
+          type: boolean
+          description: true archives, false restores.
 
     PersonalAccessTokenCreateRequest:
       type: object

@@ -243,16 +243,18 @@ public class FlagService {
             .toList();
     }
 
+    /**
+     * Delegates to {@link TargetingConfig#initialFor}, which creating an ENVIRONMENT also uses
+     * to backfill existing flags. The two must agree, so there is one implementation; the
+     * validation stays here because "fewer than two variations" is a user error on this path
+     * and an impossibility on the other.
+     */
     private static TargetingConfig initialConfig(FlagKind kind, List<Variation> variations) {
-        if (variations.size() < 2) {
+        TargetingConfig config = TargetingConfig.initialFor(variations);
+        if (config == null) {
             throw new ValidationException("STRING flags require at least 2 variations");
         }
-        // BOOLEAN: off=false (last), default=true (first). STRING: off=last, default=first.
-        UUID defaultVariationId = variations.get(0).id();
-        UUID offVariationId = variations.get(variations.size() - 1).id();
-        return new TargetingConfig(
-            List.of(), List.of(), RolloutOrVariation.ofVariation(defaultVariationId),
-            offVariationId, defaultVariationId);
+        return config;
     }
 
     private String diff(Map<String, Object> fields) {

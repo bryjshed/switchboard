@@ -41,7 +41,8 @@ public final class TopologyMappers {
 
     public static EnvironmentResponse toEnvironmentResponse(Environment env) {
         return new EnvironmentResponse(env.id(), env.projectId(), env.key(), env.name(), env.stateVersion())
-            .approvals(GovernanceMappers.toApprovalSettingsResponse(env.approvals()));
+            .approvals(GovernanceMappers.toApprovalSettingsResponse(env.approvals()))
+            .archivedAt(env.archivedAt());
     }
 
     public static SdkKeyResponse toSdkKeyResponse(SdkKey key) {

@@ -288,6 +288,7 @@ public class FlagTargetingService {
     private Mono<EnvConfigResult> mutate(
         UUID projectId, String flagKey, String envKey, UUID userId, Permission required, Mutation mutation) {
         return resolve(projectId, flagKey, envKey, userId, required)
+            .flatMap(resolved -> refuseIfArchived(resolved.env(), required).thenReturn(resolved))
             .flatMap(resolved -> flags.lockHead(resolved.flag().id(), resolved.env().id())
                 .switchIfEmpty(Mono.error(new NotFoundException("Flag has no config in this environment")))
                 .flatMap(head -> mutation.apply(resolved.orgId(), resolved.flag(), resolved.env(), head))
@@ -352,6 +353,26 @@ public class FlagTargetingService {
             case "ROLLBACK" -> WebhookEventType.FLAG_ROLLBACK;
             default -> WebhookEventType.FLAG_UPDATED;
         };
+    }
+
+    /**
+     * An archived environment is frozen against ordinary config writes - <b>except the kill
+     * switch.</b>
+     *
+     * <p>Archiving hides an environment and stops people editing it, but it deliberately keeps
+     * serving: SDK keys pointed at it still evaluate, because tidying the dashboard must not take
+     * an environment down. Something that is still serving traffic must still be stoppable, so
+     * {@link Permission#FLAG_KILL} passes through. That is the same reasoning that already lets
+     * the kill switch bypass approval - it is the emergency path, and an emergency path with
+     * preconditions is not one.
+     */
+    private Mono<Void> refuseIfArchived(Environment env, Permission required) {
+        if (!env.archived() || required == Permission.FLAG_KILL) {
+            return Mono.empty();
+        }
+        return Mono.error(new ConflictException(
+            "Environment '" + env.key() + "' is archived and cannot be changed; restore it first. "
+                + "(The kill switch still works - an archived environment keeps serving.)"));
     }
 
     private Mono<Environment> environmentByKey(UUID projectId, String envKey) {

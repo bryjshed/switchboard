@@ -9,10 +9,20 @@ import { TokensTab } from './settings/TokensTab'
 import { AccessTab } from './settings/AccessTab'
 import { ApprovalsTab } from './settings/ApprovalsTab'
 import { WebhooksTab } from './settings/WebhooksTab'
+import { EnvironmentsTab } from './settings/EnvironmentsTab'
 import { useWorkspace } from '@/hooks/useWorkspace'
 import { usePermissions } from '@/hooks/usePermissions'
 
-const TABS = ['organization', 'access', 'approvals', 'sdk-keys', 'tokens', 'webhooks', 'ai'] as const
+const TABS = [
+  'organization',
+  'access',
+  'environments',
+  'approvals',
+  'sdk-keys',
+  'tokens',
+  'webhooks',
+  'ai',
+] as const
 type TabValue = (typeof TABS)[number]
 
 function isTab(value: string | null): value is TabValue {
@@ -21,7 +31,7 @@ function isTab(value: string | null): value is TabValue {
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const { org, environments, loading } = useWorkspace()
+  const { org, project, environments, loading, refresh } = useWorkspace()
   const { has } = usePermissions()
 
   // Both admin tabs stay VISIBLE to everyone and refuse inside instead of vanishing: a tab
@@ -47,7 +57,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <PageHeading
         title="Settings"
-        description="Membership and roles, environment approval policy, SDK keys, webhooks, and the AI layer's switches."
+        description="Membership and roles, environments and their approval policy, SDK keys, webhooks, and the AI layer's switches."
       />
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
@@ -57,6 +67,9 @@ export function SettingsPage() {
           </TabsTrigger>
           <TabsTrigger value="access" data-testid="tab-access">
             Roles &amp; access
+          </TabsTrigger>
+          <TabsTrigger value="environments" data-testid="tab-environments">
+            Environments
           </TabsTrigger>
           <TabsTrigger value="approvals" data-testid="tab-approvals">
             Approvals
@@ -109,6 +122,25 @@ export function SettingsPage() {
             <WebhooksTab orgId={org.id} />
           ) : (
             <p className="text-sm text-muted-foreground">No organization selected.</p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="environments" className="mt-4">
+          {loading && environments.length === 0 ? (
+            <Skeleton className="h-64 w-full" />
+          ) : project ? (
+            <EnvironmentsTab
+              projectId={project.id}
+              projectName={project.name}
+              // project.environments rather than the workspace's list: that one has archived
+              // environments filtered out for the picker, and this screen is where they are
+              // restored from.
+              environments={project.environments}
+              canManage={canManageEnvironments}
+              onChanged={refresh}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">No project selected.</p>
           )}
         </TabsContent>
 

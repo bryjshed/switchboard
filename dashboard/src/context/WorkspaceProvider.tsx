@@ -80,8 +80,18 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const org = useMemo(() => orgs.find((o) => o.id === orgId) ?? null, [orgs, orgId])
   const project = useMemo(() => projects.find((p) => p.id === projectId) ?? null, [projects, projectId])
 
+  // Archived environments are filtered out here, which is what makes archiving mean anything:
+  // this list feeds the environment picker and every per-environment screen. The API returns
+  // them on purpose - they still own their configs and history - so Settings -> Environments
+  // reads project.environments directly in order to offer a restore.
   const environments = useMemo(
-    () => (project ? sortEnvKeys(project.environments, (e) => e.key) : []),
+    () =>
+      project
+        ? sortEnvKeys(
+            project.environments.filter((e) => !e.archivedAt),
+            (e) => e.key,
+          )
+        : [],
     [project],
   )
 

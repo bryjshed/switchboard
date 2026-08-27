@@ -184,6 +184,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/environments/{envId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename an environment, or archive/restore it
+         * @description The key is immutable - SDK keys, saved links and every audit row already recorded refer to it. Archiving hides the environment and freezes it against ordinary config writes, but it KEEPS SERVING: SDK keys pointed at it still evaluate, and the kill switch still works. The project's last active environment cannot be archived.
+         */
+        patch: operations["updateEnvironment"];
+        trace?: never;
+    };
     "/api/environments/{envId}/sdk-keys": {
         parameters: {
             query?: never;
@@ -1175,6 +1195,18 @@ export interface components {
             /** Format: int64 */
             stateVersion: number;
             approvals?: components["schemas"]["ApprovalSettingsResponse"];
+            /**
+             * Format: date-time
+             * @description Set when the environment has been archived. Archived environments are still returned by every listing endpoint on purpose - they still own their flag configs, their history and any SDK keys still pointed at them, and the dashboard needs them to offer a restore. Clients decide what to show; the API reports what exists.
+             */
+            archivedAt?: string | null;
+        };
+        /** @description Every field optional; omitted fields are left alone. */
+        EnvironmentUpdateRequest: {
+            /** @description Display name. The key cannot be changed. */
+            name?: string;
+            /** @description true archives, false restores. */
+            archived?: boolean;
         };
         PersonalAccessTokenCreateRequest: {
             /** @description What the token is for. Required, so it can be recognised before revoking it. */
@@ -2521,6 +2553,46 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["EnvironmentResponse"];
                 };
+            };
+        };
+    };
+    updateEnvironment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                envId: components["parameters"]["EnvId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated environment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentResponse"];
+                };
+            };
+            /** @description No such environment */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Archiving the project's last active environment */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
