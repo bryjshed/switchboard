@@ -39,72 +39,50 @@ flowchart LR
     be -->|"signed webhooks"| hook
 ```
 
-Every surface speaks to the same REST API, so nothing can do something another cannot.
-Changes propagate through Postgres `NOTIFY`, which means a second backend instance learns
-about a flag change the same way the first one does — there is no Redis or message broker
-in the picture.
+Every surface speaks to the same REST API, so nothing can do something another cannot, and
+changes reach every backend instance through Postgres `NOTIFY` — no Redis, no broker. Your
+applications evaluate flags in-process with the Java or Node.js SDK, through any OpenFeature
+provider over OFREP, or with one HTTP call.
 
-**That same channel is what makes the caches safe.** Reads are served from in-process caches
-and a write evicts them everywhere, so the TTLs are a backstop against a dropped notification
-rather than a budget for how stale an answer may be. A shared cache would add a network hop to
-the hottest read in the product and buy nothing — which is why there is still no Redis here.
-The one thing that would genuinely want one is the rate limiter, and only above a single
-instance; [DEPLOYMENT.md](docs/DEPLOYMENT.md#scaling-past-one-node) says so in order.
+## Get started
 
-**The Java SDK and the server run the same evaluator.** Bucketing, the operators, semver and
-precedence live in one JDK-only module both compile against, so there is no second
-implementation to drift from the first. Java appears twice above on purpose: OFREP gives you a
-provider for free and evaluates remotely, while the native SDK evaluates in-process — no I/O per
-flag check, and it keeps working through a Switchboard outage.
-[`sdk/java/README.md`](sdk/java/README.md) says which to pick.
+1. **Run it yourself** — the usual path for a company. [Self-hosting](docs/self-hosting.md) takes
+   you from an empty server to your identity provider, your first admin and your team signed in,
+   then hands over to getting started.
+2. **Already have an instance?** Someone runs Switchboard for you, or you just finished
+   self-hosting: [Getting started](docs/getting-started.md) goes from signing in to a flag rolling
+   out in production with the AI layer watching it.
+3. **Try it locally** — a demo workspace on your laptop, with seeded users and flags:
 
-## Quick start
+   ```bash
+   make deps-up     # postgres 18 + firebase auth emulator (needs Docker)
+   make backend     # the API on :28080 (needs JDK 25)
+   make seed        # demo workspace; prints one SDK key per environment, once
+   make dashboard   # the dashboard on http://localhost:5273
+   ```
 
-```bash
-make deps-up     # postgres 18 + firebase auth emulator
-make backend     # spring boot on :28080 (local profile: dev tokens on)
-make seed        # demo workspace, driven through the public API
-make dashboard   # web dashboard on :5273  <- the main UI
-```
-
-Seed logins are `alice@switchboard.dev` (owner), `bob@switchboard.dev` (member),
-`carol@beta.dev` (a second org, proving isolation) — password `password123`.
-The seed prints one SDK key per environment; they are shown once and stored hashed.
-
-Then evaluate a flag — no client library required, it is one POST:
-
-```js
-const res = await fetch('http://localhost:28080/api/eval/new-checkout', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${SDK_KEY}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    context: { key: userId, attributes: { plan: 'pro', platform: 'ios' } },
-    default: 'false',            // served back if the flag is unknown — always safe
-  }),
-});
-const { value, reason } = await res.json();   // e.g. { value: "true", reason: "ROLLOUT" }
-```
+   Sign in as `alice@switchboard.dev` (owner), `bob@switchboard.dev` (member) or
+   `carol@beta.dev` (a second org), password `password123`. This is a demo: the emulator, dev
+   tokens and seed users must never reach a real deployment.
 
 ## Documentation
 
 | | |
 |---|---|
-| [Architecture](docs/architecture.md) | The model, the write path, evaluation precedence, bucketing, and the two contracts that are enforced rather than described |
-| [Integrating](docs/integrating.md) | Evaluating from your code, OpenFeature/OFREP, reporting outcomes, gating AI agents |
-| [Targeting](docs/targeting.md) | Rules, segments, and the two limits worth knowing before you design around them |
-| [Governance](docs/governance.md) | Scoped RBAC, approvals, and the two places review is deliberately skipped |
-| [The AI layer](docs/ai-layer.md) | Healing, optimizing, and the statistics underneath — including why the scan interval does not affect the error rate |
-| [Development](docs/development.md) | Layout, running each piece, and how to verify a change |
-| [Deployment](docs/DEPLOYMENT.md) | Containers, configuration, migrations, retention, and the honest answer about when Redis becomes necessary |
-| [Performance](docs/PERFORMANCE.md) | Measured p50/p95/p99, the rig, and the instrument's own error — written to be falsifiable rather than quoted |
+| [Self-hosting](docs/self-hosting.md) | Install, identity provider, first admin, inviting the team, building the SDKs |
+| [Getting started](docs/getting-started.md) | Sign in → project → flag → SDK key → evaluate → roll out → approvals → AI |
+| [Concepts](docs/concepts.md) | The vocabulary: orgs, environments, flags, rollouts, keys, roles, proposals |
+| [Dashboard guide](docs/dashboard-guide.md) | Every page and settings tab, task by task |
+| [Integrating](docs/integrating.md) | Java, Node.js, OFREP and REST; keys; the context; reporting outcomes; gating AI agents |
+| [Targeting](docs/targeting.md) | Rules, operators, segments, and the one limit worth knowing |
+| [Governance](docs/governance.md) | Invitations, roles and permissions, approvals, and the two places review is skipped |
+| [The AI layer](docs/ai-layer.md) | Turning on healing and optimizing, and the statistics underneath |
+| [Deployment](docs/DEPLOYMENT.md) | Operator reference: configuration, scheduled jobs, migrations, retention, backups, scaling |
+| [Architecture](docs/architecture.md) | The model, the write path, evaluation precedence, bucketing |
+| [Performance](docs/PERFORMANCE.md) | Measured p50/p95/p99, the rig, and the instrument's own error |
 
-Reference: [DECISIONS.md](docs/DECISIONS.md) records the choices that look wrong until you know why —
-read it before "fixing" something that seems obviously broken.
-[REMAINING-WORK.md](docs/REMAINING-WORK.md) is what is left to build.
-[competitive-gaps.md](docs/competitive-gaps.md) is the market research the backlog derives from.
-
-Working on this with an agent? [`CLAUDE.md`](CLAUDE.md) has the commands, conventions and
-environment traps.
+SDKs and tools: [Java SDK](sdk/java/README.md) · [TypeScript SDK](sdk/typescript/README.md) ·
+[MCP server](mcp/README.md) · [Evaluation spec](spec/README.md).
 
 ## What it does
 
@@ -140,35 +118,20 @@ monitor findings to whatever you point them at. Audit exports stream as NDJSON o
 and version in attributes, and a prompt revision becomes a multivariate flag that the monitor can
 roll back or ramp on its own.
 
-## Verifying
+## For contributors
+
+- [Development](docs/development.md) — layout, running each piece, verifying a change, the live
+  checks and CI.
+- [DECISIONS.md](docs/DECISIONS.md) — the choices that look wrong until you know why. Read it
+  before "fixing" something that seems obviously broken.
+- [REMAINING-WORK.md](docs/REMAINING-WORK.md) — what is left to build, with effort and order.
+- [competitive-gaps.md](docs/competitive-gaps.md) — the market research the backlog derives from.
+- [TESTING.md](TESTING.md) — the manual passes automated tests cannot cover.
+- Working with an agent? [`CLAUDE.md`](CLAUDE.md) has the commands, conventions and environment
+  traps.
 
 ```bash
-make test    # unit + integration (Testcontainers), including the concurrency race tests
-             # runs from the repo root: evaluation/ and backend/ are one reactor build
-make smoke   # 51 API cases end to end, negative paths included
+make test    # unit + integration, from the repo root
+make smoke   # the API end to end against a running backend
 make check   # compile + checkstyle
 ```
-
-`make smoke` is the fastest honest answer to "is it working". Seven live-check scripts against a
-running stack are the real regression net — see [Development](docs/development.md#the-live-checks) —
-plus the Java SDK's, which is a JUnit test rather than a script because driving a JVM SDK from
-node would prove nothing about the JVM SDK. It asserts the SDK's in-process answers equal the
-server's for the same flags and contexts, and it is what caught the SDK rejecting every real
-bootstrap payload over a wire-format detail no hand-written fixture contained.
-
-All of it runs in [CI](.github/workflows/ci.yml) on every pull request, the live checks included:
-they bring up a real stack, seed it, and run all seven. Contract drift is exactly what unit tests
-miss, so it is the one thing a merge should not be able to get past.
-
-## Deploying
-
-```bash
-cp .env.prod.example .env       # then set POSTGRES_PASSWORD; it has no default on purpose
-docker compose -f docker-compose.prod.yml up --build -d --wait
-```
-
-Postgres, the backend and the dashboard. The backend migrates the schema on boot, so the first
-`up` on an empty volume is a working install. One built dashboard image serves any environment —
-configuration is written into the page at container start rather than baked into the bundle.
-[DEPLOYMENT.md](docs/DEPLOYMENT.md) has the rest, including what must never carry over from a
-laptop.

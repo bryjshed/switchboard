@@ -4,7 +4,7 @@ Version 1.0. Status: normative.
 
 This document defines exactly how a Switchboard flag is evaluated for one context. Every SDK, in
 every language, must produce byte-identical results to this specification. The Java class
-`backend/src/main/java/com/switchboard/domain/evaluation/FlagEvaluator.java` is the reference
+`evaluation/src/main/java/com/switchboard/domain/evaluation/FlagEvaluator.java` is the reference
 implementation; `spec/conformance/*.json` are the machine-readable vectors that prove agreement.
 
 Keywords MUST, MUST NOT, SHOULD and MAY are used in the RFC 2119 sense.

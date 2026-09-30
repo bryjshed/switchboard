@@ -5,27 +5,34 @@ own, so anything a tool can do, an operator could do with `curl`.
 
 ## Setup
 
-Create a personal access token in the dashboard (**Settings → Tokens**), then point the server at
-your Switchboard:
+1. Build the server (Node 18 or newer):
 
-```json
-{
-  "mcpServers": {
-    "switchboard": {
-      "command": "node",
-      "args": ["/path/to/switchboard/mcp/dist/index.js"],
-      "env": {
-        "SWITCHBOARD_TOKEN": "sb_pat_…",
-        "SWITCHBOARD_BASE_URL": "http://localhost:28080"
-      }
-    }
-  }
-}
-```
+   ```bash
+   cd mcp
+   npm install && npm run build      # -> mcp/dist/index.js
+   ```
 
-```bash
-npm install && npm run build
-```
+2. Create a personal access token in the dashboard (**Settings → Tokens → New token**). It is
+   shown once and starts with `sb_pat_`.
+
+3. Add the server to your MCP client's configuration, pointing it at your Switchboard:
+
+   ```json
+   {
+     "mcpServers": {
+       "switchboard": {
+         "command": "node",
+         "args": ["/path/to/switchboard/mcp/dist/index.js"],
+         "env": {
+           "SWITCHBOARD_TOKEN": "sb_pat_…",
+           "SWITCHBOARD_BASE_URL": "https://switchboard.example.com"
+         }
+       }
+     }
+   }
+   ```
+
+   `SWITCHBOARD_BASE_URL` defaults to `http://localhost:28080`, the development stack.
 
 ## The permission model
 

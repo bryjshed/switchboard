@@ -62,17 +62,30 @@ comes from `application.yml` and its environment defaults.
 | `FIREBASE_AUTH_EMULATOR_HOST` | unset | `localhost:29099` locally. Read from the OS environment, not from config. Only meaningful to a `type: firebase` provider |
 | `ANTHROPIC_API_KEY` | empty | Empty selects the keyless assistant; AI drafting then returns `503 AI_UNAVAILABLE` and everything else still works |
 | `JOB_TOKEN` | empty | Shared secret for `/api/jobs/**`. Empty refuses every call — these endpoints fail closed |
-| `JOBS_SCHEDULED_ENABLED` | `true` | The hourly in-process scan; a real scheduler should drive the endpoints instead |
+| `JOBS_SCHEDULED_ENABLED` | `true` | The in-process timers: hourly rollout scan, 30-second webhook sweep. Partition roll, stale-flag scan and audit retention have no timer — see [DEPLOYMENT.md](../docs/DEPLOYMENT.md#scheduled-jobs) |
+| `MANAGEMENT_PORT` | `28081` | Actuator's listener. Health probes go here, not to `SERVER_PORT` |
+| `SWITCHBOARD_ORG_CREATION` | `open` | `open`: any signed-in user may create an org. `bootstrap`: only while no org exists; everyone else joins by invitation. Property `switchboard.org-creation`; any other value fails startup. The prod compose file sets `bootstrap` |
+| `RATELIMIT_ENABLED` / `RATELIMIT_RPM` / `RATELIMIT_BURST` | `true` / `6000` / `600` | Per credential, per instance |
+| `EVENT_RETENTION_MONTHS` / `EVENT_PARTITION_MONTHS_AHEAD` | `3` / `2` | Monthly event partitions: dropped past retention, created ahead by the roll job |
+| `AUDIT_RETENTION_MONTHS` | `0` | Audit rows older than this are deleted by the audit-retention job. `0` keeps them forever |
+
+Everything under `switchboard.rollout-monitor.*` (alphas, subject floor, lookback, scan
+concurrency, SRM gate) and the R2DBC pool sizes (`spring.r2dbc.pool.initial-size` 2,
+`max-size` 10) are ordinary properties with no dedicated variable; the full list with defaults
+is in [DEPLOYMENT.md](../docs/DEPLOYMENT.md#backend).
 
 ### Migrations
 
 Flyway runs at startup against `classpath:db/migration` and there is no separate migrate step.
-The current head is **V4** (`V1__baseline.sql`, `V2__scoped_rbac_and_change_requests.sql`,
-`V3__ai_proposal_change_requests.sql`, `V4__provider_agnostic_identities.sql`), and boot logs it:
+The current head is **V14**, and the next migration is **V15**. Boot logs the version it reached:
 
 ```
-o.f.core.internal.command.DbMigrate : Current version of schema "public": 4
+o.f.core.internal.command.DbMigrate : Current version of schema "public": 14
 ```
+
+V14 (`V14__org_invitations.sql`) adds `org_invitations`, `user_identities.email_verified` and
+`users.scim_provisioned` — the last two are what "a verified account" means when an admin grants
+access by email.
 
 V4 is the only migration that takes a placeholder. It moves identity out of `users` and into
 `user_identities`, which means translating every existing `users.firebase_uid` into an
@@ -99,9 +112,10 @@ nothing, and that is a rule rather than an accident. `domain/flag`, `domain/segm
 `domain/project`, `domain/org`, `domain/user`, `domain/access`, `domain/changerequest` and
 `domain/ai` hold the records; each also declares its repository *interface*
 (`FlagRepository`, `AccessRepository`, `ChangeRequestRepository`, …), which is the port the
-application layer talks to. `domain/evaluation/FlagEvaluator` is a static, side-effect-free
-function of (flag, config, context, segments) and is the reference implementation the spec
-describes.
+application layer talks to. `FlagEvaluator` — a static, side-effect-free function of (flag,
+config, context, segments) and the reference implementation the spec describes — is in the same
+`com.switchboard.domain.evaluation` package but lives in the sibling `evaluation/` module, so the
+server and the Java SDK compile against one implementation.
 
 **`application/`** is where transactions live. `FlagTargetingService`, `ChangeRequestService`,
 `ProposalService`, `FlagService`, `SegmentService` and friends are `@Service` beans that
@@ -145,9 +159,9 @@ fixed to one response type and these have more than one:
 Their paths, schemas and security schemes are still declared in the YAML; only the binding is
 by hand.
 
-**The behavior** is [`spec/evaluation.md`](../spec/README.md) plus 201 conformance vectors in
-`spec/conformance/`. `ConformanceVectorTest` loads every vector file and asserts `FlagEvaluator`
-matches, which is what stops the server and an SDK from disagreeing about which half of a
+**The behavior** is [`spec/evaluation.md`](../spec/evaluation.md) plus the conformance vectors in
+`spec/conformance/`. `ConformanceVectorTest`, in the `evaluation/` module, loads every vector file
+and asserts `FlagEvaluator` matches, which is what stops the server and an SDK from disagreeing about which half of a
 rollout a context lands in. Any change to evaluation behavior lands as a spec change plus
 regenerated vectors in the same commit — the spec README is explicit about this and it is the
 one rule in this repo worth treating as absolute.
@@ -763,11 +777,10 @@ make smoke   # node scripts/smoke-test.mjs, against a running backend
 
 `./mvnw verify` runs both halves and is the gate:
 
-```
-Tests run: 280, Failures: 0, Errors: 0, Skipped: 0     surefire  (unit)
-Tests run:  74, Failures: 0, Errors: 0, Skipped: 0     failsafe  (integration)
-BUILD SUCCESS
-```
+Surefire runs the unit tests and failsafe the integration tests; current counts are in
+[`CLAUDE.md`](../CLAUDE.md#what-this-is). Run it from the repository root: the backend compiles
+against the sibling `evaluation/` module, which a backend-only build resolves from your local
+Maven repository rather than from the reactor.
 
 The split is by tag, not by directory: surefire runs with `excludedGroups=integration`, failsafe
 with `groups=integration` and `**/*IT.java`, and `IntegrationTestBase` carries `@Tag("integration")`
@@ -816,18 +829,15 @@ would catch:
   and a loser must leave no trace: no second snapshot carrying the proposal id, no second head
   bump, no second APPLIED stamp.
 
-`ConformanceVectorTest` reports 202 tests: the 201 vectors plus the cross-file ramp-monotonicity
-assertion that spans `ramp-at-10.json` and `ramp-at-25.json`.
+The conformance vectors are not run here any more. Evaluation lives in the `evaluation/` module,
+and its `ConformanceVectorTest` replays every file in `spec/conformance/` —
+`./mvnw -pl evaluation test` from the root. See [spec/README.md](../spec/README.md).
 
 `./mvnw -q compile checkstyle:check` is silent on success. Checkstyle is also bound to `validate`,
 so it gates every other Maven goal too — which is why the run target passes `-Dcheckstyle.skip`.
 
-`scripts/smoke-test.mjs` is the fastest honest answer to "is it working": ~35 cases end to end
+`scripts/smoke-test.mjs` is the fastest honest answer to "is it working": 51 cases end to end
 against a running backend, negative paths included, driven entirely through the public API.
-
-```
-34 passed, 0 failed
-```
 
 It skips the AI drafting case with a note when no `ANTHROPIC_API_KEY` is configured, rather than
 failing.

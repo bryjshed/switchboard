@@ -270,9 +270,12 @@ security-relevant half.** Identity resolution is cached for five minutes, so wit
 deprovisioned by their IdP would keep authenticating for up to five minutes after their employer
 believed access was revoked — precisely the window deprovisioning exists to close.
 
-**Provisioning an existing person ADOPTS them rather than creating a second account.** People
-sign in before anyone turns SCIM on; that is the normal order of events. A duplicate `userName`
-is a 409 only when the person is already a member of *this* org.
+**Provisioning an existing person ADOPTS them rather than creating a second account — if that
+account is verified.** People sign in before anyone turns SCIM on; that is the normal order of
+events. An *unverified* account for the address is not adopted, because it may belong to whoever
+registered the address first; SCIM creates a fresh, SCIM-provisioned account beside it, and the
+employee's first verified sign-in lands there. A duplicate `userName` is a 409 only when the
+person is already a member of *this* org.
 
 **Authentication is a personal access token, not a new credential type.** DECISIONS.md already
 records that a second authorization vocabulary is a second place for a permission bug to live,
@@ -304,6 +307,12 @@ that lets users self-assert an address becomes an account-takeover path. The loc
 adoption is a deliberate exception and is load-bearing: Firebase emulator tokens carry
 `email_verified: false`, so adoption breaks without it.
 
+**Linking never merges into an account that holds an unverified identity.** That is the
+pre-registration attack: an attacker signs up unverified as `victim@corp.com`, the victim later
+arrives with a verified token and is merged into the attacker's account, and everything the victim
+is then granted the attacker's password also opens. The victim gets a separate account instead,
+which is why `users.email` is indexed but not unique.
+
 **Issuer routing reads the unverified `iss` claim only to select a verifier, then discards
 it.** The chosen provider validates the signature and the issuer itself, so forging `iss`
 buys a different rejection and nothing else.
@@ -311,6 +320,27 @@ buys a different rejection and nothing else.
 **No SAML assertion parsing, deliberately.** Enterprise SAML is handled by delegating to an
 OIDC-capable IdP — Auth0, Okta and Entra all do SAML and issue OIDC tokens. Supporting OIDC
 covers it without a second protocol implementation.
+
+---
+
+## Granting by email requires a verified address
+
+**Invitations, adding a member and granting a role by email all resolve only to a verified
+account** — one with an identity whose token asserted `email_verified`, a dev-token account, or
+one SCIM created. An account existing for an address proves nothing about who created it:
+Firebase email/password sign-up, and any IdP that lets people type an address, creates one
+without checking the mailbox. Granting to it would hand the org to whoever signed up first.
+
+**An invitation to an unverified account stays PENDING rather than failing.** It is accepted the
+moment a verified token for the address arrives — at sign-in, or on a later `GET /api/users/me`,
+which is also where an identity's `email_verified` is upgraded after the person verifies. Direct
+grants (`POST /members`, role assignment by email) answer **409** for an unverified account, with
+a message pointing at invitations: the request is well-formed, the account is in a state that
+forbids it, and invitations are the path that works.
+
+**The cost is friction for Firebase email/password**, whose accounts start unverified — including
+ones an admin creates in the console. The dashboard's first-run screen sends the verification
+email and re-checks after it; OIDC providers normally assert verified addresses and never see it.
 
 ---
 
@@ -500,7 +530,7 @@ deployment. `java -jar` is also the shape CI's `containers` job runs.
 **Reported throughput is a floor, not a ceiling.** The 28k eval/s figure was taken with the
 generator and the JVM sharing ten cores, and the harness reported itself lag-bound at that
 rate. Quoting it as the server's maximum would be exactly the kind of number
-[competitive-gaps.md](competitive-gaps.md#latency) criticises the rest of the market for. It is
+[competitive-gaps.md](competitive-gaps.md#4-delivery-and-runtime) criticises the rest of the market for. It is
 recorded as "at least this, on this rig".
 
 **Load runs use their own database, not the dev one.** Millions of generated event rows in the

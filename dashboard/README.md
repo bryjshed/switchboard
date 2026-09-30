@@ -4,6 +4,11 @@ The web management surface for Switchboard. Flags, targeting, version history, s
 keys. The primary UI, and the only one — see [DECISIONS.md](../docs/DECISIONS.md) on the mobile
 companion.
 
+**Using the dashboard?** [docs/dashboard-guide.md](../docs/dashboard-guide.md) walks through every
+page and settings tab. **Deploying it?** [docs/self-hosting.md](../docs/self-hosting.md) covers the
+identity-provider choice and the runtime configuration. This README is for working on the
+dashboard itself.
+
 ```bash
 npm install
 npm run dev          # http://localhost:5273
@@ -284,7 +289,11 @@ the api modules call — list and filter flags, flag detail, create a throwaway 
 targeting PUT, a deliberately stale `expectedVersion` to prove the 409, kill switch on and
 off, version history, rollback, segment CRUD including the referenced-segment 409, SDK key
 create and revoke — and asserts each response carries the fields the generated types say it
-does. It cleans up everything it creates.
+does. It also walks the first-run path as a fresh dev-token user: no orgs, `canCreateOrg`,
+create an org, create a project, and the three seeded environments plus the default `error` /
+`conversion` metrics. It cleans up everything it creates except that org and its project —
+there is no delete-org endpoint, so they join the rest of the verification-run data. That
+section expects the backend's `open` org-creation policy, the local default.
 
 ```bash
 npm run service-check                          # http://localhost:28080
@@ -313,6 +322,25 @@ curl -X POST localhost:28080/api/jobs/rollout-scan -H 'X-Job-Token: local-job-to
 
 Findings are deduplicated per flag, variation and window hour, so a rescan inside the same
 hour is a no-op — a fresh OPEN finding appears on the next hour's scan.
+
+`scripts/governance-check.mjs` covers roles, approvals and change requests, and the invitation
+flow behind Settings → Organization: invite a fresh address (PENDING, listed, a duplicate is
+409), make one request as it with a dev token — a sign-in — and see it become a member with
+`FLAG_READ`; invite an existing account (ACCEPTED on the spot); and revoke one, after which
+signing in does not join. The members it adds are removed again on the way out.
+
+## First run and invitations
+
+A signed-in person who belongs to no org sees `components/workspace/FirstRunOrg.tsx` in place
+of every page. What it offers is the server's call, via `profile.canCreateOrg`: under the
+`open` policy, "Create your organization" (plus how to join a team instead); under
+`bootstrap`, after the first org exists, only "ask an admin to invite <email>" and a reload.
+The org and project switchers end in "New organization…" (same gate) and "New project…"
+(`MANAGE_PROJECTS`). A new project arrives with dev, staging and production.
+
+Adding people is an invitation (Settings → Organization). Someone with an account is added
+immediately (`ACCEPTED`); anyone else waits in **Pending invitations** until they first sign in
+with that email. Nothing is emailed — "Copy sign-in link" gives the admin the URL to pass on.
 
 ## Conventions
 

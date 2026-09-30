@@ -6,17 +6,20 @@ results to the server, including which contexts land in which half of a percenta
 
 ```
 spec/
-  evaluation.md            the normative prose spec
+  evaluation.md                the normative prose spec
   conformance/*.json           machine-readable test vectors (507 of them)
   tools/verify-bucket.mjs      a four-line reference bucket() in JS, checked against the vectors
   tools/generate-vectors.mjs   writes operators.json; --check fails when it is stale
 ```
 
-The Java class `backend/src/main/java/com/switchboard/domain/evaluation/FlagEvaluator.java` is the
-REFERENCE IMPLEMENTATION. The spec describes what it does; the vectors prove it. The JUnit test
-`backend/src/test/java/com/switchboard/domain/evaluation/ConformanceVectorTest.java` loads every file
-in `conformance/` and asserts the reference implementation matches, which is what keeps the vectors
-authoritative rather than aspirational.
+The Java class `evaluation/src/main/java/com/switchboard/domain/evaluation/FlagEvaluator.java` is the
+REFERENCE IMPLEMENTATION — the zero-dependency evaluation core that the server and the Java SDK both
+compile against. The spec describes what it does; the vectors prove it. The JUnit test
+`evaluation/src/test/java/com/switchboard/domain/evaluation/ConformanceVectorTest.java` loads every
+file in `conformance/` and asserts the reference implementation matches, which is what keeps the
+vectors authoritative rather than aspirational. The TypeScript SDK runs the same files
+(`sdk/typescript/test/conformance.test.ts`), and the Java SDK replays the evaluation vectors through
+its own bootstrap parsing (`ConformanceThroughSdkTest`).
 
 ---
 
@@ -150,7 +153,9 @@ working from a document that lies, and the vectors stop being evidence of anythi
 2. Update the affected section of `evaluation.md`.
 3. Update or add the vectors in `conformance/` that pin the new behaviour, including negative cases.
    Run `node spec/tools/generate-vectors.mjs` if the change touches operators.
-4. `./mvnw test -Dtest=ConformanceVectorTest` must pass without any assertion being loosened.
+4. From the repository root, `JAVA_HOME=$(/usr/libexec/java_home -v 25) ./mvnw -pl evaluation test
+   -Dtest=ConformanceVectorTest` must pass without any assertion being loosened, and so must
+   `cd sdk/typescript && npx vitest run test/conformance.test.ts`.
 5. Keep `FlagEvaluatorTest` too. The vectors prove conformance; the hand-written tests document
    intent in a form a reviewer can read.
 

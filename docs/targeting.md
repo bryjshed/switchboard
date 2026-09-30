@@ -1,6 +1,6 @@
 # Targeting
 
-What you can target on, and the two limits worth knowing before you design around them.
+What you can target on, and the one limit worth knowing before you design around it.
 
 Normative semantics live in [`spec/evaluation.md`](../spec/evaluation.md); this page is the
 practical version.
@@ -58,8 +58,4 @@ usually the user. "Roll out to 10% of *customers*" needs a `bucketBy` attribute,
 backlog; today you would pass the tenant id as the context key and give up per-user targeting on
 that flag.
 
-~~**Attributes are strings.**~~ Fixed — attributes are typed and the operator set is complete, so
-`appVersion SEMVER_GREATER_THAN 4.1.9` on iOS is one rule.
-
-The bucketing limit is tracked in [REMAINING-WORK.md](REMAINING-WORK.md). It is not a bug; it is
-scope.
+It is tracked in [REMAINING-WORK.md](REMAINING-WORK.md). It is not a bug; it is scope.
