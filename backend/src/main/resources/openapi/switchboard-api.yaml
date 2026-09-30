@@ -188,6 +188,63 @@ paths:
         '204':
           description: Removed
 
+  /api/orgs/{orgId}/invitations:
+    get:
+      tags: [Orgs]
+      operationId: listOrgInvitations
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      responses:
+        '200':
+          description: Pending invitations, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OrgInvitationResponse'
+    post:
+      tags: [Orgs]
+      operationId: createOrgInvitation
+      description: >-
+        Invites an email address to the org. When a user with that email already exists they
+        are added immediately and the invitation comes back ACCEPTED; otherwise it is PENDING
+        and is accepted automatically the first time that person signs in with a verified email.
+        No email is sent -- share the dashboard URL with the invitee.
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgInvitationCreateRequest'
+      responses:
+        '201':
+          description: Invitation created (PENDING) or member added (ACCEPTED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgInvitationResponse'
+        '409':
+          description: A pending invitation for that email already exists, or they are already a member
+
+  /api/orgs/{orgId}/invitations/{invitationId}:
+    delete:
+      tags: [Orgs]
+      operationId: revokeOrgInvitation
+      parameters:
+        - $ref: '#/components/parameters/OrgId'
+        - name: invitationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Revoked
+
   /api/orgs/{orgId}/settings:
     get:
       tags: [Orgs]
@@ -2059,7 +2116,7 @@ components:
 
     UserResponse:
       type: object
-      required: [id, email, onboardingCompleted, memberships]
+      required: [id, email, onboardingCompleted, canCreateOrg, memberships]
       properties:
         id:
           type: string
@@ -2070,6 +2127,11 @@ components:
           type: string
         onboardingCompleted:
           type: boolean
+        canCreateOrg:
+          type: boolean
+          description: >-
+            Whether POST /api/orgs would succeed for this caller right now. Always true when
+            switchboard.org-creation is `open`; under `bootstrap`, true only while no org exists.
         memberships:
           type: array
           items:
@@ -2144,6 +2206,41 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/OrgRole'
+
+    OrgInvitationCreateRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+
+    OrgInvitationStatus:
+      type: string
+      enum: [PENDING, ACCEPTED, REVOKED]
+
+    OrgInvitationResponse:
+      type: object
+      required: [id, email, role, status, invitedBy, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/OrgRole'
+        status:
+          $ref: '#/components/schemas/OrgInvitationStatus'
+        invitedBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        acceptedAt:
+          type: string
+          format: date-time
 
     OrgSettingsResponse:
       type: object
@@ -2869,7 +2966,7 @@ components:
 
     AuditAction:
       type: string
-      enum: [CREATE, UPDATE, KILL_SWITCH_ON, KILL_SWITCH_OFF, ROLLBACK, AI_APPLY, ARCHIVE, SEGMENT_CREATE, SEGMENT_UPDATE, SEGMENT_DELETE, SDK_KEY_CREATE, SDK_KEY_REVOKE, MEMBER_ADD, MEMBER_REMOVE, SETTINGS_UPDATE, CHANGE_REQUEST_OPEN, CHANGE_REQUEST_APPLY, CHANGE_REQUEST_DECLINE, ROLE_GRANT, ROLE_REVOKE]
+      enum: [CREATE, UPDATE, KILL_SWITCH_ON, KILL_SWITCH_OFF, ROLLBACK, AI_APPLY, ARCHIVE, SEGMENT_CREATE, SEGMENT_UPDATE, SEGMENT_DELETE, SDK_KEY_CREATE, SDK_KEY_REVOKE, MEMBER_ADD, MEMBER_REMOVE, SETTINGS_UPDATE, CHANGE_REQUEST_OPEN, CHANGE_REQUEST_APPLY, CHANGE_REQUEST_DECLINE, ROLE_GRANT, ROLE_REVOKE, APPROVAL_BYPASS, PAT_CREATE, PAT_REVOKE, SCIM_PROVISION, SCIM_ACTIVATE, SCIM_DEACTIVATE, ENVIRONMENT_CREATE, ENVIRONMENT_RENAME, ENVIRONMENT_ARCHIVE, ENVIRONMENT_RESTORE, INVITE_CREATE, INVITE_REVOKE, INVITE_ACCEPT]
 
     AuditEntryResponse:
       type: object

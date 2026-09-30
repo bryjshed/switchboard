@@ -1,5 +1,6 @@
 package com.switchboard.interfaces.rest;
 
+import com.switchboard.application.org.InvitationService;
 import com.switchboard.application.org.OrgAccessService;
 import com.switchboard.application.org.OrgService;
 import com.switchboard.application.settings.OrgSettings;
@@ -8,6 +9,8 @@ import com.switchboard.domain.access.Permission;
 import com.switchboard.interfaces.rest.api.OrgsApi;
 import com.switchboard.interfaces.rest.mapper.TopologyMappers;
 import com.switchboard.interfaces.rest.model.OrgCreateRequest;
+import com.switchboard.interfaces.rest.model.OrgInvitationCreateRequest;
+import com.switchboard.interfaces.rest.model.OrgInvitationResponse;
 import com.switchboard.interfaces.rest.model.OrgMemberAddRequest;
 import com.switchboard.interfaces.rest.model.OrgMemberResponse;
 import com.switchboard.interfaces.rest.model.OrgResponse;
@@ -28,11 +31,17 @@ public class OrgsController implements OrgsApi {
     private final OrgService orgService;
     private final OrgAccessService orgAccess;
     private final OrgSettingsService orgSettings;
+    private final InvitationService invitations;
 
-    public OrgsController(OrgService orgService, OrgAccessService orgAccess, OrgSettingsService orgSettings) {
+    public OrgsController(
+        OrgService orgService,
+        OrgAccessService orgAccess,
+        OrgSettingsService orgSettings,
+        InvitationService invitations) {
         this.orgService = orgService;
         this.orgAccess = orgAccess;
         this.orgSettings = orgSettings;
+        this.invitations = invitations;
     }
 
     @Override
@@ -80,6 +89,35 @@ public class OrgsController implements OrgsApi {
     public Mono<ResponseEntity<Void>> removeOrgMember(UUID orgId, UUID userId, ServerWebExchange exchange) {
         return Principals.currentUser()
             .flatMap(user -> orgService.removeMember(orgId, user, userId))
+            .thenReturn(ResponseEntity.noContent().build());
+    }
+
+    @Override
+    public Mono<ResponseEntity<OrgInvitationResponse>> createOrgInvitation(
+        UUID orgId, Mono<OrgInvitationCreateRequest> orgInvitationCreateRequest, ServerWebExchange exchange) {
+        return Principals.currentUser()
+            .zipWith(orgInvitationCreateRequest)
+            .flatMap(t -> invitations.invite(
+                orgId, t.getT1(), t.getT2().getEmail(), t.getT2().getRole().getValue()))
+            .map(invitation -> ResponseEntity.status(HttpStatus.CREATED)
+                .body(TopologyMappers.toInvitationResponse(invitation)));
+    }
+
+    @Override
+    public Mono<ResponseEntity<Flux<OrgInvitationResponse>>> listOrgInvitations(
+        UUID orgId, ServerWebExchange exchange) {
+        // Resolved before the ResponseEntity is built, so a 403 is a 403 rather than a 200 whose
+        // body stream fails part-way.
+        return Principals.currentUser()
+            .flatMap(user -> invitations.listPending(orgId, user).collectList())
+            .map(list -> ResponseEntity.ok(Flux.fromIterable(list).map(TopologyMappers::toInvitationResponse)));
+    }
+
+    @Override
+    public Mono<ResponseEntity<Void>> revokeOrgInvitation(
+        UUID orgId, UUID invitationId, ServerWebExchange exchange) {
+        return Principals.currentUser()
+            .flatMap(user -> invitations.revoke(orgId, user, invitationId))
             .thenReturn(ResponseEntity.noContent().build());
     }
 

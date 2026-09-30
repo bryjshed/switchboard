@@ -97,7 +97,7 @@ class ChangeRequestApprovalRaceIT extends IntegrationTestBase {
         String email = uniqueEmail(prefix);
         UUID userId = provisionUser(email);
         grantRole(workspace, email, ScopeType.ENVIRONMENT, envId, "APPROVER");
-        return new AuthenticatedUser(userId, email, Identities.DEV_ISSUER, email);
+        return new AuthenticatedUser(userId, email, Identities.DEV_ISSUER, email, email);
     }
 
     private ChangeRequestResponse openRequest(Workspace workspace, FlagDetailResponse flag) {

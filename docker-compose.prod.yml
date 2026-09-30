@@ -76,6 +76,12 @@ services:
       # NOTE the absence of FIREBASE_AUTH_EMULATOR_HOST. It is mandatory locally and must never
       # be set here: the Admin SDK would verify production users' tokens against an emulator.
 
+      # Who may create an org. `bootstrap` (the self-hosted default): only the first person to
+      # sign in, while no org exists yet -- they create the company's org and invite everyone
+      # else. `open`: any signed-in user may create their own org, which is what a hosted,
+      # multi-tenant instance wants.
+      SWITCHBOARD_ORG_CREATION: ${SWITCHBOARD_ORG_CREATION:-bootstrap}
+
       # Shared secret for POST /api/jobs/*. Unset means the scheduled jobs still run in-process
       # but the HTTP triggers are closed, which is a reasonable default; set it if you drive
       # the partition roll or the rollout scan from an external scheduler.
@@ -97,6 +103,16 @@ services:
       # evidence that the healing loop may still be accumulating over.
       EVENT_RETENTION_MONTHS: ${EVENT_RETENTION_MONTHS:-3}
       EVENT_PARTITION_MONTHS_AHEAD: ${EVENT_PARTITION_MONTHS_AHEAD:-2}
+
+      # Audit retention. 0 keeps the audit log forever, which is the default on purpose; set a
+      # number of months only if a policy requires expiry. The daily audit-retention job deletes
+      # older entries row by row.
+      AUDIT_RETENTION_MONTHS: ${AUDIT_RETENTION_MONTHS:-0}
+
+      # Any Spring property as one JSON document -- most importantly the identity-provider list
+      # (switchboard.auth.providers) for an OIDC IdP such as Okta or Entra ID; see
+      # docs/DEPLOYMENT.md for the exact form. Empty is ignored by Spring, so unset is harmless.
+      SPRING_APPLICATION_JSON: ${SPRING_APPLICATION_JSON:-}
     ports:
       - "${BACKEND_PORT:-28080}:28080"
       # 28081 is NOT published. Health, info and prometheus live there and the port -- not the

@@ -8,6 +8,7 @@ import { execSync } from 'node:child_process';
 
 const API = process.env.API_BASE_URL ?? 'http://localhost:28080';
 const EMU = process.env.FIREBASE_EMULATOR_URL ?? 'http://localhost:29099';
+const EMU_PROJECT = process.env.FIREBASE_PROJECT_ID ?? 'demo-switchboard';
 const PASSWORD = 'password123';
 const JOB_TOKEN = process.env.JOB_TOKEN ?? 'local-job-token';
 
@@ -15,6 +16,9 @@ const ALICE = 'alice@switchboard.dev';
 const BOB = 'bob@switchboard.dev';
 const CAROL = 'carol@beta.dev';
 
+// Seeded people are verified accounts: an unverified email cannot be added to an org directly
+// (it has to go through an invitation it accepts once verified), so the demo users are marked
+// verified through the emulator's admin API and signed in again to get a token that says so.
 async function emuToken(email) {
   const body = JSON.stringify({ email, password: PASSWORD, returnSecureToken: true });
   const opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body };
@@ -25,6 +29,17 @@ async function emuToken(email) {
     j = await r.json();
   }
   if (!j.idToken) throw new Error(`Cannot obtain emulator token for ${email}: ${JSON.stringify(j)}`);
+  if (j.emailVerified !== true) {
+    r = await fetch(`${EMU}/identitytoolkit.googleapis.com/v1/projects/${EMU_PROJECT}/accounts:update`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ localId: j.localId, emailVerified: true }),
+    });
+    if (!r.ok) throw new Error(`Cannot mark ${email} verified in the emulator: ${r.status} ${await r.text()}`);
+    r = await fetch(`${EMU}/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=fake-api-key`, opts);
+    j = await r.json();
+    if (!j.idToken) throw new Error(`Cannot re-sign-in ${email} after verifying: ${JSON.stringify(j)}`);
+  }
   return j.idToken;
 }
 

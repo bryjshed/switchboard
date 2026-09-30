@@ -1,5 +1,6 @@
 package com.switchboard.application.access;
 
+import com.switchboard.application.user.VerifiedAccounts;
 import com.switchboard.application.cache.CacheName;
 import com.switchboard.infrastructure.notify.CacheInvalidationPublisher;
 import com.switchboard.application.audit.AuditWriter;
@@ -162,8 +163,9 @@ public class AccessAdminService {
         if (email == null || email.isBlank()) {
             return Mono.error(new ValidationException("Name the user by userId or email"));
         }
-        return users.findByEmailPreferringReal(email)
-            .switchIfEmpty(Mono.error(new NotFoundException("No user with that email")));
+        // By email, only a verified account: an unverified one may belong to whoever signed up
+        // with the address first. By userId the admin has named a specific account deliberately.
+        return VerifiedAccounts.requireVerified(users, email, "No user with that email");
     }
 
     private static UUID projectIdOf(AccessScope scope) {

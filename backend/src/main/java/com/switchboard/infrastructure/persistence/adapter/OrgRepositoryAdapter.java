@@ -56,6 +56,26 @@ public class OrgRepositoryAdapter implements OrgRepository {
     }
 
     @Override
+    public Mono<Boolean> anyExists() {
+        return db.sql("SELECT EXISTS (SELECT 1 FROM orgs) AS present")
+            .map(row -> Boolean.TRUE.equals(row.get("present", Boolean.class)))
+            .one();
+    }
+
+    /**
+     * A transaction-scoped advisory lock, released at commit or rollback, keyed on a fixed
+     * string so every instance of the backend contends on the same lock.
+     */
+    @Override
+    public Mono<Void> lockCreation() {
+        return db.sql("SELECT pg_advisory_xact_lock(hashtext('switchboard:org-creation'))")
+            // The function returns void; the row is only proof the lock was taken.
+            .map(row -> Boolean.TRUE)
+            .one()
+            .then();
+    }
+
+    @Override
     public Mono<Org> findById(UUID orgId) {
         return db.sql("SELECT * FROM orgs WHERE id = :id")
             .bind("id", orgId)
@@ -109,6 +129,20 @@ public class OrgRepositoryAdapter implements OrgRepository {
             .bind("userId", userId)
             .bind("role", role)
             .map(OrgRepositoryAdapter::mapMember)
+            .one();
+    }
+
+    @Override
+    public Mono<Boolean> hasMemberWithEmail(UUID orgId, String email) {
+        return db.sql("""
+                SELECT EXISTS (
+                    SELECT 1 FROM org_memberships m JOIN users u ON u.id = m.user_id
+                    WHERE m.org_id = :orgId AND lower(u.email) = lower(:email)
+                ) AS present
+                """)
+            .bind("orgId", orgId)
+            .bind("email", email)
+            .map(row -> Boolean.TRUE.equals(row.get("present", Boolean.class)))
             .one();
     }
 

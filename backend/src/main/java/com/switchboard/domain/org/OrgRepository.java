@@ -10,6 +10,16 @@ public interface OrgRepository {
 
     Mono<Org> create(String name, String slug);
 
+    /** Whether any org exists at all on this instance. */
+    Mono<Boolean> anyExists();
+
+    /**
+     * Serialises org creation for the rest of the current transaction. Only meaningful inside
+     * one: it is what stops two first users on a bootstrap-mode instance from both seeing "no
+     * org yet" and both creating one.
+     */
+    Mono<Void> lockCreation();
+
     Mono<Org> findById(UUID orgId);
 
     Flux<OrgWithRole> findAllForUser(UUID userId);
@@ -17,6 +27,9 @@ public interface OrgRepository {
     Flux<OrgMemberView> findMembers(UUID orgId);
 
     Mono<OrgMemberView> addMember(UUID orgId, UUID userId, String role);
+
+    /** Whether any member of the org has this email, case-insensitively. */
+    Mono<Boolean> hasMemberWithEmail(UUID orgId, String email);
 
     /** Empty when the membership does not exist. */
     Mono<String> findMemberRole(UUID orgId, UUID userId);

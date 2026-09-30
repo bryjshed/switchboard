@@ -20,8 +20,33 @@ public interface UserRepository {
 
     Mono<User> create(String email, String displayName);
 
-    /** Links a provider identity to an existing user. Fails if that identity is already linked. */
-    Mono<UserIdentity> linkIdentity(UUID userId, String issuer, String subject);
+    /**
+     * Creates a user on behalf of SCIM. The customer's IdP asserted this address belongs to one of
+     * its people, so the account counts as verified before anyone has signed into it.
+     */
+    Mono<User> createScimProvisioned(String email, String displayName);
+
+    /**
+     * Links a provider identity to an existing user. Fails if that identity is already linked.
+     *
+     * @param emailVerified whether the provider vouched for the account's email in this token
+     */
+    Mono<UserIdentity> linkIdentity(UUID userId, String issuer, String subject, boolean emailVerified);
+
+    /**
+     * Records that this identity's provider has now vouched for the account's email. Upgrade only:
+     * a later unverified token never clears it.
+     */
+    Mono<Void> markEmailVerified(String issuer, String subject);
+
+    /**
+     * A user with this email (case-insensitive) whose ownership of it has been proven: some linked
+     * identity presented a verified token, or SCIM created the account. Oldest such user first.
+     * Empty when every account with the address is unverified - which is the case an admin
+     * inviting or adding by email must not act on, because an unverified account for
+     * victim@corp.com may belong to anybody.
+     */
+    Mono<User> findVerifiedByEmail(String email);
 
     Flux<UserIdentity> identitiesOf(UUID userId);
 }

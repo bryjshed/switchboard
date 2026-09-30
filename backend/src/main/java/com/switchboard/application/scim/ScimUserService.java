@@ -101,9 +101,11 @@ public class ScimUserService {
     /**
      * Creates or ADOPTS.
      *
-     * <p>An IdP pushing a person who already has a Switchboard account - because they signed in
-     * before SCIM was turned on, which is the normal order of events - must not produce a second
-     * account. SCIM says a duplicate {@code userName} is a 409, and that is the right answer only
+     * <p>An IdP pushing a person who already has a VERIFIED Switchboard account - because they
+     * signed in before SCIM was turned on, which is the normal order of events - must not produce
+     * a second account. An unverified account for the address is not adopted: it may not be
+     * theirs (see {@code VerifiedAccounts}), so a new SCIM-provisioned account is created beside
+     * it. SCIM says a duplicate {@code userName} is a 409, and that is the right answer only
      * when the existing user is already a member of this org. When they exist but are not a
      * member, the correct behaviour is to add them, which is also what an admin would do by hand.
      */
@@ -119,8 +121,15 @@ public class ScimUserService {
                 .flatMap(existing -> Mono.<ScimUser>error(new ConflictException(
                     "A user with that userName already belongs to this organization")))
                 .switchIfEmpty(Mono.defer(() ->
-                    users.findByEmailPreferringReal(normalised)
-                        .switchIfEmpty(users.create(normalised, displayName))
+                    // Adopt only a VERIFIED account. An unverified one may belong to whoever
+                    // signed up with the address first; adopting it would hand that person the
+                    // org the IdP is provisioning its employee into. Instead SCIM creates a new
+                    // account (users.email is deliberately not unique), and the employee's first
+                    // verified sign-in links to it - UserService prefers a verified account.
+                    // A created account is marked SCIM-provisioned: the IdP vouches for the
+                    // address. An ADOPTED one is not - SCIM says nothing about who created it.
+                    users.findVerifiedByEmail(normalised)
+                        .switchIfEmpty(Mono.defer(() -> users.createScimProvisioned(normalised, displayName)))
                         .flatMap(user -> orgs.provisionMember(orgId, user.id(), defaultRole, "scim")
                             .then(externalId == null
                                 ? scimUsers.findInOrgById(orgId, user.id())

@@ -43,6 +43,10 @@ management:
 switchboard:
   security:
     dev-auth-enabled: false
+  # Who may create an org. 'open': any signed-in user (hosted / multi-tenant; the default, and
+  # what every earlier release did). 'bootstrap': only while no org exists yet -- the first person
+  # to sign in creates the company's org and everyone else joins by invitation (self-hosted).
+  org-creation: ${SWITCHBOARD_ORG_CREATION:open}
   # Identity providers. More than one may be active at once - an org migrating from one IdP to
   # another needs both to verify while the move is in flight. Routing is by the token's issuer.
   auth:
