@@ -6,10 +6,12 @@ import com.switchboard.domain.evaluation.EvalOutcome;
 import com.switchboard.domain.evaluation.EvalReason;
 import com.switchboard.domain.evaluation.FlagEvaluator;
 import com.switchboard.sdk.internal.BootstrapCodec;
+import com.switchboard.sdk.internal.TelemetryBuffer;
 import com.switchboard.sdk.internal.Transport;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -52,6 +54,7 @@ public final class SwitchboardClient implements AutoCloseable {
 
     private final SwitchboardConfig config;
     private final Transport transport;
+    private final TelemetryBuffer telemetry;
 
     private final AtomicReference<BootstrapCodec.Snapshot> snapshot =
         new AtomicReference<>(BootstrapCodec.Snapshot.empty());
@@ -66,6 +69,17 @@ public final class SwitchboardClient implements AutoCloseable {
     public SwitchboardClient(SwitchboardConfig config) {
         this.config = config;
         this.transport = new Transport(config.baseUri(), config.sdkKey(), config.requestTimeout());
+        this.telemetry = new TelemetryBuffer(new TelemetryBuffer.Sender() {
+            @Override
+            public void sendEvalEvents(List<TelemetryBuffer.EvalEvent> batch) throws Exception {
+                transport.postEvalEvents(batch);
+            }
+
+            @Override
+            public void sendMetricEvents(List<TelemetryBuffer.MetricEvent> batch) throws Exception {
+                transport.postMetrics(batch);
+            }
+        }, config.telemetryEnabled(), config.flushInterval(), config.maxBatchSize(), config.maxQueueSize());
     }
 
     /**
@@ -209,6 +223,12 @@ public final class SwitchboardClient implements AutoCloseable {
         }
         EvalOutcome outcome = FlagEvaluator.evaluate(
             entry.flag(), entry.config(), context, current.segmentsByKey());
+        // The exposure, recorded for every evaluation that reached the flag - including the
+        // outcomes below that go on to serve the caller's default - and for none that did not
+        // (bad context, not ready, unknown flag). The same rule as the TypeScript SDK. Without
+        // it the rollout monitor cannot attribute a tracked metric to a variation at all.
+        telemetry.recordEvaluation(new TelemetryBuffer.EvalEvent(flagKey, context.key(), outcome.variationId(),
+            outcome.reason() == null ? null : outcome.reason().name(), Instant.now()));
         if (outcome.value() == null) {
             return EvaluationDetail.error(fallback, EvaluationDetail.ErrorKind.PARSE_ERROR,
                 "the flag resolved to a variation that no longer exists");
@@ -229,6 +249,57 @@ public final class SwitchboardClient implements AutoCloseable {
     private static <A, B> EvaluationDetail<B> retype(EvaluationDetail<A> from, B value) {
         return new EvaluationDetail<>(value, from.reason(), from.variationId(), from.ruleId(),
             from.errorKind(), from.errorMessage());
+    }
+
+    // ------------------------------------------------------------------ metrics
+
+    /** {@link #track(String, String, double)} with a value of 1: one conversion, one error. */
+    public void track(String metricKey, String contextKey) {
+        track(metricKey, contextKey, 1d);
+    }
+
+    /**
+     * Records a metric for the heal and optimize loops: a conversion, an error, a latency.
+     *
+     * <p>Use the same context key the flag was evaluated with - that is how Switchboard
+     * attributes the outcome to the variation that context was served. {@code error} and
+     * {@code conversion} are built in; any other key is stored, and drives the loops once the
+     * project has a metric definition for it.
+     *
+     * <p>Buffered, never blocking on I/O: sent every {@code flushInterval}, early once
+     * {@code maxBatchSize} events are waiting, and on {@link #flush()} or {@link #close()}.
+     * Works whether or not {@link #start()} has been called. A blank key or a non-finite value
+     * is logged and ignored rather than thrown, for the same reason evaluation never throws.
+     */
+    public void track(String metricKey, String contextKey, double value) {
+        if (metricKey == null || metricKey.isBlank()) {
+            log.warn("Switchboard: track() ignored: metricKey is blank");
+            return;
+        }
+        if (contextKey == null || contextKey.isBlank()) {
+            log.warn("Switchboard: track(\"{}\") ignored: contextKey is blank", metricKey);
+            return;
+        }
+        if (!Double.isFinite(value)) {
+            log.warn("Switchboard: track(\"{}\") ignored: value {} is not finite", metricKey, value);
+            return;
+        }
+        telemetry.recordMetric(new TelemetryBuffer.MetricEvent(contextKey, metricKey, value, Instant.now()));
+    }
+
+    /**
+     * Sends all buffered telemetry now - evaluation events, then metrics - and returns once it
+     * is sent (or has failed, which is logged). Never throws. Each request is bounded by
+     * {@code requestTimeout}.
+     */
+    public void flush() {
+        telemetry.flush();
+    }
+
+    /** Telemetry counters: queued evaluation and metric events, dropped, sent, failed batches. */
+    public TelemetryStats telemetryStats() {
+        return new TelemetryStats(telemetry.queuedEvalEvents(), telemetry.queuedMetricEvents(),
+            telemetry.dropped(), telemetry.sent(), telemetry.failedFlushes());
     }
 
     // ------------------------------------------------------------------ freshness
@@ -341,6 +412,11 @@ public final class SwitchboardClient implements AutoCloseable {
         return base / 2 + (long) (Math.random() * base / 2);
     }
 
+    /**
+     * Stops the update channel, then sends any buffered telemetry. The final flush is bounded by
+     * {@code requestTimeout} in total; metrics still unsent then are abandoned with a warning.
+     * Idempotent. {@link #track} after close is ignored.
+     */
     @Override
     public void close() {
         running.set(false);
@@ -348,5 +424,6 @@ public final class SwitchboardClient implements AutoCloseable {
         if (t != null) {
             t.interrupt();
         }
+        telemetry.close(config.requestTimeout());
     }
 }
