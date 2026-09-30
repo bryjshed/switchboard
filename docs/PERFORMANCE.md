@@ -10,7 +10,7 @@ instrument's own error are all stated, so a reader can disagree with a number by
 > **Why this is worth having at all.** No feature-flag vendor publishes p50/p95/p99 for its
 > delivery path — every figure in the market is a marketing average, a laptop benchmark, or
 > an adjective, and several trace back to 2021. See
-> [competitive-gaps.md](competitive-gaps.md#latency). The bar here is therefore **internal
+> [competitive-gaps.md](competitive-gaps.md#4-delivery-and-runtime). The bar here is therefore **internal
 > honesty**, not a public benchmark: numbers we believe, with the caveats attached.
 
 Reproduce with:
@@ -167,7 +167,7 @@ concurrent ingest during the drop, it was not observable. Under live ingest it w
 ### The rollout aggregation is the real scaling limit
 
 The `GROUP BY` across both event tables — described in
-[REMAINING-WORK.md](REMAINING-WORK.md#3-caching) as "the most expensive query in the system" —
+[REMAINING-WORK.md](REMAINING-WORK.md#3-caching--largely-landed-2026-08-25) as "the most expensive query in the system" —
 is exactly that, and it is worse than the phrase suggests.
 
 | `work_mem` | sort | execution |
@@ -223,7 +223,7 @@ volume to set.
 That is the second time in this document a plausible optimisation measured the wrong way round.
 Both were caught the same way: by measuring after, not only before.
 
-**Still open: incremental rollups.** [REMAINING-WORK.md](REMAINING-WORK.md#3-caching) named these
+**Still open: incremental rollups.** [REMAINING-WORK.md](REMAINING-WORK.md#3-caching--largely-landed-2026-08-25) named these
 as the alternative to a short-TTL cache and picked the cache, correctly, as the cheaper first
 move. The cache fixes repeated reads; it does nothing for the scan, which needs a *fresh* number
 every time by construction. Concurrency divides the cost; rollups would change its order.

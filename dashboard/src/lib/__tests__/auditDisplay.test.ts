@@ -41,6 +41,34 @@ describe('auditActionMeta', () => {
     for (const action of human) expect(auditActionMeta(action).automatic).toBe(false)
   })
 
+  it('marks an automation approval bypass as automatic and as something to look at', () => {
+    const meta = auditActionMeta('APPROVAL_BYPASS')
+    expect(meta.automatic).toBe(true)
+    expect(meta.variant).toBe('warning')
+  })
+
+  it('gives the invitation, environment, token and SCIM actions real labels, not the fallback', () => {
+    const actions: AuditAction[] = [
+      'PAT_CREATE',
+      'PAT_REVOKE',
+      'SCIM_PROVISION',
+      'SCIM_ACTIVATE',
+      'SCIM_DEACTIVATE',
+      'ENVIRONMENT_CREATE',
+      'ENVIRONMENT_RENAME',
+      'ENVIRONMENT_ARCHIVE',
+      'ENVIRONMENT_RESTORE',
+      'INVITE_CREATE',
+      'INVITE_REVOKE',
+      'INVITE_ACCEPT',
+    ]
+    for (const action of actions) {
+      const meta = auditActionMeta(action)
+      expect(meta.variant).not.toBe('outline')
+      expect(meta.automatic).toBe(false)
+    }
+  })
+
   it('does not blank out on an action the spec grows later', () => {
     const meta = auditActionMeta('SOMETHING_NEW' as AuditAction)
     expect(meta.label).toBe('something new')

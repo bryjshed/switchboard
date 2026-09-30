@@ -18,6 +18,18 @@ export interface AuthState {
   profileError: string | null
   /** Set when auth could not start at all — bad configuration, SDK failed to load. */
   authError: string | null
+  /**
+   * Whether the provider vouches for the signed-in email; null when it does not say. Pending
+   * org invitations are accepted only for a verified address.
+   */
+  emailVerified: boolean | null
+  /** Present only when the provider can send one (Firebase). Absent → hide the control. */
+  sendEmailVerification?: () => Promise<void>
+  /**
+   * Present only when the provider supports it. Re-reads the identity and forces a fresh token,
+   * then updates `user`; call `reloadProfile` afterwards to have the backend see the change.
+   */
+  refreshToken?: () => Promise<void>
   signIn: (credentials?: SignInOptions) => Promise<void>
   reloadProfile: () => Promise<void>
   signOut: () => Promise<void>

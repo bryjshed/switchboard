@@ -1,6 +1,7 @@
 package com.switchboard.interfaces.rest.mapper;
 
 import com.switchboard.application.project.CreatedSdkKey;
+import com.switchboard.domain.org.OrgInvitation;
 import com.switchboard.domain.org.OrgMemberView;
 import com.switchboard.domain.org.OrgWithRole;
 import com.switchboard.domain.project.Environment;
@@ -8,6 +9,8 @@ import com.switchboard.domain.project.ProjectWithEnvironments;
 import com.switchboard.domain.project.SdkKey;
 import com.switchboard.domain.project.SdkKeyKind;
 import com.switchboard.interfaces.rest.model.EnvironmentResponse;
+import com.switchboard.interfaces.rest.model.OrgInvitationResponse;
+import com.switchboard.interfaces.rest.model.OrgInvitationStatus;
 import com.switchboard.interfaces.rest.model.OrgMemberResponse;
 import com.switchboard.interfaces.rest.model.OrgResponse;
 import com.switchboard.interfaces.rest.model.OrgRole;
@@ -28,6 +31,17 @@ public final class TopologyMappers {
         return new OrgMemberResponse(
             member.userId(), member.email(), OrgRole.fromValue(member.role()), member.joinedAt())
             .displayName(member.displayName());
+    }
+
+    public static OrgInvitationResponse toInvitationResponse(OrgInvitation invitation) {
+        return new OrgInvitationResponse(
+            invitation.id(),
+            invitation.email(),
+            OrgRole.fromValue(invitation.role()),
+            OrgInvitationStatus.fromValue(invitation.status().name()),
+            invitation.invitedBy(),
+            invitation.createdAt())
+            .acceptedAt(invitation.acceptedAt());
     }
 
     public static ProjectResponse toProjectResponse(ProjectWithEnvironments project) {

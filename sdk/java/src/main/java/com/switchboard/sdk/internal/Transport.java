@@ -2,6 +2,8 @@ package com.switchboard.sdk.internal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -9,11 +11,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
- * HTTP against the Switchboard API: the conditional bootstrap and the SSE change stream.
+ * HTTP against the Switchboard API: the conditional bootstrap, the SSE change stream and
+ * telemetry ingestion.
  *
  * <p>{@code java.net.http} rather than a client dependency. An SDK that pins a version of
  * OkHttp or Netty picks a fight with whatever the host application already uses, and the JDK
@@ -130,6 +134,66 @@ public final class Transport {
         try (InputStream body = response.body()) {
             SseParser.parse(body, onEvent);
         }
+    }
+
+    /** {@code POST /api/events/eval}. 202 is success; anything else throws. */
+    public void postEvalEvents(List<TelemetryBuffer.EvalEvent> events) throws IOException, InterruptedException {
+        ObjectNode body = JSON.createObjectNode();
+        ArrayNode items = body.putArray("events");
+        for (TelemetryBuffer.EvalEvent event : events) {
+            ObjectNode item = items.addObject()
+                .put("flagKey", event.flagKey())
+                .put("contextKey", event.contextKey());
+            // Both optional in the contract; sent as null rather than omitted, as the
+            // TypeScript SDK does.
+            item.put("variationId", event.variationId() == null ? null : event.variationId().toString());
+            item.put("reason", event.reason());
+            item.put("occurredAt", event.occurredAt().toString());
+        }
+        postBatch("/api/events/eval", body);
+    }
+
+    /** {@code POST /api/events/metrics}. 202 is success; anything else throws. */
+    public void postMetrics(List<TelemetryBuffer.MetricEvent> events) throws IOException, InterruptedException {
+        ObjectNode body = JSON.createObjectNode();
+        ArrayNode items = body.putArray("events");
+        for (TelemetryBuffer.MetricEvent event : events) {
+            items.addObject()
+                .put("contextKey", event.contextKey())
+                .put("metricKey", event.metricKey())
+                .put("value", event.value())
+                .put("occurredAt", event.occurredAt().toString());
+        }
+        postBatch("/api/events/metrics", body);
+    }
+
+    /**
+     * One telemetry batch. Throws, with a message worth logging, on anything but 202; the
+     * caller drops the batch. {@code occurredAt} is an ISO-8601 instant, which the contract's
+     * {@code format: date-time} accepts, built by hand so no Jackson time module is needed.
+     */
+    private void postBatch(String path, ObjectNode body) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(baseUri.resolve(path))
+            .timeout(requestTimeout)
+            .header("Authorization", "Bearer " + sdkKey)
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)))
+            .build();
+        HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        int status = response.statusCode();
+        if (status == 202) {
+            return;
+        }
+        if (status == 403) {
+            // Metrics drive automated rollbacks, so the server refuses them from a key that
+            // ships in a browser bundle.
+            throw new IOException("403 from " + path + ": report telemetry with a SERVER key (sb_srv_)");
+        }
+        if (status == 401) {
+            throw new IOException("401 from " + path + ": the SDK key was rejected");
+        }
+        throw new IOException("HTTP " + status + " from " + path);
     }
 
     /** One server-sent event. */

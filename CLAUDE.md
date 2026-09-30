@@ -13,10 +13,10 @@ reviewable diff. A monorepo.
 | Path | What | Tests |
 |---|---|---|
 | `evaluation/` | **The flag evaluation core.** Pure Java, zero dependencies. Shared by the backend and every JVM SDK. | 528 (508 conformance + 20 unit) |
-| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 114 unit + 111 integration |
-| `dashboard/` | React + Vite. **The primary UI.** | 337 |
+| `backend/` | Spring Boot · WebFlux · R2DBC · Flyway · Postgres. DDD layering. | 166 unit + 191 integration |
+| `dashboard/` | React + Vite. **The primary UI.** | 395 |
 | `sdk/typescript/` | OpenFeature provider with local evaluation | 562 |
-| `sdk/java/` | OpenFeature provider with local evaluation, over `evaluation/` | 509 + live check |
+| `sdk/java/` | OpenFeature provider with local evaluation, over `evaluation/` | 533 + live check |
 | `mcp/` | MCP server over the REST API, authenticated by a personal access token | 7 |
 | `spec/` | Normative evaluation spec + 507 conformance vectors | executed by `evaluation/` and the SDK |
 | `scripts/`, `docs/` | Seed, smoke suite, tooling · backlog and competitive research | |
@@ -70,6 +70,13 @@ String constants into every class that reads one, and the incremental build will
 those classes just because the constant changed — so tests keep asserting the *old* literal and
 fail with a message quoting a value that no longer exists in the source. Cost an unnecessary
 debugging detour once; a clean build is the whole fix.
+
+**The OpenAPI generator can miss a YAML edit.** It runs with `skipIfSpecIsUnchanged`, so after
+editing `switchboard-api.yaml` the generated interfaces can still reflect the old spec and compile
+errors name types whose shape looks wrong. `./mvnw clean` regenerates them.
+
+**Backend unit tests now use Mockito** (`InvitationServiceTest`, `UserServiceInvitationTest`,
+`ScimUserServiceAdoptionTest`), so it is available when a service test needs to stub a port.
 
 **Actuator lives on its own port** (`MANAGEMENT_PORT`, default 28081), and that includes
 `/actuator/health` — it 404s on 28080. Health checks and probes must target the management
@@ -128,7 +135,7 @@ same commit**. That rule is the only thing keeping the server and every SDK in a
 `spec/tools/generate-vectors.mjs` writes the combinatorial vectors (`operators.json`); the rest
 are hand-authored. `--check` fails when they are stale. The runners no longer hardcode a count.
 
-**Flyway.** Migrations are `V1`–`V13` today; the next is **V14**. They run automatically
+**Flyway.** Migrations are `V1`–`V14` today; the next is **V15**. They run automatically
 locally.
 
 ## Verifying
@@ -148,9 +155,9 @@ catch contract drift that unit tests cannot:
 ```bash
 node scripts/smoke-test.mjs                    # 51  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
-node dashboard/scripts/service-check.mjs       # 67
+node dashboard/scripts/service-check.mjs       # 81
 node dashboard/scripts/ai-check.mjs            # 54
-node dashboard/scripts/governance-check.mjs    # 38
+node dashboard/scripts/governance-check.mjs    # 54
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider configured; it prints the command
 node mcp/scripts/live-check.mjs                # 19
 ```
@@ -251,6 +258,8 @@ flaky test, a check script defaulting to a user that was never seeded.
 
 ## Where things stand
 
+User-facing docs start at `docs/self-hosting.md` (the primary path) and `docs/getting-started.md`;
+keep contributor detail out of them and in `docs/development.md` or the component READMEs.
 `docs/REMAINING-WORK.md` is the backlog: what is missing, why it matters, effort estimates,
 and a suggested order. `docs/DECISIONS.md` records the choices that look wrong until you know
 why — **read it before "fixing" something that seems obviously broken**, because several

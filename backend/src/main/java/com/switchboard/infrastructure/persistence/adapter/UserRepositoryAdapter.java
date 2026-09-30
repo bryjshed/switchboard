@@ -37,7 +37,8 @@ public class UserRepositoryAdapter implements UserRepository {
             row.get("user_id", UUID.class),
             row.get("issuer", String.class),
             row.get("subject", String.class),
-            row.get("linked_at", Instant.class));
+            row.get("linked_at", Instant.class),
+            Boolean.TRUE.equals(row.get("email_verified", Boolean.class)));
     }
 
     @Override
@@ -93,16 +94,61 @@ public class UserRepositoryAdapter implements UserRepository {
     }
 
     @Override
-    public Mono<UserIdentity> linkIdentity(UUID userId, String issuer, String subject) {
+    public Mono<User> createScimProvisioned(String email, String displayName) {
         return db.sql("""
-                INSERT INTO user_identities (user_id, issuer, subject)
-                VALUES (:userId, :issuer, :subject)
+                INSERT INTO users (email, display_name, scim_provisioned)
+                VALUES (:email, :name, true)
+                RETURNING *
+                """)
+            .bind("email", email)
+            .bind("name", displayName == null ? Parameters.in(R2dbcType.VARCHAR) : displayName)
+            .map(UserRepositoryAdapter::map)
+            .one();
+    }
+
+    @Override
+    public Mono<UserIdentity> linkIdentity(UUID userId, String issuer, String subject, boolean emailVerified) {
+        return db.sql("""
+                INSERT INTO user_identities (user_id, issuer, subject, email_verified)
+                VALUES (:userId, :issuer, :subject, :emailVerified)
                 RETURNING *
                 """)
             .bind("userId", userId)
             .bind("issuer", issuer)
             .bind("subject", subject)
+            .bind("emailVerified", emailVerified)
             .map(UserRepositoryAdapter::mapIdentity)
+            .one();
+    }
+
+    @Override
+    public Mono<Void> markEmailVerified(String issuer, String subject) {
+        // Conditional, so the common case - already verified - is a read of one unique-index
+        // entry and no write at all.
+        return db.sql("""
+                UPDATE user_identities SET email_verified = true
+                WHERE issuer = :issuer AND subject = :subject AND NOT email_verified
+                """)
+            .bind("issuer", issuer)
+            .bind("subject", subject)
+            .fetch()
+            .rowsUpdated()
+            .then();
+    }
+
+    @Override
+    public Mono<User> findVerifiedByEmail(String email) {
+        return db.sql("""
+                SELECT u.* FROM users u
+                WHERE lower(u.email) = lower(:email)
+                  AND (u.scim_provisioned OR EXISTS (
+                      SELECT 1 FROM user_identities i
+                      WHERE i.user_id = u.id AND i.email_verified))
+                ORDER BY u.created_at
+                LIMIT 1
+                """)
+            .bind("email", email)
+            .map(UserRepositoryAdapter::map)
             .one();
     }
 

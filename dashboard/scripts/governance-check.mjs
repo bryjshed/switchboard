@@ -65,6 +65,101 @@ async function api(method, path, { body, as = OWNER, expect = null } = {}) {
 
 const sorted = (a) => [...a].sort()
 
+/**
+ * The invitation flow the dashboard's Settings → Organization tab drives. Invitations are
+ * accepted when the invitee signs in, and a dev token (`Bearer dev:<email>`) is a verified
+ * sign-in on the local profile, so "sign in once" here is simply the first request made as
+ * that address. Every address is fresh per run.
+ */
+async function invitations(org, joinedUserIds, pendingInvitationIds) {
+  console.log('\ninvitations')
+  const run = crypto.randomUUID().slice(0, 8)
+  const invitee = `invitee-${run}@governance-check.dev`
+  const existing = `existing-${run}@governance-check.dev`
+  const revokee = `revokee-${run}@governance-check.dev`
+  const base = `/api/orgs/${org.id}/invitations`
+
+  // Someone with no account yet: the invitation waits.
+  const invited = (
+    await api('POST', base, { body: { email: invitee, role: 'MEMBER' }, expect: 201 })
+  ).body
+  checkShape('OrgInvitationResponse', invited, [
+    'id',
+    'email',
+    'role',
+    'status',
+    'invitedBy',
+    'createdAt',
+  ])
+  check('an address with no account is invited PENDING', invited.status === 'PENDING', invited.status)
+  pendingInvitationIds.push(invited.id)
+  const listed = (await api('GET', base, { expect: 200 })).body
+  check('the pending invitation is listed', listed.some((i) => i.id === invited.id))
+  const duplicate = await api('POST', base, { body: { email: invitee, role: 'MEMBER' } })
+  check('a second pending invitation for the same address is 409', duplicate.status === 409, `got ${duplicate.status}`)
+
+  // First sign-in accepts it.
+  const inviteeMe = (await api('GET', '/api/users/me', { as: invitee, expect: 200 })).body
+  joinedUserIds.push(inviteeMe.id)
+  check(
+    'the first sign-in accepts the invitation (membership on /users/me)',
+    inviteeMe.memberships.some((m) => m.orgId === org.id && m.role === 'MEMBER'),
+    JSON.stringify(inviteeMe.memberships),
+  )
+  pendingInvitationIds.splice(pendingInvitationIds.indexOf(invited.id), 1)
+  const inviteeOrgs = (await api('GET', '/api/orgs', { as: invitee, expect: 200 })).body
+  check('the org is in the invitee’s org list', inviteeOrgs.some((o) => o.id === org.id))
+  const members = (await api('GET', `/api/orgs/${org.id}/members`, { expect: 200 })).body
+  check('the invitee is listed as a member', members.some((m) => m.email === invitee))
+  const inviteePerms = (
+    await api('GET', `/api/users/me/permissions?orgId=${org.id}`, { as: invitee, expect: 200 })
+  ).body
+  check(
+    'the invitee can read flags straight away (FLAG_READ)',
+    inviteePerms.permissions.includes('FLAG_READ'),
+    JSON.stringify(inviteePerms.permissions),
+  )
+  check(
+    'a MEMBER invitation does not hand out member management',
+    !inviteePerms.permissions.includes('MANAGE_MEMBERS'),
+  )
+  const afterAccept = (await api('GET', base, { expect: 200 })).body
+  check('an accepted invitation leaves the pending list', !afterAccept.some((i) => i.id === invited.id))
+  const memberPeek = await api('GET', base, { as: invitee })
+  check(
+    'listing invitations needs MANAGE_MEMBERS (a MEMBER gets 403)',
+    memberPeek.status === 403,
+    `got ${memberPeek.status}`,
+  )
+
+  // Someone who already has an account: added on the spot.
+  const existingMe = (await api('GET', '/api/users/me', { as: existing, expect: 200 })).body
+  const direct = (
+    await api('POST', base, { body: { email: existing, role: 'MEMBER' }, expect: 201 })
+  ).body
+  joinedUserIds.push(existingMe.id)
+  check('an address that already has an account comes back ACCEPTED', direct.status === 'ACCEPTED', direct.status)
+  const membersAfter = (await api('GET', `/api/orgs/${org.id}/members`, { expect: 200 })).body
+  check('…and is a member immediately', membersAfter.some((m) => m.email === existing))
+
+  // Revoke: a revoked invitation is never accepted.
+  const toRevoke = (
+    await api('POST', base, { body: { email: revokee, role: 'MEMBER' }, expect: 201 })
+  ).body
+  pendingInvitationIds.push(toRevoke.id)
+  const revoked = await api('DELETE', `${base}/${toRevoke.id}`)
+  check('revokeInvitation returns 204', revoked.status === 204, `got ${revoked.status}`)
+  if (revoked.status === 204) pendingInvitationIds.splice(pendingInvitationIds.indexOf(toRevoke.id), 1)
+  const afterRevoke = (await api('GET', base, { expect: 200 })).body
+  check('a revoked invitation leaves the pending list', !afterRevoke.some((i) => i.id === toRevoke.id))
+  const revokeeMe = (await api('GET', '/api/users/me', { as: revokee, expect: 200 })).body
+  check(
+    'signing in after a revoke does NOT join the org',
+    !revokeeMe.memberships.some((m) => m.orgId === org.id),
+    JSON.stringify(revokeeMe.memberships),
+  )
+}
+
 async function main() {
   console.log(`Switchboard governance check → ${API_BASE}\n`)
 
@@ -142,6 +237,9 @@ async function main() {
   ])
   let grantId = null
   let openedRequestId = null
+  // Accounts and invitations the invitation section creates, removed again in the finally.
+  const joinedUserIds = []
+  const pendingInvitationIds = []
 
   try {
     // ── A scoped grant applies where it was made, and nowhere else ──────────
@@ -216,6 +314,9 @@ async function main() {
       'the grant is listed for the roles admin screen',
       assignments.items.some((a) => a.id === grantId),
     )
+
+    // ── Invitations: invite → pending → first sign-in → member ─────────────
+    await invitations(org, joinedUserIds, pendingInvitationIds)
 
     // ── Turn approval on for production ────────────────────────────────────
     console.log('\napproval policy')
@@ -423,6 +524,16 @@ async function main() {
         restored.body.requireApproval === originalSettings.requireApproval &&
         restored.body.minApprovals === originalSettings.minApprovals,
     )
+    // Not asserted: how many of these exist depends on how far the run got, and a pass count
+    // that varies with failures would be confusing.
+    for (const id of pendingInvitationIds) {
+      const res = await api('DELETE', `/api/orgs/${org.id}/invitations/${id}`)
+      console.log(`  revoked left-over invitation ${id} (${res.status})`)
+    }
+    for (const userId of joinedUserIds) {
+      const res = await api('DELETE', `/api/orgs/${org.id}/members/${userId}`)
+      console.log(`  removed invitation-check member ${userId} (${res.status})`)
+    }
     if (grantId) {
       const revoked = await api('DELETE', `/api/orgs/${org.id}/role-assignments/${grantId}`)
       check('reviewer grant revoked', revoked.status === 204, `got ${revoked.status}`)

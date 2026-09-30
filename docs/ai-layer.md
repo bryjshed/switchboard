@@ -16,6 +16,45 @@ Healing and optimizing work without any API key. Only the natural-language path 
 
 ---
 
+## Turning it on
+
+Healing and optimizing need nothing installed and no key. They need three things from you:
+
+1. **AI features on.** **Settings → AI → AI features**. On by default for every organization;
+   an owner can turn it off, after which Switchboard scans nothing and drafts nothing.
+2. **Outcomes reported, under metric keys the project defines.** Your application reports
+   `error` and `conversion` events for the same context keys it evaluates with — the SDKs'
+   `track()` does this, and records which variation each context was served. Other keys drive
+   the monitor only once they are defined for the project. See
+   [integrating.md](integrating.md#reporting-outcomes).
+3. **A flag that is splitting traffic** — a percentage rollout in the fallthrough or in a rule,
+   in an environment that is not killed.
+
+With that, the monitor scans every hour and its findings appear under **Monitor** and on the
+flag's **Monitor** tab, with a drafted rollback or ramp step under **Proposals**. Nothing is
+applied until a person applies it — unless an owner turns on, under **Settings → AI**:
+
+- **Roll back a rollout automatically when a variant starts erroring** (auto-rollback), and/or
+- **Ramp up a variant that is winning** (auto-optimize).
+
+Both are off by default. Each automatic action is an ordinary new version, reversible from the
+flag's **History** tab and marked as an AI change in **Activity**. In an environment that requires
+approval, automated rollbacks skip the queue unless the environment turns that off — see
+[governance.md](governance.md#the-two-deliberate-bypasses).
+
+**Expect silence at first.** The monitor says nothing about a variation until both it and the
+baseline have at least 200 distinct subjects (`rollout-monitor.min-subjects`) since the rollout's
+split last changed, and it reacts only to differences at least as large as the metric's
+threshold — 1 percentage point for `error`, 2 for `conversion`. A small or brand-new rollout
+producing no findings is the monitor working, not failing.
+
+**Natural-language flag creation** (**Ask AI** on the Flags and flag pages) additionally needs
+`ANTHROPIC_API_KEY` set on the backend. Without it the dialog explains that and the rest of the
+AI layer is unaffected.
+
+**Stale flags** are swept by `POST /api/jobs/stale-flag-scan`, which is not scheduled in-process —
+see [DEPLOYMENT.md](DEPLOYMENT.md#scheduled-jobs).
+
 ## The closed circuit
 
 Your application reports outcomes, the scan judges them, and the result is an ordinary flag change.
@@ -43,8 +82,9 @@ flowchart TD
 Both auto behaviours are per-org settings, off by default, and every application lands as an ordinary
 audited version you can roll back.
 
-Scans run from `POST /api/jobs/rollout-scan` and `/api/jobs/stale-flag-scan` (shared-secret header)
-so a scheduler drives them; an hourly in-process job is only a backstop.
+The rollout scan runs hourly in-process, and `POST /api/jobs/rollout-scan` (shared-secret header)
+lets an external scheduler drive it instead — which matters when instances scale to zero, since a
+stopped instance fires no timer.
 
 ## The statistics, and why they are what they are
 
@@ -133,8 +173,14 @@ construction giving always-valid FDR across unboundedly many scans, and it would
 
 ## Configuration
 
-Everything above is tunable under `switchboard.rollout-monitor` in `application.yml`: the two alphas,
-the mixture scales, the subject floor, the lookback ceiling, the SRM gate and the metric keys.
+Instance-wide settings live under `switchboard.rollout-monitor` in `application.yml`: the three
+alphas (heal, optimize, SRM), the subject floor, the lookback ceiling, the SRM gate and the scan
+concurrency. [DEPLOYMENT.md](DEPLOYMENT.md#backend) lists them.
+
+**Which metrics are tested, their direction and their τ are per project**, in metric definitions
+(`/api/projects/{projectId}/metrics`), seeded with `error` and `conversion` on every project. The
+older `rollout-monitor.metrics.*` and `rollout-monitor.tau.*` keys in `application.yml` are no
+longer read; the definitions replaced them.
 
 One caution, and it is counter-intuitive: **the mixture scale τ must be set from what you consider
 worth reacting to, never fitted to what the data is doing.** Validity does not depend on it — only

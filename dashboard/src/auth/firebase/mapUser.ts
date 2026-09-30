@@ -5,6 +5,7 @@ export interface FirebaseUserLike {
   uid: string
   email: string | null
   displayName: string | null
+  emailVerified?: boolean
 }
 
 /**
@@ -17,5 +18,6 @@ export function firebaseToAuthUser(user: FirebaseUserLike | null): AuthUser | nu
     subject: user.uid,
     email: user.email ?? null,
     displayName: user.displayName ?? null,
+    emailVerified: user.emailVerified,
   }
 }

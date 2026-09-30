@@ -14,13 +14,37 @@ Both evaluate identically. The provider is a thin wrapper over the client.
 
 ## Install
 
+**Node.js only.** Local evaluation hashes with Node's `crypto` module, and the provider targets
+OpenFeature's server SDK, so this package does not run in a browser. For browser code, use a
+client-side key against the evaluated-bootstrap endpoint or OpenFeature's web OFREP provider —
+see [integrating.md](../../docs/integrating.md#client-side-keys). A browser build is on the
+[backlog](../../docs/REMAINING-WORK.md).
+
+The package is not published to npm yet. Build it from this repository (Node 18.17 or newer; the
+SDK uses the global `fetch`):
+
 ```bash
-npm install @switchboard/openfeature-provider
-# only if you want the OpenFeature API:
-npm install @openfeature/server-sdk
+cd sdk/typescript
+npm ci && npm run build
+npm pack                      # -> switchboard-openfeature-provider-0.1.0.tgz
 ```
 
-Node 18.17 or newer (the SDK uses the global `fetch`). ESM and CommonJS builds are both published.
+Then, in your application, either install the tarball:
+
+```bash
+npm install /path/to/switchboard-openfeature-provider-0.1.0.tgz
+npm install @openfeature/server-sdk      # only if you want the OpenFeature API
+```
+
+or reference the built directory as a `file:` dependency in `package.json`:
+
+```json
+"dependencies": { "@switchboard/openfeature-provider": "file:../switchboard/sdk/typescript" }
+```
+
+To share it across teams, `npm publish` the tarball to your internal registry — see
+[self-hosting.md](../../docs/self-hosting.md#9-build-the-sdks-for-your-developers). ESM and
+CommonJS builds are both included.
 
 ## Quickstart with OpenFeature
 
@@ -29,7 +53,10 @@ import { OpenFeature } from '@openfeature/server-sdk';
 import { SwitchboardProvider } from '@switchboard/openfeature-provider';
 
 await OpenFeature.setProviderAndWait(
-  new SwitchboardProvider({ sdkKey: process.env.SWITCHBOARD_SDK_KEY! }),
+  new SwitchboardProvider({
+    sdkKey: process.env.SWITCHBOARD_SDK_KEY!,
+    baseUrl: 'https://switchboard.example.com',
+  }),
 );
 
 const client = OpenFeature.getClient();
@@ -38,6 +65,9 @@ const prompt = await client.getStringValue('agent-planner-prompt', 'prompt-v1', 
   targetingKey: 'user-42',
   agent: 'meal-planner',
 });
+
+// On shutdown: closes the stream and flushes buffered telemetry.
+await OpenFeature.close();
 ```
 
 `targetingKey` is the bucketing input. Every other context field is an attribute your rules can
@@ -49,7 +79,10 @@ test. `setProviderAndWait` resolves even when the backend is down; see
 ```ts
 import { SwitchboardClient } from '@switchboard/openfeature-provider/core';
 
-const switchboard = new SwitchboardClient({ sdkKey: process.env.SWITCHBOARD_SDK_KEY! });
+const switchboard = new SwitchboardClient({
+  sdkKey: process.env.SWITCHBOARD_SDK_KEY!,
+  baseUrl: 'https://switchboard.example.com',
+});
 await switchboard.start();
 
 const context = { key: 'user-42', attributes: { plan: 'pro', platform: 'ios' } };
@@ -73,7 +106,7 @@ Everything but `sdkKey` is optional.
 | --- | --- | --- | --- |
 | `sdkKey` | `string` | required | `sb_srv_...` (server) or `sb_cli_...` (client-side). Scopes the client to one environment, and **selects the mode** — see below. |
 | `context` | `EvalContext` | required for a client key, rejected for a server key | The context to evaluate for. Change it with `setContext()`. |
-| `baseUrl` | `string` | `http://localhost:28080` | Switchboard API origin. |
+| `baseUrl` | `string` | `http://localhost:28080` | Switchboard API origin. **Set it** — the default is the development stack. |
 | `mode` | `'streaming' \| 'polling'` | `'streaming'` | `streaming` holds an SSE connection; `polling` re-fetches bootstrap on an interval with `If-None-Match`. |
 | `pollIntervalMs` | `number` | `30000` | Poll interval in `polling` mode. |
 | `bootstrapTimeoutMs` | `number` | `5000` | Timeout on the initial bootstrap and on every other HTTP call. |
@@ -227,28 +260,6 @@ replay `run-8f21c4` tomorrow, or on another machine, or against the server's own
 `POST /api/eval/{flagKey}`, and it still gets the prompt it got the first time. Widening a rollout
 from 10% to 25% does not reshuffle anyone; it only adds runs.
 
-## Correctness
-
-Evaluation behaviour is defined by [`spec/evaluation.md`](../../spec/evaluation.md), not by this
-implementation. This SDK is verified against the shared conformance vectors in
-[`spec/conformance/`](../../spec/conformance) (201 vectors covering precedence, clause operators,
-segments, bucketing, stickiness across ramps and rollout weight rules), the same files the Java
-reference implementation runs. If this SDK and the server ever disagree, one of them is failing a
-vector.
-
-```bash
-npm test           # conformance vectors + transport + telemetry
-npm run conformance
-npm run check      # typecheck, lint, test, build
-node scripts/live-check.mjs   # against a running backend: local evaluation vs POST /api/eval
-```
-
-`scripts/live-check.mjs` is the end-to-end proof. It mints a real SDK key, boots a client, and for
-every seeded flag across ten contexts asserts that the answer computed locally matches the answer
-the server returns for the same context (value, variation, reason and rule), then flips a flag
-through the management API and times how long the SSE stream takes to deliver it.
-
-
 ## Client-side keys
 
 The mode is **derived from the key**, not configured. There is deliberately no `mode: 'client'`
@@ -262,6 +273,10 @@ deriving it makes that unrepresentable.
 | Context | Per evaluation | Fixed at construction, changed with `setContext()` |
 | Flags visible | All of them | Only those marked available to client-side SDKs |
 | Safe to ship in a browser | **No** | Yes |
+
+The key is safe in a browser; this package is not built for one yet (see [Install](#install)).
+Client mode here is for Node processes that should see only what a browser would — a
+server-side renderer, say.
 
 ```ts
 const client = new SwitchboardClient({
@@ -285,3 +300,24 @@ Two things that will otherwise surprise you:
 - **Metric events are refused from a client key.** They drive the automated rollback loop, so
   accepting them from a key anyone can read out of a bundle would be accepting unauthenticated flag
   changes. Report them from your server.
+
+## Correctness (for contributors)
+
+Evaluation behaviour is defined by [`spec/evaluation.md`](../../spec/evaluation.md), not by this
+implementation. This SDK is verified against the shared conformance vectors in
+[`spec/conformance/`](../../spec/conformance) (every vector file: precedence, clause operators,
+segments, bucketing, stickiness across ramps and rollout weight rules), the same files the Java
+reference implementation runs. If this SDK and the server ever disagree, one of them is failing a
+vector.
+
+```bash
+npm test           # conformance vectors + transport + telemetry
+npm run conformance
+npm run check      # typecheck, lint, test, build
+node scripts/live-check.mjs   # against a running backend: local evaluation vs POST /api/eval
+```
+
+`scripts/live-check.mjs` is the end-to-end proof. It mints a real SDK key, boots a client, and for
+every seeded flag across ten contexts asserts that the answer computed locally matches the answer
+the server returns for the same context (value, variation, reason and rule), then flips a flag
+through the management API and times how long the SSE stream takes to deliver it.

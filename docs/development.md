@@ -27,11 +27,27 @@ docs/       Architecture, governance, the AI layer, performance, the backlog, ma
 carrying their own, which is what makes it impossible for them to disagree about bucketing or
 precedence — see [DECISIONS.md](DECISIONS.md#the-evaluation-core).
 
-There was an Expo mobile companion; it was deleted on 2026-08-24 and is in git history if it is
-ever wanted back. See [DECISIONS.md](DECISIONS.md#product-scope).
-
 Each component carries its own README: [backend](../backend/README.md),
-[dashboard](../dashboard/README.md), [SDK](../sdk/typescript/README.md), [spec](../spec/README.md).
+[dashboard](../dashboard/README.md), [TypeScript SDK](../sdk/typescript/README.md),
+[Java SDK](../sdk/java/README.md), [MCP server](../mcp/README.md), [spec](../spec/README.md).
+
+## How the pieces fit
+
+Every surface speaks to the same REST API, so nothing can do something another cannot. Changes
+propagate through Postgres `NOTIFY`, which means a second backend instance learns about a flag
+change the same way the first one does — there is no Redis or message broker in the picture.
+
+**That same channel is what makes the caches safe.** Reads are served from in-process caches and a
+write evicts them everywhere, so the TTLs are a backstop against a dropped notification rather than
+a budget for how stale an answer may be. A shared cache would add a network hop to the hottest read
+in the product and buy nothing — which is why there is still no Redis here. The one thing that would
+genuinely want one is the rate limiter, and only above a single instance;
+[DEPLOYMENT.md](DEPLOYMENT.md#scaling-past-one-node) says so in order.
+
+**The Java SDK and the server run the same evaluator.** Bucketing, the operators, semver and
+precedence live in one JDK-only module both compile against, so there is no second implementation
+to drift from the first. The TypeScript SDK is a second implementation, kept honest by executing the
+same conformance vectors. [architecture.md](architecture.md) has the model and the write path.
 
 ## Running it
 
@@ -56,6 +72,7 @@ user, auto-provisioning. Every check script uses them.
 
 ```bash
 make test    # unit + integration (Testcontainers), including the concurrency race tests
+             # runs from the repo root: evaluation/, backend/ and sdk/java/ are one reactor build
 make smoke   # 51 API cases end to end, negative paths included
 make check   # compile + checkstyle
 ```
@@ -89,9 +106,9 @@ drift that unit tests cannot:
 ```bash
 node scripts/smoke-test.mjs                    # 51  · repo root
 node sdk/typescript/scripts/live-check.mjs     # 32  · client vs server agreement
-node dashboard/scripts/service-check.mjs       # 67
+node dashboard/scripts/service-check.mjs       # 81
 node dashboard/scripts/ai-check.mjs            # 54
-node dashboard/scripts/governance-check.mjs    # 38
+node dashboard/scripts/governance-check.mjs    # 54
 node dashboard/scripts/auth-check.mjs          # 19  · needs a second OIDC provider; it prints the command
 node mcp/scripts/live-check.mjs                # 19  · every MCP tool against a real stack
 ```
@@ -124,7 +141,9 @@ for the manual passes, including the kill-switch drill and the SSE watch.
 ### CI
 
 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs all of the above on every pull
-request. Two jobs are worth knowing about before you edit it:
+request, the live checks included: they bring up a real stack, seed it, and run all seven. Contract
+drift is exactly what unit tests miss, so it is the one thing a merge should not be able to get
+past. Two jobs are worth knowing about before you edit it:
 
 **`conformance`** is its own job rather than a step inside `backend` or `sdk`, because it belongs
 to neither: it runs the Java vector runner, the TypeScript one, and `generate-vectors.mjs --check`.

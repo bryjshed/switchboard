@@ -7,7 +7,7 @@ from — read that for who has each feature and how the market treats it.
 Effort is **S** (a day or less), **M** (a few days), **L** (a week or more), measured
 against the architecture as it stands.
 
-**Status of the product today.** Evaluation core (528, shared by the server and the Java SDK), backend (114 unit + 111 integration), TypeScript SDK (562), Java SDK (509 + a live check), MCP server (7), web dashboard (337),
+**Status of the product today.** Evaluation core (528, shared by the server and the Java SDK), backend (166 unit + 191 integration), TypeScript SDK (562), Java SDK (533 + a live check), MCP server (7), web dashboard (395),
 an evaluation spec with 507 conformance vectors executed by both the server and
 the SDK, and seven live-check scripts against a running stack, plus the Java SDK's live check.
 
@@ -766,6 +766,39 @@ the reasons held.
 21. The **§5 long tail**: prompt registry, LLM metrics, prerequisite flags, scheduled changes,
     bulk targeting/CSV, code-references scanner, Terraform provider, CLI, evaluation explainer,
     OpenTelemetry, Slack app.
+
+### Opened by the onboarding work (2026-09-29)
+
+Writing the self-hosting and getting-started path end to end surfaced these. Each is something a
+new company hits in its first week.
+
+22. **Invitation email delivery.** Invitations are accepted on first sign-in with a verified
+    email, but nothing tells the invitee they were invited — the admin shares the URL by hand.
+    Needs an outbound mail port (SMTP or a provider) with a keyless no-op default, and a decision
+    about whether an emailed link should carry a token or stay a plain URL (today's
+    verified-email rule is what makes a plain URL safe). **S–M**
+23. **Publishing the SDKs.** Neither SDK is on Maven Central or npm, so every adopter builds from
+    source (`./mvnw -pl evaluation,sdk/java -am install`, `npm pack`) and republishes internally.
+    Needs group/package ownership, signing, a release workflow, and — for Java — a decision on the
+    release-25 bytecode target, which excludes applications on older JVMs. **M**
+24. **A browser build of the TypeScript SDK.** Local evaluation imports `node:crypto` and the
+    provider targets OpenFeature's server SDK, so browsers use the evaluated-bootstrap endpoint or
+    the OFREP web provider directly. A browser entry point needs a pure-JS MD5 (bucketing must stay
+    byte-identical, see `spec/evaluation.md` §5) and an `@openfeature/web-sdk` provider over
+    client keys. **M**
+25. **Metric-definition UI.** Metric definitions (`/api/projects/{projectId}/metrics`) decide what
+    the monitor acts on, and have no dashboard screen — defining anything beyond `error` and
+    `conversion` means a curl. A project-settings table with direction, τ and auto-act, and a
+    warning that τ must be chosen rather than fitted. **S–M**
+26. **Custom-role UI.** Roles are rows, so a custom role is an INSERT — but only with database
+    access. A roles editor over the existing permission vocabulary, with the union semantics
+    explained in the editor itself. **M**
+27. **In-process scheduling for the remaining jobs.** Only the rollout scan and webhook sweep have
+    timers. `partition-roll`, `stale-flag-scan` and `audit-retention` run only when something
+    calls `/api/jobs/*`, so a self-hoster who never sets up cron gets no partition creation, no
+    event expiry and no stale-flag proposals — silently. Either timers behind the same
+    `JOBS_SCHEDULED_ENABLED` switch, or a startup warning when `JOB_TOKEN` is empty. Documented in
+    DEPLOYMENT.md#scheduled-jobs meanwhile. **S**
 
 Plus §1's two items, which still need a human rather than an agent: an `ANTHROPIC_API_KEY` (the
 prompt-to-diff-to-apply loop has never executed) and a visual pass in light and dark.

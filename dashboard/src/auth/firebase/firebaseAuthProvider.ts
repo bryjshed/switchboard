@@ -5,6 +5,8 @@ import {
   getAuth,
   inMemoryPersistence,
   onAuthStateChanged,
+  reload,
+  sendEmailVerification,
   setPersistence,
   signInWithEmailAndPassword,
   signOut,
@@ -80,6 +82,25 @@ export function createFirebaseAuthProvider(config: FirebaseAuthConfig): Dashboar
 
     onAuthStateChanged(cb: (user: AuthUser | null) => void): () => void {
       return onAuthStateChanged(requireAuth(), (user) => cb(firebaseToAuthUser(user)))
+    },
+
+    // Email/password accounts start unverified, and the backend accepts an org invitation only
+    // for a verified address — so without this an invited teammate could never join.
+    async sendEmailVerification(): Promise<void> {
+      const user = requireAuth().currentUser
+      if (!user) throw new Error('Sign in before asking for a verification email')
+      await sendEmailVerification(user)
+    },
+
+    // Verifying happens in another tab (the emailed link), and neither the cached User nor the
+    // cached ID token notice: `reload` refreshes `emailVerified`, and a forced token carries the
+    // new `email_verified` claim the backend reads. onAuthStateChanged does not fire for either.
+    async refreshToken(): Promise<AuthUser | null> {
+      const user = requireAuth().currentUser
+      if (!user) return null
+      await reload(user)
+      await user.getIdToken(true)
+      return firebaseToAuthUser(requireAuth().currentUser)
     },
   }
 }

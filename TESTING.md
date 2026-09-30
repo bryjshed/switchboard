@@ -11,8 +11,7 @@ make seed                         # demo data; prints SDK keys — copy them som
 make dashboard                    # web UI on :5273  <- sign in here
 ```
 
-The web dashboard is the primary and only UI. (There was an Expo companion; it was deleted on
-2026-08-24 — see docs/DECISIONS.md.)
+The web dashboard is the only UI. [docs/dashboard-guide.md](docs/dashboard-guide.md) describes each page.
 
 Logins, all password `password123`:
 
@@ -157,9 +156,40 @@ compare the two prompt revisions by error and conversion rate.
 
 ## Access control
 
-- Sign in as bob: he sees Acme Mobile but cannot add members or mint SDK keys.
+- Sign in as bob: he sees Acme Mobile but cannot invite members or mint SDK keys.
 - Sign in as carol: she sees only Beta Labs. Acme's flags must be invisible to her.
 - Revoke an SDK key in Settings, then evaluate with it: `401`.
+
+## First run and invitations
+
+The local stack runs with org creation `open`, so any new user may create an org. To see the
+`bootstrap` behaviour, start the backend with `SWITCHBOARD_ORG_CREATION=bootstrap` against a
+reset database.
+
+The seeded users are verified. A new emulator account is **not**, which is exactly what the
+invitation rule turns on, so make one through the emulator's REST API:
+
+```bash
+curl -s -X POST 'http://localhost:29099/identitytoolkit.googleapis.com/v1/accounts:signUp?key=demo-api-key' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dana@example.com","password":"password123","returnSecureToken":true}'
+```
+
+- Sign in to the dashboard as dana: the app shows **Create your organization** instead of the
+  flag list, plus **Verify your email to join organizations you’ve been invited to**. Create an
+  org, then **New project…** in the switcher: the project arrives with `dev`, `staging` and
+  `production`.
+- As alice, **Settings → Organization**, invite a second fresh address (sign it up the same way
+  first). It is listed under **Pending invitations**, not added — the account is unverified.
+  Sign in as that address: still no membership.
+- On its first-run screen, **Send verification email**. The emulator does not send mail; open the
+  link from `http://localhost:29099/emulator/v1/projects/demo-switchboard/oobCodes`, then
+  **I’ve verified — check again**: they land in Acme Mobile with the invited role, and the pending
+  row is gone.
+- Invite bob (already a member): refused with 409. Invite carol (verified, other org): added
+  immediately.
+- Revoke a pending invitation, then verify and sign in as that address: no membership.
+- **Copy sign-in link** copies `http://localhost:5273/login`.
 
 ## Natural-language flag creation
 

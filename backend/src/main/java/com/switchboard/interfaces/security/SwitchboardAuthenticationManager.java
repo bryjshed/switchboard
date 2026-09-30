@@ -6,6 +6,7 @@ import com.switchboard.application.cache.SwitchboardCache;
 import com.switchboard.application.token.PersonalAccessTokenService;
 import com.switchboard.application.user.UserService;
 import com.switchboard.domain.token.PersonalAccessTokenRepository;
+import com.switchboard.domain.identity.Identities;
 import com.switchboard.domain.identity.IdentityProviderPort;
 import com.switchboard.domain.identity.IdentityVerificationException;
 import com.switchboard.domain.identity.VerifiedIdentity;
@@ -121,8 +122,9 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
                 tokens.touchLastUsed(hash, Instant.now())
                     .onErrorResume(e -> Mono.empty())
                     .subscribe();
+                // No verifiedEmail: a token proves possession of a secret, not of a mailbox.
                 AuthenticatedUser principal = new AuthenticatedUser(
-                    user.id(), user.email(), PAT_ISSUER, user.id().toString());
+                    user.id(), user.email(), PAT_ISSUER, user.id().toString(), null);
                 return UsernamePasswordAuthenticationToken.authenticated(
                     principal, null, USER_AUTHORITIES);
             });
@@ -152,8 +154,10 @@ public class SwitchboardAuthenticationManager implements ReactiveAuthenticationM
      * person would therefore keep working perfectly.
      */
     private Authentication userAuth(User user, VerifiedIdentity identity) {
+        boolean vouched = identity.emailVerified() || Identities.DEV_ISSUER.equals(identity.issuer());
         AuthenticatedUser principal = new AuthenticatedUser(
-            user.id(), user.email(), identity.issuer(), identity.subject());
+            user.id(), user.email(), identity.issuer(), identity.subject(),
+            vouched ? identity.email() : null);
         return UsernamePasswordAuthenticationToken.authenticated(
             principal, null, user.deactivated() ? List.of() : USER_AUTHORITIES);
     }

@@ -1,9 +1,12 @@
 # Deployment
 
-Running Switchboard somewhere other than a laptop.
+The operator reference for running Switchboard somewhere other than a laptop.
 
-Companion to [development.md](development.md), which covers the local stack. Everything here is
-about the differences, and the differences are mostly about what must *not* carry over.
+**Setting up a new instance? Start with [self-hosting.md](self-hosting.md)**, which walks through
+it in order — identity provider, first admin, inviting the team, building the SDKs. This page is
+the reference behind it: every setting, the management port, scheduled jobs, migrations,
+retention, backups and scaling. [development.md](development.md) covers the local stack; the
+differences are mostly about what must *not* carry over.
 
 ---
 
@@ -18,8 +21,10 @@ Three containers: Postgres, the backend, and the dashboard behind nginx. The bac
 schema on boot, so there is no separate install step and the first `up` on an empty volume is a
 working install.
 
-Then create the first user by signing in — Switchboard auto-provisions on first authenticated
-request — and see [governance.md](governance.md) for what that user can do.
+Then sign in: Switchboard creates a user on the first authenticated request, and under the
+`bootstrap` org-creation mode (the default here) the first person to sign in creates the
+organization and invites everyone else. See [self-hosting.md](self-hosting.md#7-the-first-admin-signs-in-and-creates-the-organization)
+and [governance.md](governance.md).
 
 ## What is deliberately absent from a production image
 
@@ -57,12 +62,41 @@ message naming both ways out. Running the emulator locally means `make backend`
 | `MANAGEMENT_PORT` | `28081` | Actuator. See [The management port](#the-management-port). |
 | `FLYWAY_ENABLED` | `true` | Migrate on boot. |
 | `FIREBASE_PROJECT_ID` | `demo-switchboard` | Only meaningful for the default Firebase provider. |
-| `JOB_TOKEN` | *(empty)* | Shared secret for `POST /api/jobs/*`. Empty closes the HTTP triggers; the scheduled in-process runs are unaffected. |
-| `JOBS_SCHEDULED_ENABLED` | `true` | Turn off if an external scheduler drives the jobs instead. |
+| `SWITCHBOARD_ORG_CREATION` | `open` (`bootstrap` in `docker-compose.prod.yml`) | Who may create an organization. `open`: anyone signed in. `bootstrap`: only the first person, while no org exists; everyone else joins by invitation. Any other value fails startup. See [self-hosting.md](self-hosting.md#org-creation-open-or-bootstrap). |
+| `JOB_TOKEN` | *(empty)* | Shared secret for `POST /api/jobs/*`, sent as `X-Job-Token`. Empty closes the HTTP triggers. See [Scheduled jobs](#scheduled-jobs) — three of the jobs only run this way. |
+| `JOBS_SCHEDULED_ENABLED` | `true` | The in-process rollout scan and webhook sweep. Turn off if an external scheduler drives them instead. |
 | `ANTHROPIC_API_KEY` | *(empty)* | Natural-language flag authoring only. Healing, optimizing and the stale sweep work without it. |
 | `RATELIMIT_ENABLED` `RATELIMIT_RPM` `RATELIMIT_BURST` | `true` `6000` `600` | Per credential, per instance. See [Rate limiting](#rate-limiting-and-the-honest-answer-about-redis). |
 | `EVENT_RETENTION_MONTHS` | `3` | See [Retention](#retention). |
 | `EVENT_PARTITION_MONTHS_AHEAD` | `2` | How far ahead the roll job creates partitions. |
+| `AUDIT_RETENTION_MONTHS` | `0` (keep forever) | Deletes audit entries older than this, when the audit-retention job runs. Off by default on purpose. |
+
+`docker-compose.prod.yml` passes through every variable above, plus `SPRING_APPLICATION_JSON`
+(empty by default), and `.env.prod.example` lists them. Anything else goes in an override file
+added with a second `-f`.
+
+**Properties without a dedicated variable** are still settable from the environment through
+Spring's relaxed binding — upper-case, dots to underscores, dashes dropped
+(`switchboard.rollout-monitor.min-subjects` → `SWITCHBOARD_ROLLOUTMONITOR_MINSUBJECTS`) — or all
+at once through `SPRING_APPLICATION_JSON`. The ones an operator may want:
+
+| Property | Default | What it is |
+|---|---|---|
+| `spring.r2dbc.pool.initial-size` / `max-size` | `2` / `10` | Connections per instance. See [Scaling past one node](#scaling-past-one-node). |
+| `switchboard.rollout-monitor.enabled` | `true` | The rollout scan at all. |
+| `switchboard.rollout-monitor.min-subjects` | `200` | Distinct subjects each arm needs before it is compared. |
+| `switchboard.rollout-monitor.max-lookback` | `P30D` | Ceiling on the evidence window. |
+| `switchboard.rollout-monitor.scan-concurrency` | `4` | Flags aggregated in parallel per scan. |
+| `switchboard.rollout-monitor.alpha.heal` / `.optimize` / `.srm` | `0.05` / `0.01` / `0.001` | Error budgets for rollback, ramp and the sample-ratio gate. |
+| `switchboard.rollout-monitor.srm.enabled` / `.min-subjects` | `true` / `500` | The sample-ratio-mismatch gate. |
+| `switchboard.rollout-monitor.aggregate-work-mem` | *(unset)* | e.g. `64MB`; raises Postgres `work_mem` for the scan's aggregation only. |
+| `switchboard.cache.provider` | `caffeine` | The cache seam. Caffeine is the only provider today. |
+| `switchboard.webhooks.timeout-seconds` / `sweep-batch` | `5` / `100` | Per-delivery timeout; retries per sweep. |
+| `switchboard.scim.default-role` | `MEMBER` | Role given to a user provisioned over SCIM. |
+| `switchboard.sdk.client-keys.allow-metric-events` | `false` | Accept metric events from public client keys. Read `EventsController` before turning it on. |
+
+Which metric keys the monitor tests, their direction and their thresholds are per project, not
+here — see [ai-layer.md](ai-layer.md#configuration).
 
 Identity providers are structured configuration rather than flat variables, so they come in
 through `SPRING_APPLICATION_JSON`:
@@ -133,6 +167,29 @@ livenessProbe:
   initialDelaySeconds: 60
 ```
 
+## Scheduled jobs
+
+Five maintenance jobs, each an idempotent `POST /api/jobs/<name>` authenticated by the
+`X-Job-Token` header (`JOB_TOKEN`). Only two also run on a timer inside the backend:
+
+| Job | In-process timer | Suggested external schedule |
+|---|---|---|
+| `rollout-scan` | hourly | optional; drive it externally if instances scale to zero |
+| `webhook-sweep` | every 30 s | optional, as above |
+| `partition-roll` | **none** | daily |
+| `stale-flag-scan` | **none** | daily |
+| `audit-retention` | **none** | daily, only if `AUDIT_RETENTION_MONTHS` is set |
+
+So a deployment that never calls the other three never creates event partitions ahead, never
+expires old events, and never drafts stale-flag proposals. Set `JOB_TOKEN` and add them to cron
+(or a Kubernetes `CronJob`) on the host:
+
+```cron
+15 3 * * *  curl -fsS -X POST -H "X-Job-Token: $JOB_TOKEN" http://127.0.0.1:28080/api/jobs/partition-roll
+30 3 * * *  curl -fsS -X POST -H "X-Job-Token: $JOB_TOKEN" http://127.0.0.1:28080/api/jobs/stale-flag-scan
+45 3 * * *  curl -fsS -X POST -H "X-Job-Token: $JOB_TOKEN" http://127.0.0.1:28080/api/jobs/audit-retention
+```
+
 ## Migrations
 
 Flyway runs on boot against the JDBC URL and is the only thing that touches the schema. For a
@@ -145,7 +202,7 @@ and run migrations as a separate step (a Kubernetes `Job`, a deploy hook) before
 rolls out. That also forces the discipline that makes rolling deploys safe: **a migration must be
 compatible with the previous version of the code**, because both will be running at once.
 
-Migrations are `V1`–`V7`; the next is `V8`.
+Migrations are `V1`–`V14`; the next is `V15`.
 
 ## Rate limiting, and the honest answer about Redis
 
@@ -167,8 +224,10 @@ instance count, then reach for Redis. In that order.
 ## Retention
 
 `eval_events` and `metric_events` are monthly-partitioned. The roll job (`POST
-/api/jobs/partition-roll`, also scheduled in-process) creates `EVENT_PARTITION_MONTHS_AHEAD`
-months forward and **drops whole partitions** older than `EVENT_RETENTION_MONTHS`.
+/api/jobs/partition-roll` — **not** run in-process; see [Scheduled jobs](#scheduled-jobs)) creates
+`EVENT_PARTITION_MONTHS_AHEAD` months forward and **drops whole partitions** older than
+`EVENT_RETENTION_MONTHS`. Until it runs, events still land safely in the `DEFAULT` partition, but
+nothing is ever expired.
 
 Two things follow, and both matter:
 
@@ -184,6 +243,11 @@ rather than expire old data.
 Epoch evidence (`rollout_epoch_evidence`) is pruned on the same window, deliberately: evidence
 about events that have been dropped cannot be rechecked, and a finding whose basis no longer
 exists is worse than no finding.
+
+**The audit log is kept forever by default.** `AUDIT_RETENTION_MONTHS=0` means no expiry; set a
+window only if a policy requires one. It is a row-wise `DELETE`, run by `POST
+/api/jobs/audit-retention`. Export first (`GET /api/orgs/{orgId}/audit/export`, NDJSON or CSV) if
+you need the history elsewhere.
 
 The one thing never dropped is each table's `DEFAULT` partition — it is what keeps an out-of-range
 event from being rejected outright, and dropping it would lose every row that landed there.
@@ -230,8 +294,9 @@ Both declare `HEALTHCHECK`s that ask for something real — the backend's readin
 dashboard's actual `index.html` — rather than proving a port is open. An image whose `dist/` never
 got copied passes the second kind of check.
 
-The backend image is built from `backend/` and the dashboard from `dashboard/`; neither needs the
-repository root as context.
+**Build contexts differ.** The backend image builds from the **repository root**
+(`docker build -f backend/Dockerfile .`), because it compiles against the sibling `evaluation/`
+module; the dashboard builds from `dashboard/`. `docker-compose.prod.yml` already sets both.
 
 ## Verifying a deployment
 

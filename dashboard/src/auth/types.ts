@@ -20,6 +20,12 @@ export interface AuthUser {
   subject: string
   email: string | null
   displayName: string | null
+  /**
+   * Whether the provider vouches for `email`. Undefined when it does not say — an OIDC IdP that
+   * sends no `email_verified` claim. The backend accepts a pending org invitation only for a
+   * verified address, so `false` is worth telling the person about; undefined is not.
+   */
+  emailVerified?: boolean
 }
 
 /** Arguments to `signIn`. Which fields matter depends on the active provider. */
@@ -62,6 +68,20 @@ export interface DashboardAuthProvider {
 
   /** Fires immediately with the current state, then on every change. Returns an unsubscribe. */
   onAuthStateChanged(cb: (user: AuthUser | null) => void): () => void
+
+  /**
+   * Sends the signed-in user a verification email. Optional: only a provider that owns the
+   * account can do this (Firebase). An OIDC IdP verifies addresses on its own terms, so the
+   * OIDC implementation leaves it undefined and the UI hides the control.
+   */
+  sendEmailVerification?(): Promise<void>
+
+  /**
+   * Re-reads the signed-in user from the provider and mints a fresh token, so a change made
+   * elsewhere (clicking the verification link in another tab) reaches the next API call.
+   * Returns the refreshed user. Optional, for the same reason as `sendEmailVerification`.
+   */
+  refreshToken?(): Promise<AuthUser | null>
 
   /** OIDC only: finish the authorization-code exchange on the callback route. */
   handleRedirectCallback?(): Promise<RedirectResult>

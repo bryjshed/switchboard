@@ -3,10 +3,12 @@ package com.switchboard.application.org;
 import com.switchboard.application.cache.CacheName;
 import com.switchboard.infrastructure.notify.CacheInvalidationPublisher;
 import com.switchboard.application.audit.AuditWriter;
+import com.switchboard.application.user.VerifiedAccounts;
 import com.switchboard.domain.access.AccessRepository;
 import com.switchboard.domain.access.AccessScope;
 import com.switchboard.domain.access.Permission;
 import com.switchboard.domain.common.ConflictException;
+import com.switchboard.domain.common.ForbiddenException;
 import com.switchboard.domain.common.NotFoundException;
 import com.switchboard.domain.org.Org;
 import com.switchboard.domain.org.OrgMemberView;
@@ -28,6 +30,8 @@ import reactor.core.publisher.Mono;
 public class OrgService {
 
     private static final String OWNER = "OWNER";
+    static final String CREATION_DISABLED =
+        "Organization creation is disabled on this instance; ask an admin for an invitation.";
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final OrgRepository orgs;
@@ -37,6 +41,7 @@ public class OrgService {
     private final AuditWriter audit;
     private final CacheInvalidationPublisher cacheInvalidation;
     private final TransactionalOperator tx;
+    private final OrgCreationPolicy creationPolicy;
 
     public OrgService(
         OrgRepository orgs,
@@ -45,7 +50,8 @@ public class OrgService {
         AccessRepository roles,
         AuditWriter audit,
         CacheInvalidationPublisher cacheInvalidation,
-        TransactionalOperator tx) {
+        TransactionalOperator tx,
+        OrgCreationPolicy creationPolicy) {
         this.orgs = orgs;
         this.users = users;
         this.access = access;
@@ -53,9 +59,27 @@ public class OrgService {
         this.audit = audit;
         this.cacheInvalidation = cacheInvalidation;
         this.tx = tx;
+        this.creationPolicy = creationPolicy;
     }
 
-    /** Creates the org and makes the creator its OWNER in one transaction. */
+    /**
+     * Whether {@link #createOrg} would pass the creation policy right now. Advisory - it is what
+     * the dashboard gates its "create organization" affordance on - and deliberately lock-free;
+     * {@code createOrg} re-checks under the lock, which is the check that counts.
+     */
+    public Mono<Boolean> canCreateOrg() {
+        return creationPolicy == OrgCreationPolicy.OPEN
+            ? Mono.just(true)
+            : orgs.anyExists().map(exists -> !exists);
+    }
+
+    /**
+     * Creates the org and makes the creator its OWNER in one transaction.
+     *
+     * <p>Under {@link OrgCreationPolicy#BOOTSTRAP} the transaction first takes an advisory lock
+     * and then checks that no org exists, so two first users racing each other on a fresh
+     * instance produce exactly one org and one 403.
+     */
     public Mono<OrgWithRole> createOrg(String name, UUID creatorId) {
         String baseSlug = slugify(name);
         return orgs.slugExists(baseSlug)
@@ -67,12 +91,24 @@ public class OrgService {
     }
 
     private Mono<OrgWithRole> insertOrgWithOwner(String name, String slug, UUID creatorId) {
-        return orgs.create(name, slug)
+        return enforceCreationPolicy()
+            .then(Mono.defer(() -> orgs.create(name, slug)))
             .flatMap(org -> orgs.addMember(org.id(), creatorId, OWNER)
                 .then(grantOrgRole(org.id(), creatorId, OWNER, "system"))
                 .thenReturn(org))
             .as(tx::transactional)
             .map(org -> withRole(org, OWNER));
+    }
+
+    private Mono<Void> enforceCreationPolicy() {
+        if (creationPolicy == OrgCreationPolicy.OPEN) {
+            return Mono.empty();
+        }
+        return orgs.lockCreation()
+            .then(Mono.defer(orgs::anyExists))
+            .flatMap(exists -> exists
+                ? Mono.<Void>error(new ForbiddenException(CREATION_DISABLED))
+                : Mono.<Void>empty());
     }
 
     /**
@@ -124,8 +160,9 @@ public class OrgService {
 
     public Mono<OrgMemberView> addMember(UUID orgId, AuthenticatedUser caller, String email, String role) {
         return access.requireOrgPermission(orgId, caller.userId(), Permission.MANAGE_MEMBERS)
-            .then(users.findByEmailPreferringReal(email)
-                .switchIfEmpty(Mono.error(new NotFoundException("No user with that email"))))
+            // Only a VERIFIED account may be added by email - see VerifiedAccounts.
+            .then(Mono.defer(() -> VerifiedAccounts.requireVerified(users, email,
+                "No user with that email has signed in yet; invite them instead")))
             .flatMap(target -> orgs.addMember(orgId, target.id(), role)
                 .flatMap(member -> grantOrgRole(orgId, target.id(), role, caller.email())
                     .then(audit.insert(

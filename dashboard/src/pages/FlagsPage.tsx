@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FlagEnvStateChip } from '@/components/FlagEnvStateChip'
 import { EmptyState } from '@/components/EmptyState'
 import { NewFlagDialog } from './flags/NewFlagDialog'
+import { CreateProjectDialog } from '@/components/workspace/CreateProjectDialog'
 import { AskAiDialog } from './ai/AskAiDialog'
 import { listFlags } from '@/lib/flagsApi'
 import { errorMessage } from '@/lib/apiClient'
@@ -21,6 +22,7 @@ import type { FlagSummary } from '@/types/api'
 
 export function FlagsPage() {
   const writeGate = usePermissionGate('FLAG_WRITE')
+  const projectGate = usePermissionGate('MANAGE_PROJECTS')
   const navigate = useNavigate()
   const { project, loading: workspaceLoading } = useWorkspace()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -33,6 +35,7 @@ export function FlagsPage() {
   const [error, setError] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [askOpen, setAskOpen] = useState(false)
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
   // Which project the table currently holds data for, so a filter change refreshes in place
   // rather than falling back to the loading skeletons.
   const loadedProjectId = useRef<string | null>(null)
@@ -142,8 +145,23 @@ export function FlagsPage() {
         <EmptyState
           icon={Flag}
           title="No project selected"
-          description="Pick a project in the header, or create one to get started."
+          description={
+            projectGate.allowed
+              ? 'Flags live in a project. Create one — it comes with dev, staging and production — or pick one in the header.'
+              : projectGate.loading
+                ? 'Pick a project in the header.'
+                : `Pick a project in the header. ${projectGate.reason}`
+          }
+          action={
+            projectGate.allowed ? (
+              <Button onClick={() => setCreateProjectOpen(true)} data-testid="flags-create-project">
+                <Plus className="mr-1 h-4 w-4" />
+                Create project
+              </Button>
+            ) : undefined
+          }
         />
+        <CreateProjectDialog open={createProjectOpen} onOpenChange={setCreateProjectOpen} />
       </div>
     )
   }

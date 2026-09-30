@@ -4,6 +4,7 @@ import type {
   EnvironmentCreateRequest,
   EnvironmentUpdateRequest,
   Project,
+  ProjectCreateRequest,
   SdkKey,
   SdkKeyCreateRequest,
   SdkKeyCreated,
@@ -12,6 +13,15 @@ import { apiDelete } from './apiClient'
 
 export function listProjects(orgId: string): Promise<Project[]> {
   return apiGet<Project[]>(`/api/orgs/${encodeURIComponent(orgId)}/projects`)
+}
+
+/**
+ * Creates a project. The server seeds it with dev / staging / production and the default
+ * metric definitions (`error`, `conversion`), so a new project is usable immediately.
+ * Needs MANAGE_PROJECTS at the org.
+ */
+export function createProject(orgId: string, body: ProjectCreateRequest): Promise<Project> {
+  return apiPost<Project>(`/api/orgs/${encodeURIComponent(orgId)}/projects`, body)
 }
 
 export function getProject(projectId: string): Promise<Project> {

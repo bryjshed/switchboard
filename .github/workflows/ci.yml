@@ -270,11 +270,11 @@ jobs:
         run: node scripts/smoke-test.mjs
       - name: sdk live-check (32)
         run: node sdk/typescript/scripts/live-check.mjs
-      - name: service-check (67)
+      - name: service-check (81)
         run: node dashboard/scripts/service-check.mjs
       - name: ai-check (54)
         run: node dashboard/scripts/ai-check.mjs
-      - name: governance-check (38)
+      - name: governance-check (54)
         run: node dashboard/scripts/governance-check.mjs
       - name: auth-check (19, both legs)
         run: node dashboard/scripts/auth-check.mjs

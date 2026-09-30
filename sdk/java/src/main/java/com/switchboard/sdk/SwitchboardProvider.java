@@ -12,6 +12,7 @@ import dev.openfeature.sdk.Metadata;
 import dev.openfeature.sdk.ProviderEvaluation;
 import dev.openfeature.sdk.ProviderState;
 import dev.openfeature.sdk.Reason;
+import dev.openfeature.sdk.TrackingEventDetails;
 import dev.openfeature.sdk.Value;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -85,6 +86,21 @@ public final class SwitchboardProvider implements FeatureProvider {
     @Override
     public ProviderState getState() {
         return client.isReady() ? ProviderState.READY : ProviderState.NOT_READY;
+    }
+
+    // ------------------------------------------------------------------ tracking
+
+    /**
+     * OpenFeature tracking, routed to {@link SwitchboardClient#track} and from there to
+     * {@code POST /api/events/metrics} for the heal and optimize loops. The event name is the
+     * metric key and the targeting key is the context key - required, since a metric nobody can
+     * attribute to a variation is noise. The value defaults to 1.
+     */
+    @Override
+    public void track(String eventName, EvaluationContext context, TrackingEventDetails details) {
+        String contextKey = context == null ? null : context.getTargetingKey();
+        double value = details == null ? 1d : details.getValue().map(Number::doubleValue).orElse(1d);
+        client.track(eventName, contextKey, value);
     }
 
     // ------------------------------------------------------------------ evaluation
