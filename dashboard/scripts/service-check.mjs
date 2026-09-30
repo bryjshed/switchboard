@@ -58,13 +58,86 @@ async function api(method, path, { body, as = OWNER, expect = null } = {}) {
 
 const uuid = () => crypto.randomUUID()
 
+async function firstRun() {
+  console.log('\nfirst run: create an org and a project')
+  const newcomer = `service-check-${uuid().slice(0, 8)}@newco.dev`
+  const as = newcomer
+
+  const newMe = (await api('GET', '/api/users/me', { as, expect: 200 })).body
+  check('a brand-new account belongs to no org', newMe.memberships.length === 0, JSON.stringify(newMe.memberships))
+  check('canCreateOrg is true under the open policy', newMe.canCreateOrg === true, String(newMe.canCreateOrg))
+  const noOrgs = (await api('GET', '/api/orgs', { as, expect: 200 })).body
+  check('listOrgs is empty for it (the dashboard shows the first-run screen)', Array.isArray(noOrgs) && noOrgs.length === 0)
+
+  const newOrg = (
+    await api('POST', '/api/orgs', { as, body: { name: 'Service Check Co' }, expect: 201 })
+  ).body
+  checkShape('OrgResponse (created)', newOrg, ['id', 'name', 'slug', 'role', 'createdAt'])
+  check('the creator owns the new org', newOrg.role === 'OWNER', newOrg.role)
+  const orgsAfter = (await api('GET', '/api/orgs', { as, expect: 200 })).body
+  check('the new org is listed for its creator', orgsAfter.some((o) => o.id === newOrg.id))
+  const perms = (
+    await api('GET', `/api/users/me/permissions?orgId=${newOrg.id}`, { as, expect: 200 })
+  ).body
+  check(
+    'the creator may create projects in it (MANAGE_PROJECTS)',
+    perms.permissions.includes('MANAGE_PROJECTS'),
+    JSON.stringify(perms.permissions),
+  )
+
+  const newProject = (
+    await api('POST', `/api/orgs/${newOrg.id}/projects`, {
+      as,
+      body: { key: 'first-project', name: 'First project' },
+      expect: 201,
+    })
+  ).body
+  checkShape('ProjectResponse (created)', newProject, ['id', 'orgId', 'key', 'name', 'environments'])
+  const envKeys = newProject.environments.map((e) => e.key).sort()
+  check(
+    'a new project comes with dev, staging and production',
+    JSON.stringify(envKeys) === JSON.stringify(['dev', 'production', 'staging']),
+    JSON.stringify(envKeys),
+  )
+  const listedEnvs = (
+    await api('GET', `/api/projects/${newProject.id}/environments`, { as, expect: 200 })
+  ).body
+  check('the environments endpoint agrees (3 environments)', listedEnvs.length === 3, `got ${listedEnvs.length}`)
+
+  const metrics = (await api('GET', `/api/projects/${newProject.id}/metrics`, { as, expect: 200 })).body
+  const metricKeys = metrics.map((m) => m.key)
+  check(
+    'a new project is seeded with the default metrics (error, conversion)',
+    metricKeys.includes('error') && metricKeys.includes('conversion'),
+    JSON.stringify(metricKeys),
+  )
+  checkShape('MetricDefinitionResponse', metrics[0], [
+    'id',
+    'projectId',
+    'key',
+    'name',
+    'direction',
+    'tau',
+    'autoAct',
+    'createdAt',
+  ])
+
+  const projectsAfter = (await api('GET', `/api/orgs/${newOrg.id}/projects`, { as, expect: 200 })).body
+  check('the new project is listed in its org', projectsAfter.some((p) => p.id === newProject.id))
+  const peek = await api('GET', `/api/orgs/${newOrg.id}/projects`)
+  check(
+    `the seeded owner cannot see into the new org (got ${peek.status})`,
+    peek.status === 403 || peek.status === 404,
+  )
+}
+
 async function main() {
   console.log(`Switchboard dashboard service check → ${API_BASE}\n`)
 
   // ── Auth / workspace ─────────────────────────────────────────────────────
   console.log('users, orgs, projects, environments')
   const me = (await api('GET', '/api/users/me', { expect: 200 })).body
-  checkShape('UserResponse', me, ['id', 'email', 'onboardingCompleted', 'memberships'])
+  checkShape('UserResponse', me, ['id', 'email', 'onboardingCompleted', 'canCreateOrg', 'memberships'])
   check('memberships is an array', Array.isArray(me.memberships))
 
   const orgs = (await api('GET', '/api/orgs', { expect: 200 })).body
@@ -100,6 +173,15 @@ async function main() {
     `a member of another org cannot read this project's flags (got ${outsider.status})`,
     outsider.status === 403 || outsider.status === 404,
   )
+
+  // ── First run: a brand-new account creates its own org and project ───────
+  // The dashboard's first-run screen and the "New organization…" / "New project…" entries
+  // drive exactly this sequence. Runs as a fresh dev-token user each time, so it never
+  // depends on (or disturbs) the seeded workspace. The local backend runs the `open`
+  // org-creation policy; under `bootstrap` this section would rightly fail at canCreateOrg.
+  // There is no delete-org endpoint, so the org it creates stays behind like any other
+  // verification-run data.
+  await firstRun()
 
   // ── Flags list / detail ──────────────────────────────────────────────────
   console.log('\nflags: list, filter, detail')

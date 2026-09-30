@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Trash2, UserPlus } from 'lucide-react'
+import { Link2, Trash2, UserPlus } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,13 +25,35 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { useToast } from '@/components/ui/use-toast'
 import { InfoCallout } from '@/components/InfoCallout'
-import { addOrgMember, listOrgMembers, removeOrgMember } from '@/lib/orgsApi'
+import {
+  createInvitation,
+  listInvitations,
+  listOrgMembers,
+  removeOrgMember,
+  revokeInvitation,
+} from '@/lib/orgsApi'
 import { errorMessage } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/format'
 import { useAuth } from '@/hooks/useAuth'
 import { usePermissionGate } from '@/hooks/usePermissions'
-import type { Org, OrgMember, OrgRole } from '@/types/api'
+import type { Org, OrgInvitation, OrgMember, OrgRole } from '@/types/api'
 
+/**
+ * Where an invitee should go. Invitations are accepted when that person signs in, and nothing
+ * is emailed, so the admin has to pass the address on themselves — this is it.
+ */
+function signInLink(): string {
+  return `${window.location.origin}/login`
+}
+
+/**
+ * Org details, members, and invitations.
+ *
+ * Adding people is an invitation, not a lookup: "Add member" used to 404 for anyone who had not
+ * signed in yet, which is everyone you would want to add to a new org. An invitation for someone
+ * who already has an account is accepted on the spot (the server answers ACCEPTED and they appear
+ * in Members); otherwise it waits in Pending invitations until they first sign in with that email.
+ */
 export function OrganizationTab({ org }: { org: Org }) {
   const { toast } = useToast()
   const { profile } = useAuth()
@@ -44,6 +66,11 @@ export function OrganizationTab({ org }: { org: Org }) {
   const [addError, setAddError] = useState<string | null>(null)
   const [removeTarget, setRemoveTarget] = useState<OrgMember | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [invitations, setInvitations] = useState<OrgInvitation[]>([])
+  const [invitationsLoading, setInvitationsLoading] = useState(false)
+  const [invitationsError, setInvitationsError] = useState<string | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<OrgInvitation | null>(null)
+  const [revoking, setRevoking] = useState(false)
 
   // Membership is an RBAC capability now, not a legacy org role: someone granted Admin at
   // the org can manage members without being an OWNER. The org role still decides the badge.
@@ -67,21 +94,76 @@ export function OrganizationTab({ org }: { org: Org }) {
     void load()
   }, [load])
 
-  const handleAdd = async (e: React.FormEvent) => {
+  // Listing invitations needs MANAGE_MEMBERS, so it is not even asked for without it — the
+  // section is hidden rather than showing a 403.
+  const loadInvitations = useCallback(async () => {
+    setInvitationsError(null)
+    try {
+      setInvitations(await listInvitations(org.id))
+    } catch (err) {
+      setInvitationsError(errorMessage(err, 'Could not load invitations'))
+    } finally {
+      setInvitationsLoading(false)
+    }
+  }, [org.id])
+
+  useEffect(() => {
+    if (!canManage) return
+    setInvitationsLoading(true)
+    void loadInvitations()
+  }, [canManage, loadInvitations])
+
+  const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!email.trim()) return
+    const address = email.trim()
+    if (!address) return
     setAdding(true)
     setAddError(null)
     try {
-      await addOrgMember(org.id, { email: email.trim(), role })
-      toast({ title: `Added ${email.trim()}` })
+      const invitation = await createInvitation(org.id, { email: address, role })
+      if (invitation.status === 'ACCEPTED') {
+        toast({
+          title: `Added ${invitation.email}`,
+          description: `They already had an account, so they are a member of ${org.name} now.`,
+        })
+      } else {
+        toast({
+          title: `Invited ${invitation.email}`,
+          description: `They join ${org.name} the first time they sign in with that email. Nothing is emailed — send them the sign-in link.`,
+        })
+      }
       setEmail('')
       setRole('MEMBER')
-      await load()
+      await Promise.all([load(), loadInvitations()])
     } catch (err) {
-      setAddError(errorMessage(err, 'Could not add that member'))
+      setAddError(errorMessage(err, 'Could not invite that address'))
     } finally {
       setAdding(false)
+    }
+  }
+
+  const handleRevoke = async () => {
+    if (!revokeTarget) return
+    setRevoking(true)
+    try {
+      await revokeInvitation(org.id, revokeTarget.id)
+      toast({ title: `Revoked the invitation for ${revokeTarget.email}` })
+      setRevokeTarget(null)
+      await loadInvitations()
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Revoke failed', description: errorMessage(err) })
+    } finally {
+      setRevoking(false)
+    }
+  }
+
+  const copySignInLink = async () => {
+    try {
+      await navigator.clipboard.writeText(signInLink())
+      toast({ title: 'Sign-in link copied', description: signInLink() })
+    } catch {
+      // Clipboard access can be refused (insecure origin, permissions). Show the link instead.
+      toast({ title: 'Copy failed — here is the link', description: signInLink() })
     }
   }
 
@@ -136,7 +218,7 @@ export function OrganizationTab({ org }: { org: Org }) {
         {canManage ? (
           <form
             className="flex flex-wrap items-end gap-2 rounded-md border p-4"
-            onSubmit={(e) => void handleAdd(e)}
+            onSubmit={(e) => void handleInvite(e)}
           >
             <div className="min-w-[220px] flex-1 space-y-1.5">
               <Label htmlFor="member-email">Email</Label>
@@ -161,12 +243,17 @@ export function OrganizationTab({ org }: { org: Org }) {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="submit" disabled={adding || !email.trim()} data-testid="member-add">
+            <Button type="submit" disabled={adding || !email.trim()} data-testid="member-invite">
               <UserPlus className="mr-1 h-4 w-4" />
-              {adding ? 'Adding…' : 'Add member'}
+              {adding ? 'Inviting…' : 'Invite'}
             </Button>
+            <p className="w-full text-xs text-muted-foreground">
+              Someone who already has an account is added straight away. Anyone else joins the
+              first time they sign in with this email — no email is sent, so pass them the
+              sign-in link.
+            </p>
             {addError && (
-              <p className="w-full text-sm text-destructive" role="alert" data-testid="member-add-error">
+              <p className="w-full text-sm text-destructive" role="alert" data-testid="member-invite-error">
                 {addError}
               </p>
             )}
@@ -229,6 +316,104 @@ export function OrganizationTab({ org }: { org: Org }) {
           </div>
         )}
       </section>
+
+      {canManage && (
+        <section className="space-y-3" aria-labelledby="invitations-heading">
+          <div className="flex items-center justify-between gap-4">
+            <h3 id="invitations-heading" className="text-sm font-semibold">
+              Pending invitations
+            </h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void copySignInLink()}
+              data-testid="copy-sign-in-link"
+            >
+              <Link2 className="mr-1 h-4 w-4" />
+              Copy sign-in link
+            </Button>
+          </div>
+          {invitationsLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : invitationsError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {invitationsError}
+            </p>
+          ) : invitations.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="invitations-empty">
+              No one is waiting to join.
+            </p>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Invited</TableHead>
+                    <TableHead className="w-16" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invitations.map((invitation) => (
+                    <TableRow key={invitation.id} data-testid={`invitation-row-${invitation.email}`}>
+                      <TableCell className="text-sm">{invitation.email}</TableCell>
+                      <TableCell>
+                        <Badge variant={invitation.role === 'OWNER' ? 'default' : 'secondary'}>
+                          {invitation.role}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDateTime(invitation.createdAt)}
+                        <div className="text-xs">by {invitation.invitedBy}</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          data-testid={`invitation-revoke-${invitation.email}`}
+                          onClick={() => setRevokeTarget(invitation)}
+                        >
+                          Revoke
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </section>
+      )}
+
+      <AlertDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => !open && setRevokeTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke the invitation for {revokeTarget?.email}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Signing in with that email will no longer add them to {org.name}. You can invite
+              them again later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revoking}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="invitation-revoke-confirm"
+              disabled={revoking}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault()
+                void handleRevoke()
+              }}
+            >
+              {revoking ? 'Revoking…' : 'Revoke'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={removeTarget !== null}

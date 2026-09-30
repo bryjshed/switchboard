@@ -12,9 +12,11 @@ import {
 } from 'lucide-react'
 import { ThemeToggle } from './ThemeToggle'
 import { WorkspaceSwitchers } from './WorkspaceSwitchers'
+import { FirstRunOrg } from '@/components/workspace/FirstRunOrg'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
+import { useWorkspace } from '@/hooks/useWorkspace'
 
 const navGroups = [
   {
@@ -41,6 +43,7 @@ const navGroups = [
 
 export function AppLayout() {
   const { profile, signOut } = useAuth()
+  const { needsOrg } = useWorkspace()
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
@@ -108,7 +111,9 @@ export function AppLayout() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
+          {/* Every page needs an org. Without one, show the way to get one instead of a page
+              that can only say "nothing selected". */}
+          {needsOrg ? <FirstRunOrg /> : <Outlet />}
         </main>
       </div>
     </div>

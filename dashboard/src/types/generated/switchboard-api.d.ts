@@ -120,6 +120,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/orgs/{orgId}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listOrgInvitations"];
+        put?: never;
+        /** @description Invites an email address to the org. When a user with that email already exists they are added immediately and the invitation comes back ACCEPTED; otherwise it is PENDING and is accepted automatically the first time that person signs in with a verified email. No email is sent -- share the dashboard URL with the invitee. */
+        post: operations["createOrgInvitation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/orgs/{orgId}/invitations/{invitationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["revokeOrgInvitation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/orgs/{orgId}/settings": {
         parameters: {
             query?: never;
@@ -1115,6 +1148,8 @@ export interface components {
             email: string;
             displayName?: string;
             onboardingCompleted: boolean;
+            /** @description Whether POST /api/orgs would succeed for this caller right now. Always true when switchboard.org-creation is `open`; under `bootstrap`, true only while no org exists. */
+            canCreateOrg: boolean;
             memberships: components["schemas"]["UserMembership"][];
         };
         UserMembership: {
@@ -1150,6 +1185,24 @@ export interface components {
         OrgMemberAddRequest: {
             email: string;
             role: components["schemas"]["OrgRole"];
+        };
+        OrgInvitationCreateRequest: {
+            email: string;
+            role: components["schemas"]["OrgRole"];
+        };
+        /** @enum {string} */
+        OrgInvitationStatus: "PENDING" | "ACCEPTED" | "REVOKED";
+        OrgInvitationResponse: {
+            /** Format: uuid */
+            id: string;
+            email: string;
+            role: components["schemas"]["OrgRole"];
+            status: components["schemas"]["OrgInvitationStatus"];
+            invitedBy: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            acceptedAt?: string;
         };
         OrgSettingsResponse: {
             aiEnabled: boolean;
@@ -1481,7 +1534,7 @@ export interface components {
             updatedAt?: string;
         };
         /** @enum {string} */
-        AuditAction: "CREATE" | "UPDATE" | "KILL_SWITCH_ON" | "KILL_SWITCH_OFF" | "ROLLBACK" | "AI_APPLY" | "ARCHIVE" | "SEGMENT_CREATE" | "SEGMENT_UPDATE" | "SEGMENT_DELETE" | "SDK_KEY_CREATE" | "SDK_KEY_REVOKE" | "MEMBER_ADD" | "MEMBER_REMOVE" | "SETTINGS_UPDATE" | "CHANGE_REQUEST_OPEN" | "CHANGE_REQUEST_APPLY" | "CHANGE_REQUEST_DECLINE" | "ROLE_GRANT" | "ROLE_REVOKE";
+        AuditAction: "CREATE" | "UPDATE" | "KILL_SWITCH_ON" | "KILL_SWITCH_OFF" | "ROLLBACK" | "AI_APPLY" | "ARCHIVE" | "SEGMENT_CREATE" | "SEGMENT_UPDATE" | "SEGMENT_DELETE" | "SDK_KEY_CREATE" | "SDK_KEY_REVOKE" | "MEMBER_ADD" | "MEMBER_REMOVE" | "SETTINGS_UPDATE" | "CHANGE_REQUEST_OPEN" | "CHANGE_REQUEST_APPLY" | "CHANGE_REQUEST_DECLINE" | "ROLE_GRANT" | "ROLE_REVOKE" | "APPROVAL_BYPASS" | "PAT_CREATE" | "PAT_REVOKE" | "SCIM_PROVISION" | "SCIM_ACTIVATE" | "SCIM_DEACTIVATE" | "ENVIRONMENT_CREATE" | "ENVIRONMENT_RENAME" | "ENVIRONMENT_ARCHIVE" | "ENVIRONMENT_RESTORE" | "INVITE_CREATE" | "INVITE_REVOKE" | "INVITE_ACCEPT";
         AuditEntryResponse: {
             /** Format: uuid */
             id: string;
@@ -2356,6 +2409,82 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listOrgInvitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending invitations, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgInvitationResponse"][];
+                };
+            };
+        };
+    };
+    createOrgInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgInvitationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Invitation created (PENDING) or member added (ACCEPTED) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgInvitationResponse"];
+                };
+            };
+            /** @description A pending invitation for that email already exists, or they are already a member */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revokeOrgInvitation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orgId: components["parameters"]["OrgId"];
+                invitationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
             204: {
                 headers: {
                     [name: string]: unknown;

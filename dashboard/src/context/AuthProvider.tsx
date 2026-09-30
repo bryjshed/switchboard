@@ -5,6 +5,7 @@ import {
   requireAuthProvider,
   type AuthConfig,
   type AuthUser,
+  type DashboardAuthProvider,
   type SignInOptions,
 } from '@/auth'
 import { getMe } from '@/lib/orgsApi'
@@ -24,6 +25,7 @@ function describeConfig(): { config: AuthConfig | null; error: string | null } {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [{ config, error: configError }] = useState(describeConfig)
   const [user, setUser] = useState<AuthUser | null>(null)
+  const [provider, setProvider] = useState<DashboardAuthProvider | null>(null)
   const [profile, setProfile] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -48,9 +50,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let unsubscribe: (() => void) | null = null
 
     initAuth()
-      .then((provider) => {
+      .then((active) => {
         if (cancelled) return
-        unsubscribe = provider.onAuthStateChanged((next) => {
+        setProvider(active)
+        unsubscribe = active.onAuthStateChanged((next) => {
           setUser(next)
           if (!next) {
             setProfile(null)
@@ -85,6 +88,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await provider.signOut()
   }, [])
 
+  const sendEmailVerification = useMemo(
+    () =>
+      provider?.sendEmailVerification
+        ? () => provider.sendEmailVerification!()
+        : undefined,
+    [provider],
+  )
+
+  const refreshToken = useMemo(
+    () =>
+      provider?.refreshToken
+        ? async () => {
+            const fresh = await provider.refreshToken!()
+            if (fresh) setUser(fresh)
+          }
+        : undefined,
+    [provider],
+  )
+
   const value = useMemo(
     () => ({
       user,
@@ -95,11 +117,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       profileError,
       authError,
+      emailVerified: user?.emailVerified ?? null,
+      sendEmailVerification,
+      refreshToken,
       signIn,
       reloadProfile: loadProfile,
       signOut,
     }),
-    [user, config, profile, loading, profileError, authError, signIn, loadProfile, signOut],
+    [
+      user,
+      config,
+      profile,
+      loading,
+      profileError,
+      authError,
+      sendEmailVerification,
+      refreshToken,
+      signIn,
+      loadProfile,
+      signOut,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -39,6 +39,23 @@ const META: Record<AuditAction, AuditActionMeta> = {
   CHANGE_REQUEST_DECLINE: { label: 'change declined', variant: 'warning', automatic: false },
   ROLE_GRANT: { label: 'role granted', variant: 'ok', automatic: false },
   ROLE_REVOKE: { label: 'role revoked', variant: 'warning', automatic: false },
+  // Automated healing / optimizing skipped an approval gate the environment requires of people.
+  // It is recorded alongside the write itself; the write is the change, this row is the reason
+  // nobody reviewed it — so it is marked automatic and tinted like something to look at.
+  APPROVAL_BYPASS: { label: 'approval bypassed by automation', variant: 'warning', automatic: true },
+  PAT_CREATE: { label: 'access token created', variant: 'ok', automatic: false },
+  PAT_REVOKE: { label: 'access token revoked', variant: 'warning', automatic: false },
+  // SCIM is the identity provider acting, not Switchboard's automation, so no AI marker.
+  SCIM_PROVISION: { label: 'provisioned via SCIM', variant: 'ok', automatic: false },
+  SCIM_ACTIVATE: { label: 'activated via SCIM', variant: 'ok', automatic: false },
+  SCIM_DEACTIVATE: { label: 'deactivated via SCIM', variant: 'warning', automatic: false },
+  ENVIRONMENT_CREATE: { label: 'environment created', variant: 'ok', automatic: false },
+  ENVIRONMENT_RENAME: { label: 'environment renamed', variant: 'secondary', automatic: false },
+  ENVIRONMENT_ARCHIVE: { label: 'environment archived', variant: 'warning', automatic: false },
+  ENVIRONMENT_RESTORE: { label: 'environment restored', variant: 'ok', automatic: false },
+  INVITE_CREATE: { label: 'member invited', variant: 'ok', automatic: false },
+  INVITE_REVOKE: { label: 'invitation revoked', variant: 'warning', automatic: false },
+  INVITE_ACCEPT: { label: 'invitation accepted', variant: 'ok', automatic: false },
 }
 
 export function auditActionMeta(action: AuditAction): AuditActionMeta {

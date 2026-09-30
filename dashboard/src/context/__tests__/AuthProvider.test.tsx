@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import type { AuthUser, DashboardAuthProvider } from '@/auth'
 import { useAuth } from '@/hooks/useAuth'
@@ -54,6 +55,11 @@ function Probe() {
       <dd data-testid="profile">{auth.profile?.email ?? '-'}</dd>
       <dd data-testid="profile-error">{auth.profileError ?? '-'}</dd>
       <dd data-testid="auth-error">{auth.authError ?? '-'}</dd>
+      <dd data-testid="verified">{String(auth.emailVerified)}</dd>
+      <dd data-testid="can-send">{String(auth.sendEmailVerification !== undefined)}</dd>
+      {auth.refreshToken && (
+        <button onClick={() => void auth.refreshToken!()}>refresh token</button>
+      )}
     </dl>
   )
 }
@@ -146,5 +152,34 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
     unmount()
     expect(unsubscribe).toHaveBeenCalled()
+  })
+
+  it('hides the verification controls when the provider has none (OIDC)', async () => {
+    initAuth.mockResolvedValue(
+      fakeProvider({ subject: 'okta|1', email: 'a@acme.com', displayName: null, emailVerified: false }),
+    )
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(screen.getByTestId('verified')).toHaveTextContent('false')
+    expect(screen.getByTestId('can-send')).toHaveTextContent('false')
+    expect(screen.queryByRole('button', { name: 'refresh token' })).not.toBeInTheDocument()
+  })
+
+  it('exposes the provider controls, and refreshToken updates the user it reports', async () => {
+    const unverified = { subject: 'uid-1', email: 'a@b.c', displayName: null, emailVerified: false }
+    const provider = {
+      ...fakeProvider(unverified),
+      sendEmailVerification: vi.fn().mockResolvedValue(undefined),
+      refreshToken: vi.fn().mockResolvedValue({ ...unverified, emailVerified: true }),
+    }
+    initAuth.mockResolvedValue(provider)
+    renderProvider()
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'))
+    expect(screen.getByTestId('can-send')).toHaveTextContent('true')
+    expect(screen.getByTestId('verified')).toHaveTextContent('false')
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'refresh token' }))
+    await waitFor(() => expect(screen.getByTestId('verified')).toHaveTextContent('true'))
+    expect(provider.refreshToken).toHaveBeenCalled()
   })
 })

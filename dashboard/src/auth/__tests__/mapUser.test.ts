@@ -24,6 +24,13 @@ describe('firebaseToAuthUser', () => {
   it('maps a signed-out session to null', () => {
     expect(firebaseToAuthUser(null)).toBeNull()
   })
+
+  it('carries emailVerified, which decides whether an invitation can be accepted', () => {
+    expect(
+      firebaseToAuthUser({ uid: 'u', email: 'a@b.c', displayName: null, emailVerified: false })
+        ?.emailVerified,
+    ).toBe(false)
+  })
 })
 
 describe('oidcToAuthUser', () => {
@@ -63,5 +70,21 @@ describe('oidcToAuthUser', () => {
   it('maps a missing user, or one with no sub, to null', () => {
     expect(oidcToAuthUser(null)).toBeNull()
     expect(oidcToAuthUser({ profile: { sub: '' } })).toBeNull()
+  })
+})
+
+describe('oidcToAuthUser email_verified', () => {
+  it('reads the boolean claim', () => {
+    expect(oidcToAuthUser({ profile: { sub: 'x', email_verified: true } })?.emailVerified).toBe(true)
+  })
+
+  it('reads the string form Cognito sends', () => {
+    expect(oidcToAuthUser({ profile: { sub: 'x', email_verified: 'false' } })?.emailVerified).toBe(
+      false,
+    )
+  })
+
+  it('leaves it undefined when the IdP does not say — not the same as unverified', () => {
+    expect(oidcToAuthUser({ profile: { sub: 'x' } })?.emailVerified).toBeUndefined()
   })
 })

@@ -7,10 +7,22 @@ export interface OidcProfileLike {
   name?: unknown
   preferred_username?: unknown
   nickname?: unknown
+  email_verified?: unknown
 }
 
 export interface OidcUserLike {
   profile: OidcProfileLike
+}
+
+/**
+ * `email_verified` is a boolean in the spec, but Cognito sends the STRING "true"/"false".
+ * Anything else is "the IdP did not say", which is not the same as unverified.
+ */
+function verifiedClaim(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return undefined
 }
 
 function claim(value: unknown): string | null {
@@ -33,5 +45,6 @@ export function oidcToAuthUser(user: OidcUserLike | null): AuthUser | null {
     email: claim(profile.email),
     displayName:
       claim(profile.name) ?? claim(profile.preferred_username) ?? claim(profile.nickname) ?? null,
+    emailVerified: verifiedClaim(profile.email_verified),
   }
 }

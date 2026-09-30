@@ -44,6 +44,10 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Whether any load has finished. `needsOrg` keys off this rather than `loading`, so a reload
+  // (the first-run screen's "Reload", a profile refresh) keeps the first-run screen mounted
+  // instead of flashing a page in and out while it runs.
+  const [loadedOnce, setLoadedOnce] = useState(false)
 
   const load = useCallback(async () => {
     setError(null)
@@ -65,6 +69,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       setProjectId(resolvedProject?.id ?? null)
     } catch (err) {
       setError(errorMessage(err, 'Could not load your workspace'))
+    } finally {
+      setLoadedOnce(true)
     }
   }, [])
 
@@ -145,6 +151,26 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     writeStored(WORKSPACE_STORAGE_KEYS.environment, nextEnvKey)
   }, [])
 
+  // `load` resolves the selection from storage, so pointing storage at the new ids first is
+  // all it takes to land on them - and it goes through the same fallback if one has vanished.
+  const adopt = useCallback(
+    async (nextOrgId: string, nextProjectId?: string) => {
+      writeStored(WORKSPACE_STORAGE_KEYS.org, nextOrgId)
+      writeStored(WORKSPACE_STORAGE_KEYS.project, nextProjectId ?? null)
+      setLoading(true)
+      try {
+        await load()
+      } finally {
+        setLoading(false)
+      }
+    },
+    [load],
+  )
+
+  // Only after a successful load: a failed one also leaves `orgs` empty, and telling someone
+  // who has orgs that they need to create one would be worse than showing the error.
+  const needsOrg = loadedOnce && error === null && orgs.length === 0
+
   return (
     <WorkspaceContext.Provider
       value={{
@@ -160,6 +186,8 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         selectProject,
         selectEnvironment,
         refresh: load,
+        adopt,
+        needsOrg,
       }}
     >
       {children}
