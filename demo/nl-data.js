@@ -5,8 +5,7 @@ window.SB_NL = {
   html: `
   <figure class="shot" data-zoom>
     <div class="chrome"><i></i><i></i><i></i><span>Flags → Ask AI</span></div>
-    <img class="l" src="shots/ask-ai-light.jpg" alt="Review the drafted change: planner-v2 in staging adds a rule, platform is ios and plan is pro, serve 10% compact and 90% control. Apply change or Discard." loading="lazy">
-    <img class="d" src="shots/ask-ai-dark.jpg" alt="The drafted change in dark mode" loading="lazy">
+    <img src="shots/ask-ai-dark.jpg" alt="Review the drafted change: planner-v2 in staging adds a rule, platform is ios and plan is pro, serve 10% compact and 90% control. Apply change or Discard." loading="lazy">
     <figcaption>Captured live from the product. The draft says what it will do in plain words, shows the exact rule it adds, and changes nothing until someone presses Apply.</figcaption>
   </figure>
   <div class="sim">
