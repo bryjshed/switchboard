@@ -53,6 +53,9 @@ for (const [label, vp, scheme] of [['desktop-light', { width: 1440, height: 900 
     sections: document.querySelectorAll('#sideList a').length,
   }));
   if (facts.overflow > 0) problems.push(`${label}: horizontal overflow ${facts.overflow}px`);
+  // buttons must wear the page's own style, not the browser's default
+  const unstyled = await page.evaluate(() => [...document.querySelectorAll('.btn')].filter((b) => getComputedStyle(b).borderRadius !== '8px').length);
+  if (unstyled) problems.push(`${label}: ${unstyled} .btn buttons without the page's button style`);
   const layoutWidth = await page.evaluate(() => document.documentElement.clientWidth);
   if (layoutWidth !== vp.width) problems.push(`${label}: lays out at ${layoutWidth}px for a ${vp.width}px screen (viewport meta?)`);
   if (await page.evaluate(() => document.compatMode) !== 'CSS1Compat') problems.push(`${label}: quirks mode (missing doctype)`);
@@ -60,6 +63,17 @@ for (const [label, vp, scheme] of [['desktop-light', { width: 1440, height: 900 
   await page.evaluate(() => scrollTo(0, 0)); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(300);
   const after = await page.evaluate(() => document.querySelector('#sideList a.active')?.getAttribute('href'));
   if (after !== '#s-setup') problems.push(`${label}: ArrowRight went to ${after}`);
+  if (label !== 'phone') {
+    // collapsing gives the content the width and keeps the rail navigable
+    await page.click('#collapseBtn'); await page.waitForTimeout(350);
+    const c = await page.evaluate(() => ({ side: document.querySelector('#side').getBoundingClientRect().width,
+      main: parseFloat(getComputedStyle(document.querySelector('main')).marginLeft),
+      titles: [...document.querySelectorAll('#sideList .t')].some((t) => t.offsetParent !== null) }));
+    await page.screenshot({ path: `${OUT}/${label}-collapsed.png` });
+    await page.keyboard.press('['); await page.waitForTimeout(350);
+    const back = await page.evaluate(() => document.querySelector('#side').getBoundingClientRect().width);
+    if (c.side > 70 || c.main > 70 || c.titles || back < 200) problems.push(`${label}: collapse ${JSON.stringify(c)}, expanded back to ${back}px`);
+  }
   if (label === 'phone') {
     // the side menu is a drawer on a phone: closed by default, opens from the Menu button
     const closed = await page.evaluate(() => document.querySelector('#side').getBoundingClientRect().right <= 0);
