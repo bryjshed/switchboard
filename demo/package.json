@@ -1,0 +1,17 @@
+{
+  "name": "@switchboard/demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interactive showcase of Switchboard for live demos: real screens plus simulations of its own algorithms",
+  "type": "module",
+  "scripts": {
+    "verify": "node scripts/verify-sim.mjs",
+    "stage": "node scripts/heal-scenario.mjs && node scripts/stage-screens.mjs",
+    "shots": "node scripts/shots.mjs",
+    "nl": "node scripts/nl-capture.mjs",
+    "qa": "node scripts/qa.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

@@ -64,6 +64,10 @@ provider over OFREP, or with one HTTP call.
    Sign in as `alice@switchboard.dev` (owner), `bob@switchboard.dev` (member) or
    `carol@beta.dev` (a second org), password `password123`. This is a demo: the emulator, dev
    tokens and seed users must never reach a real deployment.
+4. **See it first** — open [`demo/index.html`](demo/index.html) in a browser: a presentable
+   walkthrough of every feature, with real screens and simulations that run Switchboard's own
+   algorithms. No stack needed. [`demo/README.md`](demo/README.md) covers presenting and
+   regenerating it.
 
 ## Documentation
 
