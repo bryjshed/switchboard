@@ -1,6 +1,12 @@
 <meta charset="utf-8">
-<title>Switchboard Showcase</title>
-<meta name="description" content="Interactive walkthrough of Switchboard: feature flags that heal and optimize their own rollouts.">
+<title>Switchboard</title>
+<meta name="description" content="Self-hosted feature flags that heal and optimize their own rollouts. See every feature working, then get started.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Switchboard: feature flags that heal and optimize their own rollouts">
+<meta property="og:description" content="Self-hosted feature flags with an AI layer that rolls back a variant that starts erroring and ramps one that converts better. Every change versioned, audited and reversible.">
+<meta property="og:url" content="https://bryjshed.github.io/switchboard/">
+<meta property="og:image" content="https://bryjshed.github.io/switchboard/shots/flags-light.jpg">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -344,6 +350,21 @@ table.join { width: 100%; border-collapse: collapse; font-size: 13px; font-varia
 .meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent); width: 0; transition: width .2s; }
 .verdict.fire .meter i { background: var(--bad); }
 
+/* links and calls to action */
+.barlink { font: 500 14px var(--body); color: var(--ink-2); text-decoration: none; padding: 6px 4px; white-space: nowrap; }
+.barlink:hover { color: var(--ink); }
+.ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.cta { display: inline-flex; align-items: center; gap: 8px; font: 600 15px var(--body); padding: 10px 16px; border-radius: 9px; text-decoration: none; border: 1px solid var(--line-2); color: var(--ink); background: var(--surface); }
+.cta.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.cta:hover { border-color: var(--ink); }
+.how a, .tile a, .sim-head a { color: var(--accent); }
+.links { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.links a { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; color: var(--ink); font-size: 14.5px; }
+.links a span { color: var(--ink-3); font-size: 13px; }
+.links a:hover { border-color: var(--accent); }
+footer a { color: var(--ink-2); }
+@media (max-width: 720px) { .barlink { display: none; } }
+
 /* lightbox */
 .lightbox { position: fixed; inset: 0; z-index: 50; background: hsl(240 10% 4% / .88); display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 20px 60px #0008; }
@@ -361,6 +382,8 @@ footer .wrap { gap: 8px; }
     <select id="jump" aria-label="Jump to section"></select>
     <div class="spacer"></div>
     <span class="kbd-hint">← → to move between sections</span>
+    <a class="barlink" href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Docs</a>
+    <a class="barlink" href="https://github.com/bryjshed/switchboard">GitHub</a>
     <button id="howToggle" aria-pressed="true" title="Show or hide the technical layer in every section">How it works</button>
     <button id="themeToggle" aria-label="Switch light or dark theme">Theme</button>
   </div>
@@ -383,6 +406,11 @@ footer .wrap { gap: 8px; }
           <li><b>12</b> MCP tools for agents</li>
           <li><b>0</b> Redis or brokers</li>
         </ul>
+        <div class="ctas">
+          <a class="cta primary" href="https://github.com/bryjshed/switchboard/blob/main/docs/self-hosting.md">Run it yourself →</a>
+          <a class="cta" href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Getting started</a>
+          <a class="cta" href="https://github.com/bryjshed/switchboard">View on GitHub</a>
+        </div>
       </div>
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>switchboard.example.com/flags</span></div>
@@ -508,7 +536,7 @@ footer .wrap { gap: 8px; }
     </div>
     <div class="how">
       <h4>How it works</h4>
-      <p>The ladder is <code>spec/evaluation.md</code> §2: kill switch → flag off → individual targets → rules in order → fallthrough. The server, the Java SDK and the Node SDK all run it. The simulation on this page runs a port of it that passes the spec's stickiness, ramp, precedence, segment and clause vectors. A missing attribute fails a clause without erroring, an unknown flag returns your default at HTTP 200, and the reason code (<code>RULE_MATCH</code>, <code>KILL_SWITCH</code>…) travels with every answer.</p>
+      <p>The ladder is <a href="https://github.com/bryjshed/switchboard/blob/main/spec/evaluation.md#precedence"><code>spec/evaluation.md</code> §2</a>: kill switch → flag off → individual targets → rules in order → fallthrough. The server, the Java SDK and the Node SDK all run it. The simulation on this page runs a port of it that passes the spec's stickiness, ramp, precedence, segment and clause vectors. A missing attribute fails a clause without erroring, an unknown flag returns your default at HTTP 200, and the reason code (<code>RULE_MATCH</code>, <code>KILL_SWITCH</code>…) travels with every answer.</p>
     </div>
   </div>
 </section>
@@ -620,7 +648,7 @@ footer .wrap { gap: 8px; }
   <div class="wrap">
     <div class="eyebrow"><b>06</b> Integrate</div>
     <h2>Java, Node, OpenFeature, or one HTTP call.</h2>
-    <p class="lede">The Java and Node SDKs evaluate in your process and keep working through a Switchboard outage. OpenFeature providers in Go, Python, .NET and others connect over OFREP. Anything else makes one POST.</p>
+    <p class="lede">The Java and Node SDKs evaluate in your process and keep working through a Switchboard outage. OpenFeature providers in Go, Python, .NET and others connect over OFREP. Anything else makes one POST. Install guides: <a href="https://github.com/bryjshed/switchboard/blob/main/sdk/java/README.md">Java SDK</a>, <a href="https://github.com/bryjshed/switchboard/blob/main/sdk/typescript/README.md">Node SDK</a>.</p>
     <div class="cols">
       <div class="sim" id="sim-sdk">
         <div class="tabs" role="tablist" id="sdkTabs"></div>
@@ -637,7 +665,7 @@ footer .wrap { gap: 8px; }
     </div>
     <div class="how">
       <h4>How it works</h4>
-      <p>Evaluation behaviour is spec-first: <code>spec/evaluation.md</code> plus machine-readable vectors. The Java core (<code>evaluation/</code>, zero dependencies) is compiled into both the server and the Java SDK, and the Node SDK runs the same vectors in its tests. A live check asserts the SDK's in-process answers equal the server's for the same flags and contexts. That check once caught the SDK rejecting every real bootstrap payload over a wire-format detail no hand-written fixture contained.</p>
+      <p>Evaluation behaviour is spec-first: <a href="https://github.com/bryjshed/switchboard/blob/main/spec/evaluation.md"><code>spec/evaluation.md</code></a> plus <a href="https://github.com/bryjshed/switchboard/tree/main/spec/conformance">machine-readable vectors</a>. The Java core (<a href="https://github.com/bryjshed/switchboard/tree/main/evaluation"><code>evaluation/</code></a>, zero dependencies) is compiled into both the server and the Java SDK, and the Node SDK runs the same vectors in its tests. A live check asserts the SDK's in-process answers equal the server's for the same flags and contexts. That check once caught the SDK rejecting every real bootstrap payload over a wire-format detail no hand-written fixture contained.</p>
     </div>
   </div>
 </section>
@@ -746,7 +774,7 @@ footer .wrap { gap: 8px; }
     <div class="how">
       <h4>How it works</h4>
       <ul>
-        <li><b>The statistic</b> is a mixture sequential probability ratio test (<code>MixtureSequentialTest.java</code>). It produces an e-value: under "no difference" it is a supermartingale, so by Ville's inequality the chance it <em>ever</em> reaches 1/α is at most α, however often it's inspected. The scan interval doesn't change any decision.</li>
+        <li><b>The statistic</b> is a mixture sequential probability ratio test (<a href="https://github.com/bryjshed/switchboard/blob/main/backend/src/main/java/com/switchboard/domain/ai/stats/MixtureSequentialTest.java"><code>MixtureSequentialTest.java</code></a>; the reasoning is in <a href="https://github.com/bryjshed/switchboard/blob/main/docs/ai-layer.md">the AI layer docs</a>). It produces an e-value: under "no difference" it is a supermartingale, so by Ville's inequality the chance it <em>ever</em> reaches 1/α is at most α, however often it's inspected. The scan interval doesn't change any decision.</li>
         <li><b>Healing</b> uses α = 0.05 (roll back at E ≥ 20) with τ = 0.01. <b>Optimizing</b> is stricter, α = 0.01 (E ≥ 100), because a wrong ramp is costlier than a wrong rollback.</li>
         <li><b>Before comparing</b>, it counts distinct users (not events), waits for 200 per variant, checks traffic arrived in the configured split (a sample-ratio-mismatch check that stops the comparison and alerts a person), and corrects for testing many variants at once.</li>
         <li><b>Evidence restarts</b> whenever the traffic split changes. Auto-rollback is opt-in per organization; otherwise the monitor files the rollback as a proposal for a person to apply.</li>
@@ -874,7 +902,7 @@ footer .wrap { gap: 8px; }
   <div class="wrap">
     <div class="eyebrow"><b>13</b> Agents</div>
     <h2>Give an AI assistant the controls, and the same guardrails.</h2>
-    <p class="lede">The MCP server gives Claude and other agents twelve tools: list flags, read rollout stats, change targeting, pull a kill switch, approve requests. It acts as you, through a personal access token, with your permissions. It can't claim a change happened when it only queued for review.</p>
+    <p class="lede">The MCP server gives Claude and other agents twelve tools: list flags, read rollout stats, change targeting, pull a kill switch, approve requests. It acts as you, through a personal access token, with your permissions. It can't claim a change happened when it only queued for review. <a href="https://github.com/bryjshed/switchboard/blob/main/mcp/README.md">Set it up</a>.</p>
     <div class="cols">
       <div class="sim" id="sim-mcp">
         <div class="sim-head"><h3>An on-call conversation</h3><span class="tag illus">Replayed · real tool names and responses</span></div>
@@ -902,7 +930,7 @@ footer .wrap { gap: 8px; }
       <div><b>259 ms</b><span>to drop a day of 828,000 events for retention</span></div>
     </div>
     <div class="sim">
-      <div class="sim-head"><h3>Server-side latency by path</h3><span class="tag real">docs/PERFORMANCE.md</span></div>
+      <div class="sim-head"><h3>Server-side latency by path</h3><a class="tag real" href="https://github.com/bryjshed/switchboard/blob/main/docs/PERFORMANCE.md">docs/PERFORMANCE.md</a></div>
       <div class="dotplot" id="perfPlot"></div>
       <div class="legend"><span><i style="background:var(--accent)"></i>p50</span><span><i style="background:var(--surface);box-shadow:0 0 0 2px var(--accent) inset"></i>p99</span><span>log scale, milliseconds</span></div>
     </div>
@@ -929,7 +957,15 @@ docker compose -f docker-compose.prod.yml up --build -d --wait
 open https://switchboard.example.com</pre>
       <div class="tiles" style="grid-template-columns:minmax(0,1fr)">
         <div class="tile"><h3>One image, any environment</h3><p>The dashboard reads its configuration at container start, so the same built image serves staging and production.</p></div>
-        <div class="tile"><h3>Where to go next</h3><p><code>docs/self-hosting.md</code> for the first install, <code>docs/getting-started.md</code> for a first flag in production, <code>docs/DEPLOYMENT.md</code> for scaling, retention and scheduled jobs.</p></div>
+        <div class="tile"><h3>Where to go next</h3>
+          <ul class="links">
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/self-hosting.md">Self-hosting <span>first install, first admin</span></a></li>
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Getting started <span>first flag in production</span></a></li>
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/integrating.md">Integrating <span>SDKs, OpenFeature, metrics</span></a></li>
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/concepts.md">Concepts <span>the vocabulary, in one page</span></a></li>
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/dashboard-guide.md">Dashboard guide <span>every page and setting</span></a></li>
+            <li><a href="https://github.com/bryjshed/switchboard/blob/main/docs/DEPLOYMENT.md">Deployment <span>scaling, retention, jobs</span></a></li>
+          </ul></div>
       </div>
     </div>
   </div>
@@ -938,6 +974,7 @@ open https://switchboard.example.com</pre>
 </main>
 
 <footer><div class="wrap">
+  <p><a href="https://github.com/bryjshed/switchboard">GitHub</a> · <a href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Docs</a> · <a href="https://github.com/bryjshed/switchboard/blob/main/docs/self-hosting.md">Self-hosting</a> · <a href="https://github.com/bryjshed/switchboard/blob/main/demo/README.md">About this page</a></p>
   <p>Screens captured from a seeded Switchboard instance (the Acme Mobile demo workspace). Simulations run ports of the product's own algorithms, checked against the spec's conformance vectors and the compiled Java.</p>
 </div></footer>
 

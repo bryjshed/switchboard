@@ -4,7 +4,12 @@ An interactive page for presenting Switchboard: one section per feature, each wi
 screenshot of the dashboard, a simulation you can drive live, and a "How it works" panel for the
 technical half of the room.
 
-**To present:** open `index.html` in a browser. It needs no server and no running stack (fonts load
+**Live at [bryjshed.github.io/switchboard](https://bryjshed.github.io/switchboard/)**: the project's
+landing page. `.github/workflows/pages.yml` publishes this folder (the page, its scripts and
+`shots/`, not the tooling) on every push to `main` that touches `demo/`, so regenerating the
+screenshots and merging is all it takes to update the site.
+
+**To present:** open the site, or `index.html` straight from disk. It needs no server and no running stack (fonts load
 from Google Fonts when online and fall back to system fonts offline).
 
 | Key | Does |
