@@ -17,6 +17,7 @@ from Google Fonts when online and fall back to system fonts offline).
 | ← → / Page Up / Page Down / Space | previous / next section (works with a presentation clicker) |
 | `h` or the **Technical details** switch | show or hide the technical explanation at the end of every section |
 | side menu | jump to any section; below laptop width it opens from the **Menu** button |
+| `[` or the **‹** button | collapse the side menu to a rail of section numbers, for more room (remembered) |
 | click a screenshot | full screen; click or Esc to close |
 
 The strongest moments: **Metrics and tracking** (send traffic and watch exposures and `track()`
@@ -75,5 +76,6 @@ $(/usr/libexec/java_home -v 25)/bin/java -cp backend/target/classes demo/scripts
 | `app.js` | presenter controls and the simulations |
 | `sim.js` | the product's algorithms, ported (shared by the page and `npm run verify`) |
 | `nl-data.js` | the captured natural-language example |
+| `favicon.svg`, `favicon-32.png`, `apple-touch-icon.png` | the tab and home-screen icon: `docs/assets/icon.svg`, with PNGs rendered from it for Safari and iOS |
 | `shots/` | dashboard screenshots in dark mode, `<name>-dark.jpg` |
 | `scripts/` | staging, capture, verification and QA scripts; `lib.mjs` holds the shared plumbing |

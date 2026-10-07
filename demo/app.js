@@ -23,7 +23,7 @@
     list.innerHTML = '';
     sections().forEach((s, i) => {
       const li = el('li');
-      li.append(el('a', { href: '#' + s.id }, `<span>${i === 0 ? '·' : String(i).padStart(2, '0')}</span>${esc(s.dataset.title)}`));
+      li.append(el('a', { href: '#' + s.id, title: s.dataset.title }, `<span class="n">${i === 0 ? '·' : String(i).padStart(2, '0')}</span><span class="t">${esc(s.dataset.title)}</span>`));
       list.append(li);
     });
   }
@@ -48,6 +48,7 @@
     else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key) || (e.key === ' ' && e.shiftKey)) { e.preventDefault(); go(-1); }
     else if (e.key === 'Home') { e.preventDefault(); sections()[0].scrollIntoView(); }
     else if (e.key === 'h') $('#howToggle').click();
+    else if (e.key === '[') collapseBtn.click();
   });
   function onScroll() {
     const s = sections()[currentIndex()];
@@ -67,6 +68,19 @@
   }
   $('#menuBtn').addEventListener('click', () => setMenu(!document.body.classList.contains('nav-open')));
   $('#sideList').addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
+
+  // collapse the side menu to a rail of section numbers (desktop); remembered per viewer
+  const collapseBtn = $('#collapseBtn');
+  function setCollapsed(on) {
+    document.body.classList.toggle('side-collapsed', on);
+    collapseBtn.setAttribute('aria-expanded', String(!on));
+    const label = on ? 'Expand the menu' : 'Collapse the menu';
+    collapseBtn.setAttribute('aria-label', label);
+    collapseBtn.title = label + ' ( [ )';
+    store.set('sb-demo-side', on ? 'collapsed' : 'open');
+  }
+  collapseBtn.addEventListener('click', () => setCollapsed(!document.body.classList.contains('side-collapsed')));
+  setCollapsed(store.get('sb-demo-side') === 'collapsed');
 
   // "Technical details": show or hide the explanation panel at the end of every section
   const howBtn = $('#howToggle');

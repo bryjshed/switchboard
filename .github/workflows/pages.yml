@@ -36,6 +36,7 @@ jobs:
         run: |
           mkdir -p _site
           cp demo/index.html demo/app.js demo/sim.js demo/nl-data.js _site/
+          cp demo/favicon.svg demo/favicon-32.png demo/apple-touch-icon.png _site/
           cp -r demo/shots _site/shots
           # Every relative reference in the page must resolve inside the published folder.
           grep -oE '(src|href)="[^"#:]+"' _site/index.html | sed -E 's/^(src|href)="//; s/"$//' | sort -u | while read -r f; do
