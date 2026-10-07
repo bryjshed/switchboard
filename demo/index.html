@@ -391,7 +391,7 @@ footer .wrap { gap: 8px; }
           <li><b>0.68 ms</b> p50 evaluation</li>
           <li><b>507</b> conformance vectors</li>
           <li><b>12</b> MCP tools for agents</li>
-          <li><b>0</b> Redis or brokers</li>
+          <li><b>Postgres</b> only: no Redis or message broker required</li>
         </ul>
         <div class="ctas">
           <a class="cta primary" href="https://github.com/bryjshed/switchboard/blob/main/docs/self-hosting.md">Run it yourself →</a>
@@ -590,7 +590,7 @@ footer .wrap { gap: 8px; }
   <div class="wrap">
     <div class="eyebrow"><b>05</b> Delivery</div>
     <h2>A change reaches every SDK without a restart or a poll.</h2>
-    <p class="lede">SDKs download the environment once, evaluate locally with no network call per flag check, and hold an open stream for changes. More backend instances learn about a change the same way, through Postgres. No Redis, no message broker.</p>
+    <p class="lede">SDKs download the environment once, evaluate locally with no network call per flag check, and hold an open stream for changes. More backend instances learn about a change the same way, through Postgres, so Postgres is the only infrastructure you need. The cache sits behind a pluggable provider, so a shared cache like Redis can be added later if one instance stops being enough.</p>
     <div class="sim stream" id="sim-stream">
       <div class="sim-head"><h3>Pull a kill switch, watch it propagate</h3><span class="tag illus">Animated · real frame format</span></div>
       <div class="controls"><button class="btn danger" id="stKill">Pull kill switch on payment-provider-v3</button><button class="btn" id="stReset">Reset</button></div>
