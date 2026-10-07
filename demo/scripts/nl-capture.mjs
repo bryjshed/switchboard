@@ -1,6 +1,6 @@
 // Live natural-language capture (needs the backend started with ANTHROPIC_API_KEY).
 // Opens Ask AI on the Flags page as alice, sends ONE real prompt, waits for the drafted proposal,
-// screenshots the dialog in light then dark (same proposal: the theme is switched in place),
+// screenshots the dialog in dark mode (the page is dark-only),
 // and saves the proposal the API returned. The proposal is left as a draft: nothing is applied.
 //
 // usage: npm run nl   (the backend must have been started with ANTHROPIC_API_KEY set)
@@ -40,11 +40,10 @@ try {
     throw new Error('dialog shows an error: ' + (await page.locator('[data-testid="ask-ai-error"]').innerText()));
   }
   const dialog = page.locator('[role="dialog"]').first();
-  await dialog.screenshot({ path: join(dir, 'shots', 'ask-ai-light.jpg'), type: 'jpeg', quality: 86 });
   await page.evaluate(() => { document.documentElement.classList.remove('light'); document.documentElement.classList.add('dark'); });
   await page.waitForTimeout(400);
   await dialog.screenshot({ path: join(dir, 'shots', 'ask-ai-dark.jpg'), type: 'jpeg', quality: 86 });
-  console.log('shots ask-ai-light/dark');
+  console.log('shot ask-ai-dark');
   const p = JSON.parse(body);
   console.log('proposal', p.id, p.status, '| keys:', Object.keys(p).join(','));
   await ctx.close();

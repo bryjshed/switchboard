@@ -1,4 +1,4 @@
-// Captures the real dashboard for the demo page, in light and dark.
+// Captures the real dashboard for the demo page, in dark mode (the page is dark-only).
 // Signs in through the real login page (Firebase emulator), so every shot is what a user sees.
 // A shot that shows an error alert or fails to load stops the run: nothing broken gets published.
 //
@@ -63,7 +63,7 @@ async function settle(page) {
 
 const browser = await chromium.launch();
 try {
-  for (const theme of ['light', 'dark']) {
+  for (const theme of ['dark']) {
     for (const [userKey, user] of Object.entries(USERS)) {
       const mine = SHOTS.filter(([name, , u]) => u === userKey && (!only || only.has(name)));
       if (!mine.length) continue;

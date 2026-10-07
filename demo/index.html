@@ -1,86 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c0c0f">
 <title>Switchboard</title>
 <meta name="description" content="Self-hosted feature flags that heal and optimize their own rollouts. See every feature working, then get started.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Switchboard: feature flags that heal and optimize their own rollouts">
 <meta property="og:description" content="Self-hosted feature flags with an AI layer that rolls back a variant that starts erroring and ramps one that converts better. Every change versioned, audited and reversible.">
 <meta property="og:url" content="https://bryjshed.github.io/switchboard/">
-<meta property="og:image" content="https://bryjshed.github.io/switchboard/shots/flags-light.jpg">
+<meta property="og:image" content="https://bryjshed.github.io/switchboard/shots/flags-dark.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: a presenter's scroll — one full-width band per feature, each band = claim, the real
-   screen, a live simulation running the product's own algorithm, and a collapsible "how it works". */
+/* Layout: a fixed side menu of sections; the page is one band per feature, each band = claim,
+   the real screen, a live simulation running the product's own algorithm, and "technical details". */
 :root {
-  /* colour: the dashboard's own tokens (dashboard/src/index.css), zinc neutrals biased to its hue */
-  --bg: hsl(240 12% 97.5%);
-  --surface: hsl(0 0% 100%);
-  --sunken: hsl(240 10% 95%);
-  --ink: hsl(240 10% 8%);
-  --ink-2: hsl(240 5% 34%);
-  --ink-3: hsl(240 4% 46%);
-  --line: hsl(240 6% 88%);
-  --line-2: hsl(240 6% 80%);
-  --accent: hsl(250 62% 52%);      /* variant series 1 */
-  --accent-soft: hsl(250 70% 95%);
-  --teal: hsl(176 72% 30%);        /* variant series 2 */
-  --ok: hsl(142 71% 32%);
-  --ok-soft: hsl(142 60% 93%);
-  --warn: hsl(32 92% 38%);
-  --warn-soft: hsl(38 92% 93%);
-  --bad: hsl(0 72% 48%);
-  --bad-soft: hsl(0 80% 95%);
-  --env-dev: hsl(199 89% 42%);
-  --env-staging: hsl(32 92% 44%);
-  --env-prod: hsl(271 81% 52%);
-  --code-bg: hsl(240 10% 10%);
-  --code-ink: hsl(240 10% 92%);
-  --code-dim: hsl(240 6% 62%);
+  /* colour: the dashboard's own dark tokens (dashboard/src/index.css), zinc neutrals biased to its hue */
+  --bg: hsl(240 10% 5%);
+  --surface: hsl(240 8% 8.5%);
+  --sunken: hsl(240 8% 11%);
+  --ink: hsl(240 10% 95%);
+  --ink-2: hsl(240 6% 72%);
+  --ink-3: hsl(240 5% 58%);
+  --line: hsl(240 6% 17%);
+  --line-2: hsl(240 6% 26%);
+  --accent: hsl(250 85% 72%);      /* variant series 1 */
+  --accent-soft: hsl(250 40% 18%);
+  --teal: hsl(176 60% 48%);        /* variant series 2 */
+  --ok: hsl(142 60% 55%);
+  --ok-soft: hsl(142 40% 14%);
+  --warn: hsl(38 92% 60%);
+  --warn-soft: hsl(38 60% 14%);
+  --bad: hsl(0 85% 66%);
+  --bad-soft: hsl(0 50% 15%);
+  --env-dev: hsl(199 89% 60%);
+  --env-staging: hsl(38 92% 58%);
+  --env-prod: hsl(271 85% 72%);
+  --code-bg: hsl(240 10% 3%);
+  --code-ink: hsl(240 10% 90%);
+  --code-dim: hsl(240 6% 55%);
   --code-key: hsl(250 90% 80%);
   --code-str: hsl(150 50% 68%);
-  --shadow: 0 1px 2px hsl(240 10% 10% / .06), 0 8px 24px hsl(240 10% 10% / .06);
+  --shadow: 0 1px 2px hsl(0 0% 0% / .4), 0 8px 24px hsl(0 0% 0% / .35);
   /* type */
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --radius: 10px;
-  --bar-h: 56px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: hsl(240 10% 5%); --surface: hsl(240 8% 8.5%); --sunken: hsl(240 8% 11%);
-    --ink: hsl(240 10% 95%); --ink-2: hsl(240 6% 72%); --ink-3: hsl(240 5% 58%);
-    --line: hsl(240 6% 17%); --line-2: hsl(240 6% 26%);
-    --accent: hsl(250 85% 72%); --accent-soft: hsl(250 40% 18%);
-    --teal: hsl(176 60% 48%);
-    --ok: hsl(142 60% 55%); --ok-soft: hsl(142 40% 14%);
-    --warn: hsl(38 92% 60%); --warn-soft: hsl(38 60% 14%);
-    --bad: hsl(0 85% 66%); --bad-soft: hsl(0 50% 15%);
-    --env-dev: hsl(199 89% 60%); --env-staging: hsl(38 92% 58%); --env-prod: hsl(271 85% 72%);
-    --code-bg: hsl(240 10% 3%); --code-ink: hsl(240 10% 90%); --code-dim: hsl(240 6% 55%);
-    --shadow: 0 1px 2px hsl(0 0% 0% / .4), 0 8px 24px hsl(0 0% 0% / .35);
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: hsl(240 10% 5%); --surface: hsl(240 8% 8.5%); --sunken: hsl(240 8% 11%);
-  --ink: hsl(240 10% 95%); --ink-2: hsl(240 6% 72%); --ink-3: hsl(240 5% 58%);
-  --line: hsl(240 6% 17%); --line-2: hsl(240 6% 26%);
-  --accent: hsl(250 85% 72%); --accent-soft: hsl(250 40% 18%);
-  --teal: hsl(176 60% 48%);
-  --ok: hsl(142 60% 55%); --ok-soft: hsl(142 40% 14%);
-  --warn: hsl(38 92% 60%); --warn-soft: hsl(38 60% 14%);
-  --bad: hsl(0 85% 66%); --bad-soft: hsl(0 50% 15%);
-  --env-dev: hsl(199 89% 60%); --env-staging: hsl(38 92% 58%); --env-prod: hsl(271 85% 72%);
-  --code-bg: hsl(240 10% 3%); --code-ink: hsl(240 10% 90%); --code-dim: hsl(240 6% 55%);
-  --shadow: 0 1px 2px hsl(0 0% 0% / .4), 0 8px 24px hsl(0 0% 0% / .35);
+  --side-w: 264px;
+  --top-h: 56px;
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 12px); }
+html, body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; scroll-padding-top: 12px; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { transition: none !important; animation: none !important; } }
 body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); }
@@ -88,29 +68,43 @@ code, kbd, .mono { font-family: var(--mono); font-size: .92em; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -.01em; }
 
-/* ---------- top bar ---------- */
-.bar { position: fixed; inset: 0 0 auto 0; z-index: 20; padding-top: env(safe-area-inset-top, 0px);
-  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--line); }
-.bar-inner { height: var(--bar-h); display: flex; align-items: center; gap: 12px; padding-inline: 16px; max-width: 1280px; margin: 0 auto; }
-.brand { display: flex; align-items: center; gap: 10px; font: 700 17px var(--display); color: var(--ink); text-decoration: none; flex-shrink: 0; }
-.brand svg { width: 28px; height: 28px; }
-.bar select, .bar button, .btn { font: 500 14px var(--body); color: var(--ink); background: var(--surface);
-  border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
-.bar select { min-width: 0; max-width: 44vw; }
-.bar .spacer { flex: 1; }
-.bar .kbd-hint { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
-.bar button { white-space: nowrap; }
-.bar button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.progress { position: absolute; left: 0; bottom: -1px; height: 2px; background: var(--accent); width: 0; }
-@media (max-width: 720px) {
-  .bar .kbd-hint, .brand span { display: none; }
-  .bar-inner { gap: 8px; } .bar select { flex: 1; max-width: none; } .bar .spacer { display: none; }
-  .bar button { padding: 6px 9px; font-size: 13px; }
+/* ---------- side menu ---------- */
+.side { position: fixed; inset: 0 auto 0 0; width: var(--side-w); z-index: 30; overflow-y: auto;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 18px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 17px var(--display); color: var(--ink); text-decoration: none; padding: 0 6px; }
+.brand svg { width: 28px; height: 28px; flex-shrink: 0; }
+.side-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.side-list a { display: grid; grid-template-columns: 2.4ch minmax(0, 1fr); gap: 10px; padding: 7px 10px; border-radius: 7px; color: var(--ink-2); text-decoration: none; font-size: 14px; line-height: 1.35; }
+.side-list a span { font: 600 11.5px/1.6 var(--mono); color: var(--ink-3); }
+.side-list a:hover { background: var(--sunken); color: var(--ink); }
+.side-list a.active { background: var(--accent-soft); color: var(--ink); }
+.side-list a.active span { color: var(--accent); }
+.side-foot { margin-top: auto; display: grid; gap: 12px; border-top: 1px solid var(--line); padding: 14px 6px 0; }
+.switch { display: flex; align-items: center; gap: 10px; background: none; border: 0; color: var(--ink-2); font: 500 14px var(--body); cursor: pointer; padding: 2px 0; text-align: left; }
+.switch .knob { width: 32px; height: 18px; border-radius: 999px; background: var(--line-2); position: relative; flex-shrink: 0; transition: background .2s; }
+.switch .knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink); transition: transform .2s; }
+.switch[aria-checked="true"] .knob { background: var(--accent); }
+.switch[aria-checked="true"] .knob::after { transform: translateX(14px); }
+.side .hint { margin: 0; font-size: 12px; color: var(--ink-3); }
+.side-links { display: flex; gap: 16px; font-size: 14px; }
+.side-links a { color: var(--ink-2); text-decoration: none; }
+.side-links a:hover { color: var(--ink); }
+.topbar { display: none; }
+@media (min-width: 1024px) { main, footer { margin-left: var(--side-w); } .band, footer { padding-inline: 40px; } }
+@media (max-width: 1023px) {
+  html { scroll-padding-top: calc(var(--top-h) + env(safe-area-inset-top, 0px) + 12px); }
+  .topbar { display: flex; position: fixed; inset: 0 0 auto 0; z-index: 40; align-items: center; justify-content: space-between;
+    height: calc(var(--top-h) + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) 16px 0;
+    background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  .topbar button { font: 500 14px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  .side { top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); padding-top: 16px; transform: translateX(-100%); transition: transform .25s ease; box-shadow: var(--shadow); }
+  body.nav-open .side { transform: none; }
+  .side > .brand { display: none; }
+  main { padding-top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); }
 }
 
 /* ---------- page ---------- */
-main { padding-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px)); }
 .band { border-bottom: 1px solid var(--line); padding-inline: 16px; padding-block: 72px; }
 .band:nth-of-type(even) { background: var(--surface); }
 .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
@@ -130,10 +124,6 @@ main { padding-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px)); }
 .shot .chrome span { margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shot img { display: block; width: 100%; height: auto; }
 .shot figcaption { padding: 10px 14px; font-size: 14px; color: var(--ink-2); border-top: 1px solid var(--line); cursor: auto; }
-.shot .d { display: none; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .shot .l { display: none; } :root:not([data-theme="light"]) .shot .d { display: block; } }
-:root[data-theme="dark"] .shot .l { display: none; }
-:root[data-theme="dark"] .shot .d { display: block; }
 .shots-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 @media (max-width: 720px) { .shots-2 { grid-template-columns: minmax(0, 1fr); } }
 
@@ -351,8 +341,6 @@ table.join { width: 100%; border-collapse: collapse; font-size: 13px; font-varia
 .verdict.fire .meter i { background: var(--bad); }
 
 /* links and calls to action */
-.barlink { font: 500 14px var(--body); color: var(--ink-2); text-decoration: none; padding: 6px 4px; white-space: nowrap; }
-.barlink:hover { color: var(--ink); }
 .ctas { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
 .cta { display: inline-flex; align-items: center; gap: 8px; font: 600 15px var(--body); padding: 10px 16px; border-radius: 9px; text-decoration: none; border: 1px solid var(--line-2); color: var(--ink); background: var(--surface); }
 .cta.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -363,7 +351,6 @@ table.join { width: 100%; border-collapse: collapse; font-size: 13px; font-varia
 .links a span { color: var(--ink-3); font-size: 13px; }
 .links a:hover { border-color: var(--accent); }
 footer a { color: var(--ink-2); }
-@media (max-width: 720px) { .barlink { display: none; } }
 
 /* lightbox */
 .lightbox { position: fixed; inset: 0; z-index: 50; background: hsl(240 10% 4% / .88); display: grid; place-items: center; padding: 24px; cursor: zoom-out; }
@@ -372,28 +359,28 @@ footer a { color: var(--ink-2); }
 footer { padding-inline: 16px; padding-block: 36px 56px; color: var(--ink-3); font-size: 14px; }
 footer .wrap { gap: 8px; }
 </style>
+</head>
+<body>
 
-<header class="bar">
-  <div class="bar-inner">
-    <a class="brand" href="#top" aria-label="Switchboard, back to top">
-      <svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="15" fill="#17181A"/><rect x="14" y="22" width="36" height="20" rx="10" fill="none" stroke="#fff" stroke-width="3.5"/><circle cx="24" cy="32" r="5.5" fill="#fff"/></svg>
-      <span>Switchboard</span>
-    </a>
-    <select id="jump" aria-label="Jump to section"></select>
-    <div class="spacer"></div>
-    <span class="kbd-hint">← → to move between sections</span>
-    <a class="barlink" href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Docs</a>
-    <a class="barlink" href="https://github.com/bryjshed/switchboard">GitHub</a>
-    <button id="howToggle" aria-pressed="true" title="Show or hide the technical layer in every section">How it works</button>
-    <button id="themeToggle" aria-label="Switch light or dark theme">Theme</button>
+<div class="topbar">
+  <a class="brand" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="15" fill="#17181A"/><rect x="14" y="22" width="36" height="20" rx="10" fill="none" stroke="#fff" stroke-width="3.5"/><circle cx="24" cy="32" r="5.5" fill="#fff"/></svg><span>Switchboard</span></a>
+  <button id="menuBtn" type="button" aria-expanded="false" aria-controls="side">Menu</button>
+</div>
+
+<nav class="side" id="side" aria-label="Sections">
+  <a class="brand" href="#top"><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="2" y="2" width="60" height="60" rx="15" fill="#17181A"/><rect x="14" y="22" width="36" height="20" rx="10" fill="none" stroke="#fff" stroke-width="3.5"/><circle cx="24" cy="32" r="5.5" fill="#fff"/></svg><span>Switchboard</span></a>
+  <ol class="side-list" id="sideList"></ol>
+  <div class="side-foot">
+    <button class="switch" id="howToggle" type="button" role="switch" aria-checked="true" title="Show or hide the technical explanation at the end of every section"><span class="knob" aria-hidden="true"></span>Technical details</button>
+    <p class="hint">← → or a clicker moves between sections. Click a screenshot to enlarge it.</p>
+    <div class="side-links"><a href="https://github.com/bryjshed/switchboard/blob/main/docs/getting-started.md">Docs</a><a href="https://github.com/bryjshed/switchboard">GitHub</a></div>
   </div>
-  <div class="progress" id="progress"></div>
-</header>
+</nav>
 
 <main id="top">
 
 <!-- HERO -->
-<section class="band hero" id="s-intro" data-title="Switchboard">
+<section class="band hero" id="s-intro" data-title="Overview">
   <div class="wrap">
     <div class="hero-grid">
       <div style="display:grid;gap:18px">
@@ -404,7 +391,7 @@ footer .wrap { gap: 8px; }
           <li><b>0.68 ms</b> p50 evaluation</li>
           <li><b>507</b> conformance vectors</li>
           <li><b>12</b> MCP tools for agents</li>
-          <li><b>0</b> Redis or brokers</li>
+          <li><b>3</b> containers to self-host</li>
         </ul>
         <div class="ctas">
           <a class="cta primary" href="https://github.com/bryjshed/switchboard/blob/main/docs/self-hosting.md">Run it yourself →</a>
@@ -414,8 +401,7 @@ footer .wrap { gap: 8px; }
       </div>
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>switchboard.example.com/flags</span></div>
-        <img class="l" src="shots/flags-light.jpg" alt="The Flags page: ten flags with a live-state chip per environment" loading="eager">
-        <img class="d" src="shots/flags-dark.jpg" alt="The Flags page in dark mode" loading="lazy">
+        <img src="shots/flags-dark.jpg" alt="The Flags page: ten flags with a live-state chip per environment" loading="eager">
         <figcaption>One flag, three environments: <code>new-checkout</code> is on in dev, 50% in staging and 25% in production. <code>payment-provider-v3</code> was last changed by <code>switchboard-monitor</code>.</figcaption>
       </figure>
     </div>
@@ -452,7 +438,6 @@ footer .wrap { gap: 8px; }
     </svg>
     </div>
 
-    <nav aria-label="Sections"><ol class="toc" id="toc"></ol></nav>
   </div>
 </section>
 
@@ -466,14 +451,12 @@ footer .wrap { gap: 8px; }
       <div class="stack">
         <figure class="shot" data-zoom>
           <div class="chrome"><i></i><i></i><i></i><span>First sign-in</span></div>
-          <img class="l" src="shots/first-run-light.jpg" alt="First-run screen: Create your organization, with a verify-your-email panel" loading="lazy">
-          <img class="d" src="shots/first-run-dark.jpg" alt="First-run screen in dark mode" loading="lazy">
+          <img src="shots/first-run-dark.jpg" alt="First-run screen in dark mode" loading="lazy">
           <figcaption>A brand-new account with no organization. An unverified email also gets a way to verify, because invitations only admit a verified address.</figcaption>
         </figure>
         <figure class="shot" data-zoom>
           <div class="chrome"><i></i><i></i><i></i><span>Settings → Organization</span></div>
-          <img class="l" src="shots/settings-organization-light.jpg" alt="Organization settings: members, the invite form, and a pending invitation" loading="lazy">
-          <img class="d" src="shots/settings-organization-dark.jpg" alt="Organization settings in dark mode" loading="lazy">
+          <img src="shots/settings-organization-dark.jpg" alt="Organization settings in dark mode" loading="lazy">
           <figcaption>Invite by email. A pending invitation is accepted the first time that person signs in with a verified address.</figcaption>
         </figure>
       </div>
@@ -495,7 +478,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Under <code>bootstrap</code>, <code>POST /api/orgs</code> takes a Postgres advisory lock and succeeds only while no organization exists, so two people racing to be first get exactly one success. <code>GET /api/users/me</code> reports <code>canCreateOrg</code>, which is what the dashboard uses to pick the screen. An invitation to an address that already belongs to a <em>verified</em> account adds them immediately. Otherwise it waits until that person proves the address, so nobody can pre-register a colleague's email and walk in.</p>
     </div>
   </div>
@@ -510,8 +493,7 @@ footer .wrap { gap: 8px; }
     <div class="cols">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>pro-plan-features · Targeting</span></div>
-        <img class="l" src="shots/targeting-pro-light.jpg" alt="Targeting tab for pro-plan-features: rule 1 matches the beta-testers segment, rule 2 matches plan equals pro" loading="lazy">
-        <img class="d" src="shots/targeting-pro-dark.jpg" alt="Targeting tab in dark mode" loading="lazy">
+        <img src="shots/targeting-pro-dark.jpg" alt="Targeting tab in dark mode" loading="lazy">
         <figcaption><code>pro-plan-features</code> in production: rule 1 matches the <code>beta-testers</code> segment, rule 2 matches <code>plan = pro</code>, everyone else gets <code>false</code>.</figcaption>
       </figure>
       <div class="sim" id="sim-ladder">
@@ -535,7 +517,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>The ladder is <a href="https://github.com/bryjshed/switchboard/blob/main/spec/evaluation.md#precedence"><code>spec/evaluation.md</code> §2</a>: kill switch → flag off → individual targets → rules in order → fallthrough. The server, the Java SDK and the Node SDK all run it. The simulation on this page runs a port of it that passes the spec's stickiness, ramp, precedence, segment and clause vectors. A missing attribute fails a clause without erroring, an unknown flag returns your default at HTTP 200, and the reason code (<code>RULE_MATCH</code>, <code>KILL_SWITCH</code>…) travels with every answer.</p>
     </div>
   </div>
@@ -561,13 +543,12 @@ footer .wrap { gap: 8px; }
       </div>
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>new-checkout · Targeting · production</span></div>
-        <img class="l" src="shots/rollout-checkout-light.jpg" alt="Rollout editor: True 25%, False 75%" loading="lazy">
-        <img class="d" src="shots/rollout-checkout-dark.jpg" alt="Rollout editor in dark mode" loading="lazy">
+        <img src="shots/rollout-checkout-dark.jpg" alt="Rollout editor in dark mode" loading="lazy">
         <figcaption>The same flag in the dashboard, ramped to 25% in production.</figcaption>
       </figure>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p><code>bucket = int(md5(flagKey + ":" + contextKey)[0:8], 16) % 10000</code>, and a variation with weight <em>w</em> owns exactly <em>w</em>×100 buckets. The flag key salts the hash, so two 50/50 flags don't pick the same unlucky half. Across <code>user-1</code>…<code>user-1000</code> a 50/50 <code>new-checkout</code> splits 512/488, the figure the spec states and this page's port reproduces. MD5 is part of the cross-language contract, chosen because every language has it, not for security.</p>
     </div>
   </div>
@@ -582,8 +563,7 @@ footer .wrap { gap: 8px; }
     <div class="cols">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>new-checkout · History · production</span></div>
-        <img class="l" src="shots/history-checkout-light.jpg" alt="History tab: v1 created, v2 ramp 10%, v3 rollback to v1, v4 retry at 25%" loading="lazy">
-        <img class="d" src="shots/history-checkout-dark.jpg" alt="History tab in dark mode" loading="lazy">
+        <img src="shots/history-checkout-dark.jpg" alt="History tab in dark mode" loading="lazy">
         <figcaption>Real history: a 10% ramp, a rollback after an error spike (v3), then a retry at 25% (v4, live).</figcaption>
       </figure>
       <div class="sim" id="sim-versions">
@@ -599,7 +579,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Every flag write, including AI-applied and approval-applied ones, goes through one path: <code>SELECT … FOR UPDATE</code> → check <code>expectedVersion</code> (409 if stale) → write the head at version+1 → store an immutable snapshot → write the audit row → bump the environment's <code>state_version</code> → <code>pg_notify</code> after commit. Two people editing the same flag can't silently overwrite each other; the second one is told.</p>
     </div>
   </div>
@@ -610,7 +590,7 @@ footer .wrap { gap: 8px; }
   <div class="wrap">
     <div class="eyebrow"><b>05</b> Delivery</div>
     <h2>A change reaches every SDK without a restart or a poll.</h2>
-    <p class="lede">SDKs download the environment once, evaluate locally with no network call per flag check, and hold an open stream for changes. More backend instances learn about a change the same way, through Postgres. No Redis, no message broker.</p>
+    <p class="lede">SDKs download the environment once, evaluate locally with no network call per flag check, and hold an open stream for changes. More backend instances learn about a change the same way, through Postgres.</p>
     <div class="sim stream" id="sim-stream">
       <div class="sim-head"><h3>Pull a kill switch, watch it propagate</h3><span class="tag illus">Animated · real frame format</span></div>
       <div class="controls"><button class="btn danger" id="stKill">Pull kill switch on payment-provider-v3</button><button class="btn" id="stReset">Reset</button></div>
@@ -637,7 +617,7 @@ footer .wrap { gap: 8px; }
       <p class="note">The animation is paced for the room. Frame names and fields are what <code>GET /api/stream</code> sends: a <code>put</code> on connect, a <code>patch</code> per change with the <code>stateVersion</code> as its event id, and a <code>ping</code> every 15 seconds.</p>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>After commit, the writer calls <code>pg_notify</code>. Every instance <code>LISTEN</code>s, evicts exactly the cache entries the change touched, and pushes a <code>patch</code> to its own stream subscribers. Reads are served from in-process caches, so the cache TTLs are only a backstop against a dropped notification. A reconnecting SDK sends <code>If-None-Match</code> on the bootstrap and gets a 304 if nothing changed.</p>
     </div>
   </div>
@@ -664,7 +644,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Evaluation behaviour is spec-first: <a href="https://github.com/bryjshed/switchboard/blob/main/spec/evaluation.md"><code>spec/evaluation.md</code></a> plus <a href="https://github.com/bryjshed/switchboard/tree/main/spec/conformance">machine-readable vectors</a>. The Java core (<a href="https://github.com/bryjshed/switchboard/tree/main/evaluation"><code>evaluation/</code></a>, zero dependencies) is compiled into both the server and the Java SDK, and the Node SDK runs the same vectors in its tests. A live check asserts the SDK's in-process answers equal the server's for the same flags and contexts. That check once caught the SDK rejecting every real bootstrap payload over a wire-format detail no hand-written fixture contained.</p>
     </div>
   </div>
@@ -716,7 +696,7 @@ footer .wrap { gap: 8px; }
         <div class="verdict" id="mtVerdict"></div>
       </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <ul>
         <li><b>Exposures</b> come from the SDK: one per evaluation of a known flag, batched in the background and sent every 10 seconds (at most 500 per request), with a final flush on shutdown. If you evaluate over REST or OFREP, post them to <code>/api/events/eval</code> yourself.</li>
         <li><b>Outcomes</b> are <code>{contextKey, metricKey, value, occurredAt}</code> sent to <code>/api/events/metrics</code>, by <code>track()</code> or directly. They need a server key; a client-side key is refused.</li>
@@ -736,14 +716,12 @@ footer .wrap { gap: 8px; }
     <div class="stack">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>payment-provider-v3 · Monitor</span></div>
-        <img class="l" src="shots/monitor-heal-light.jpg" alt="Monitor tab: the True variation erroring at 40.5% against 4.3%, finding rolled back automatically" loading="lazy">
-        <img class="d" src="shots/monitor-heal-dark.jpg" alt="Monitor tab in dark mode" loading="lazy">
+        <img src="shots/monitor-heal-dark.jpg" alt="Monitor tab in dark mode" loading="lazy">
         <figcaption>The erroring variant, flagged, and the finding marked <em>rolled back automatically</em>.</figcaption>
       </figure>
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>payment-provider-v3 · History</span></div>
-        <img class="l" src="shots/history-heal-light.jpg" alt="History: v3 by switchboard-monitor, from AI proposal" loading="lazy">
-        <img class="d" src="shots/history-heal-dark.jpg" alt="History in dark mode" loading="lazy">
+        <img src="shots/history-heal-dark.jpg" alt="History in dark mode" loading="lazy">
         <figcaption>v3 was written by <code>switchboard-monitor</code>, not a person, with its reasoning as the version note. It can be rolled back like any other version.</figcaption>
       </figure>
     </div>
@@ -772,7 +750,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <ul>
         <li><b>The statistic</b> is a mixture sequential probability ratio test (<a href="https://github.com/bryjshed/switchboard/blob/main/backend/src/main/java/com/switchboard/domain/ai/stats/MixtureSequentialTest.java"><code>MixtureSequentialTest.java</code></a>; the reasoning is in <a href="https://github.com/bryjshed/switchboard/blob/main/docs/ai-layer.md">the AI layer docs</a>). It produces an e-value: under "no difference" it is a supermartingale, so by Ville's inequality the chance it <em>ever</em> reaches 1/α is at most α, however often it's inspected. The scan interval doesn't change any decision.</li>
         <li><b>Healing</b> uses α = 0.05 (roll back at E ≥ 20) with τ = 0.01. <b>Optimizing</b> is stricter, α = 0.01 (E ≥ 100), because a wrong ramp is costlier than a wrong rollback.</li>
@@ -792,8 +770,7 @@ footer .wrap { gap: 8px; }
     <div class="cols">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>AI proposals</span></div>
-        <img class="l" src="shots/proposals-light.jpg" alt="AI proposals: applied rollback, retirement drafts, a ramp from 25% to 50%" loading="lazy">
-        <img class="d" src="shots/proposals-dark.jpg" alt="AI proposals in dark mode" loading="lazy">
+        <img src="shots/proposals-dark.jpg" alt="AI proposals in dark mode" loading="lazy">
         <figcaption>Everything the AI layer drafted: alice's Ask AI request, the applied rollback, two stale flags to retire, and <code>new-checkout</code> converting at 34.5% vs 17.8% (always-valid p = 3×10⁻⁵), so a ramp from 25% to 50% awaits review.</figcaption>
       </figure>
       <div class="sim" id="sim-opt">
@@ -810,7 +787,7 @@ footer .wrap { gap: 8px; }
       </div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Optimize findings use the one-sided e-value on conversions with τ = 0.02 and α = 0.01. With several variants or flags in an environment, findings are screened together (e-BH) so a busy environment doesn't produce more false ramps. Proposals are typed diffs; applying one goes through the same versioned write, and an environment that requires approval turns it into a change request. The same machinery retires flags left at 0% or 100% for weeks, with a removal checklist.</p>
     </div>
   </div>
@@ -824,7 +801,7 @@ footer .wrap { gap: 8px; }
     <p class="lede" id="nlLede"></p>
     <div class="cols" id="nlBody"></div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Claude is constrained to a single tool whose schema is the flag-change format, so the answer is always a typed, validated change rather than free text. It lands as a proposal with a before/after diff. Applying it is an ordinary versioned write, subject to approvals like any other. Without an Anthropic key the feature explains itself rather than failing; everything else in the AI layer runs without one.</p>
     </div>
   </div>
@@ -839,8 +816,7 @@ footer .wrap { gap: 8px; }
     <div class="cols">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>Change requests · new-checkout · staging</span></div>
-        <img class="l" src="shots/change-request-light.jpg" alt="A change request from bob: staging 50% to 75%, awaiting review, Approve and Decline buttons" loading="lazy">
-        <img class="d" src="shots/change-request-dark.jpg" alt="Change request in dark mode" loading="lazy">
+        <img src="shots/change-request-dark.jpg" alt="Change request in dark mode" loading="lazy">
         <figcaption>Bob's edit to staging came back <code>202</code> and waits here. Nothing has been written yet.</figcaption>
       </figure>
       <div class="sim" id="sim-gov">
@@ -871,14 +847,12 @@ footer .wrap { gap: 8px; }
     <div class="shots-2">
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>Activity</span></div>
-        <img class="l" src="shots/activity-light.jpg" alt="Activity feed with an AI change marked applied by AI" loading="lazy">
-        <img class="d" src="shots/activity-dark.jpg" alt="Activity feed in dark mode" loading="lazy">
+        <img src="shots/activity-dark.jpg" alt="Activity feed in dark mode" loading="lazy">
         <figcaption>Every change, who made it, and which ones the AI made.</figcaption>
       </figure>
       <figure class="shot" data-zoom>
         <div class="chrome"><i></i><i></i><i></i><span>Settings → Webhooks</span></div>
-        <img class="l" src="shots/settings-webhooks-light.jpg" alt="Webhooks settings: one endpoint filtered to kill switch, rollback and monitor findings" loading="lazy">
-        <img class="d" src="shots/settings-webhooks-dark.jpg" alt="Webhooks settings in dark mode" loading="lazy">
+        <img src="shots/settings-webhooks-dark.jpg" alt="Webhooks settings in dark mode" loading="lazy">
         <figcaption>An incident relay that only hears kill switches, rollbacks and monitor findings.</figcaption>
       </figure>
     </div>
@@ -935,7 +909,7 @@ footer .wrap { gap: 8px; }
       <div class="legend"><span><i style="background:var(--accent)"></i>p50</span><span><i style="background:var(--surface);box-shadow:0 0 0 2px var(--accent) inset"></i>p99</span><span>log scale, milliseconds</span></div>
     </div>
     <div class="how">
-      <h4>How it works</h4>
+      <h4>Technical details</h4>
       <p>Evaluation, the bootstrap payload, SDK-key resolution, permissions and the dashboard's flag list are all served from memory. Every write that could change one of them evicts it on every instance through <code>NOTIFY</code>, so the cache TTLs are a backstop, not a staleness budget. Benchmarks run against the packaged jar with the full JIT, a separate database, and the rate limiter off; the write-up states the rig and where the numbers stop being trustworthy.</p>
     </div>
   </div>
@@ -981,3 +955,5 @@ open https://switchboard.example.com</pre>
 <script src="sim.js" charset="utf-8"></script>
 <script src="nl-data.js" charset="utf-8"></script>
 <script src="app.js" charset="utf-8"></script>
+</body>
+</html>

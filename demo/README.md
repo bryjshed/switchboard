@@ -1,8 +1,8 @@
 # Switchboard demo showcase
 
 An interactive page for presenting Switchboard: one section per feature, each with a real
-screenshot of the dashboard, a simulation you can drive live, and a "How it works" panel for the
-technical half of the room.
+screenshot of the dashboard, a simulation you can drive live, and a technical-details panel for the
+engineers in the room.
 
 **Live at [bryjshed.github.io/switchboard](https://bryjshed.github.io/switchboard/)**: the project's
 landing page. `.github/workflows/pages.yml` publishes this folder (the page, its scripts and
@@ -15,8 +15,8 @@ from Google Fonts when online and fall back to system fonts offline).
 | Key | Does |
 |---|---|
 | ← → / Page Up / Page Down / Space | previous / next section (works with a presentation clicker) |
-| `h` or **How it works** | show or hide the technical layer in every section |
-| **Theme** | light or dark; the screenshots switch with it |
+| `h` or the **Technical details** switch | show or hide the technical explanation at the end of every section |
+| side menu | jump to any section; below laptop width it opens from the **Menu** button |
 | click a screenshot | full screen; click or Esc to close |
 
 The strongest moments: **Metrics and tracking** (send traffic and watch exposures and `track()`
@@ -52,7 +52,7 @@ make dashboard
 
 cd demo
 npm run stage    # an AI rollback on payment-provider-v3, a pending change request, an invitation, a webhook
-npm run shots    # all screenshots, light and dark, into shots/   (`npm run shots -- flags,first-run` for some)
+npm run shots    # all screenshots (dark mode) into shots/   (`npm run shots -- flags,first-run` for some)
 npm run nl       # optional: re-capture Ask AI; then update nl-data.js from scripts/nl-proposal.json
 npm run verify   # simulations vs spec vectors and the Java statistic
 npm run qa       # opens index.html from disk: console errors, every simulation, phone width, both themes
@@ -75,5 +75,5 @@ $(/usr/libexec/java_home -v 25)/bin/java -cp backend/target/classes demo/scripts
 | `app.js` | presenter controls and the simulations |
 | `sim.js` | the product's algorithms, ported (shared by the page and `npm run verify`) |
 | `nl-data.js` | the captured natural-language example |
-| `shots/` | dashboard screenshots, `<name>-light.jpg` / `<name>-dark.jpg` |
+| `shots/` | dashboard screenshots in dark mode, `<name>-dark.jpg` |
 | `scripts/` | staging, capture, verification and QA scripts; `lib.mjs` holds the shared plumbing |

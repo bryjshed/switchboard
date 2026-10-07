@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 Every surface speaks to the same REST API, so nothing can do something another cannot, and
-changes reach every backend instance through Postgres `NOTIFY` — no Redis, no broker. Your
+changes reach every backend instance through Postgres `NOTIFY`. Your
 applications evaluate flags in-process with the Java or Node.js SDK, through any OpenFeature
 provider over OFREP, or with one HTTP call.
 

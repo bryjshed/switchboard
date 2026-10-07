@@ -19,17 +19,12 @@
   // ---------------------------------------------------------------- presenter chrome
   const sections = () => $$('main > section.band').filter((s) => !s.hidden);
   function buildNav() {
-    const jump = $('#jump');
-    const toc = $('#toc');
-    jump.innerHTML = '';
-    toc.innerHTML = '';
+    const list = $('#sideList');
+    list.innerHTML = '';
     sections().forEach((s, i) => {
-      jump.append(el('option', { value: s.id }, esc(s.dataset.title)));
-      if (i > 0) {
-        const li = el('li');
-        li.append(el('a', { href: '#' + s.id }, `<span>${String(i).padStart(2, '0')}</span>${esc(s.dataset.title)}`));
-        toc.append(li);
-      }
+      const li = el('li');
+      li.append(el('a', { href: '#' + s.id }, `<span>${i === 0 ? '·' : String(i).padStart(2, '0')}</span>${esc(s.dataset.title)}`));
+      list.append(li);
     });
   }
   function currentIndex() {
@@ -48,41 +43,40 @@
     const t = e.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if ($('.lightbox')) { if (e.key === 'Escape') $('.lightbox').remove(); return; }
+    if (e.key === 'Escape') { setMenu(false); return; }
     if (['ArrowRight', 'ArrowDown', 'PageDown'].includes(e.key) || (e.key === ' ' && !e.shiftKey)) { e.preventDefault(); go(1); }
     else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key) || (e.key === ' ' && e.shiftKey)) { e.preventDefault(); go(-1); }
     else if (e.key === 'Home') { e.preventDefault(); sections()[0].scrollIntoView(); }
     else if (e.key === 'h') $('#howToggle').click();
   });
-  $('#jump').addEventListener('change', (e) => document.getElementById(e.target.value).scrollIntoView({ block: 'start' }));
   function onScroll() {
-    const max = document.documentElement.scrollHeight - innerHeight;
-    $('#progress').style.width = (max > 0 ? (scrollY / max) * 100 : 0) + '%';
     const s = sections()[currentIndex()];
-    if (s && $('#jump').value !== s.id) $('#jump').value = s.id;
+    $$('#sideList a').forEach((a) => {
+      const on = s && a.getAttribute('href') === '#' + s.id;
+      a.classList.toggle('active', on);
+      if (on) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current');
+    });
   }
   addEventListener('scroll', onScroll, { passive: true });
 
+  // the side menu becomes a drawer below laptop width
+  function setMenu(open) {
+    document.body.classList.toggle('nav-open', open);
+    $('#menuBtn').setAttribute('aria-expanded', String(open));
+    $('#menuBtn').textContent = open ? 'Close' : 'Menu';
+  }
+  $('#menuBtn').addEventListener('click', () => setMenu(!document.body.classList.contains('nav-open')));
+  $('#sideList').addEventListener('click', (e) => { if (e.target.closest('a')) setMenu(false); });
+
+  // "Technical details": show or hide the explanation panel at the end of every section
   const howBtn = $('#howToggle');
   function setHow(on) {
     document.body.classList.toggle('hide-how', !on);
-    howBtn.setAttribute('aria-pressed', String(on));
+    howBtn.setAttribute('aria-checked', String(on));
     store.set('sb-demo-how', on ? '1' : '0');
   }
-  howBtn.addEventListener('click', () => setHow(howBtn.getAttribute('aria-pressed') !== 'true'));
+  howBtn.addEventListener('click', () => setHow(howBtn.getAttribute('aria-checked') !== 'true'));
   setHow(store.get('sb-demo-how') !== '0');
-
-  function effectiveDark() {
-    const t = document.documentElement.getAttribute('data-theme');
-    if (t) return t === 'dark';
-    return matchMedia('(prefers-color-scheme: dark)').matches;
-  }
-  $('#themeToggle').addEventListener('click', () => {
-    const next = effectiveDark() ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', next);
-    store.set('sb-demo-theme', next);
-  });
-  const savedTheme = store.get('sb-demo-theme');
-  if (savedTheme === 'light' || savedTheme === 'dark') document.documentElement.setAttribute('data-theme', savedTheme);
 
   // zoom a screenshot
   document.addEventListener('click', (e) => {

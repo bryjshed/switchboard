@@ -12,7 +12,9 @@ mkdirSync(OUT, { recursive: true });
 const problems = [];
 const browser = await chromium.launch();
 for (const [label, vp, scheme] of [['desktop-light', { width: 1440, height: 900 }, 'light'], ['desktop-dark', { width: 1440, height: 900 }, 'dark'], ['phone', { width: 390, height: 844 }, 'light']]) {
-  const ctx = await browser.newContext({ viewport: vp, colorScheme: scheme, reducedMotion: 'reduce' });
+  // the phone run is a real mobile emulation, so a missing or wrong viewport meta tag shows up
+  const mobile = label === 'phone' ? { isMobile: true, hasTouch: true, deviceScaleFactor: 3 } : {};
+  const ctx = await browser.newContext({ viewport: vp, colorScheme: scheme, reducedMotion: 'reduce', ...mobile });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => problems.push(`${label} pageerror: ${e}`));
   page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.g/.test(m.text())) problems.push(`${label} console: ${m.text()}`); });
@@ -48,13 +50,25 @@ for (const [label, vp, scheme] of [['desktop-light', { width: 1440, height: 900 
     metrics: document.querySelector('#mtVerdict').textContent.replace(/\s+/g, ' ').trim().slice(0, 90),
     nl: !document.querySelector('#s-nl').hidden,
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    sections: document.querySelectorAll('#jump option').length,
+    sections: document.querySelectorAll('#sideList a').length,
   }));
   if (facts.overflow > 0) problems.push(`${label}: horizontal overflow ${facts.overflow}px`);
+  const layoutWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  if (layoutWidth !== vp.width) problems.push(`${label}: lays out at ${layoutWidth}px for a ${vp.width}px screen (viewport meta?)`);
+  if (await page.evaluate(() => document.compatMode) !== 'CSS1Compat') problems.push(`${label}: quirks mode (missing doctype)`);
   console.log(label, JSON.stringify(facts));
   await page.evaluate(() => scrollTo(0, 0)); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(300);
-  const after = await page.evaluate(() => document.querySelector('#jump').value);
-  if (after !== 's-setup') problems.push(`${label}: ArrowRight went to ${after}`);
+  const after = await page.evaluate(() => document.querySelector('#sideList a.active')?.getAttribute('href'));
+  if (after !== '#s-setup') problems.push(`${label}: ArrowRight went to ${after}`);
+  if (label === 'phone') {
+    // the side menu is a drawer on a phone: closed by default, opens from the Menu button
+    const closed = await page.evaluate(() => document.querySelector('#side').getBoundingClientRect().right <= 0);
+    await page.click('#menuBtn'); await page.waitForTimeout(400);
+    const open = await page.evaluate(() => document.querySelector('#side').getBoundingClientRect().left >= 0);
+    await page.screenshot({ path: `${OUT}/phone-menu.png` });
+    await page.click('#menuBtn'); await page.waitForTimeout(400);
+    if (!closed || !open) problems.push(`phone: drawer closed=${closed} open=${open}`);
+  }
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({ path: `${OUT}/${label}-top.png` });
   for (const id of ['s-metrics', 's-heal', 's-nl', 's-perf']) {
