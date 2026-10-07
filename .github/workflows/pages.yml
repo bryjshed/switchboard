@@ -1,0 +1,52 @@
+# Publishes demo/ as the project's public landing page on GitHub Pages:
+# https://bryjshed.github.io/switchboard/
+#
+# Only the site itself is published (the page, its scripts and screenshots), not the capture and
+# QA tooling beside it. The page is static and fully relative, so there is no build step.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'demo/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push supersedes a queued one, but never cancels one mid-flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp demo/index.html demo/app.js demo/sim.js demo/nl-data.js _site/
+          cp -r demo/shots _site/shots
+          # Every relative reference in the page must resolve inside the published folder.
+          grep -oE '(src|href)="[^"#:]+"' _site/index.html | sed -E 's/^(src|href)="//; s/"$//' | sort -u | while read -r f; do
+            test -e "_site/$f" || { echo "missing from the site: $f"; exit 1; }
+          done
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -64,10 +64,11 @@ provider over OFREP, or with one HTTP call.
    Sign in as `alice@switchboard.dev` (owner), `bob@switchboard.dev` (member) or
    `carol@beta.dev` (a second org), password `password123`. This is a demo: the emulator, dev
    tokens and seed users must never reach a real deployment.
-4. **See it first** — open [`demo/index.html`](demo/index.html) in a browser: a presentable
-   walkthrough of every feature, with real screens and simulations that run Switchboard's own
-   algorithms. No stack needed. [`demo/README.md`](demo/README.md) covers presenting and
-   regenerating it.
+4. **See it first** — **[bryjshed.github.io/switchboard](https://bryjshed.github.io/switchboard/)**
+   walks through every feature with real screens and simulations that run Switchboard's own
+   algorithms. No stack needed. The page is [`demo/`](demo/), published by
+   [`pages.yml`](.github/workflows/pages.yml); [`demo/README.md`](demo/README.md) covers presenting
+   and regenerating it.
 
 ## Documentation
 
