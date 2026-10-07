@@ -76,5 +76,6 @@ $(/usr/libexec/java_home -v 25)/bin/java -cp backend/target/classes demo/scripts
 | `app.js` | presenter controls and the simulations |
 | `sim.js` | the product's algorithms, ported (shared by the page and `npm run verify`) |
 | `nl-data.js` | the captured natural-language example |
+| `favicon.svg`, `favicon-32.png`, `apple-touch-icon.png` | the tab and home-screen icon: `docs/assets/icon.svg`, with PNGs rendered from it for Safari and iOS |
 | `shots/` | dashboard screenshots in dark mode, `<name>-dark.jpg` |
 | `scripts/` | staging, capture, verification and QA scripts; `lib.mjs` holds the shared plumbing |
